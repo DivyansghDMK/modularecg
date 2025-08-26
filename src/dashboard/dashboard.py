@@ -166,7 +166,7 @@ class Dashboard(QWidget):
         # heart_img_path = os.path.abspath(heart_img_path)
         # print(f"Pratyaksh Heart image path: {heart_img_path}")  # Debugging line to check the path
         # print(f"Pratyaksh Heart image exists: {os.path.exists(heart_img_path)}")  # Check if the file exists
-        self.heart_pixmap = QPixmap("/Users/deckmount/Pratyaksh1/modularecg/assets/her.png")
+        self.heart_pixmap = QPixmap("/Users/ptr/Downloads/Pratyaksh1/modularecg/assets/her.png")
         self.heart_base_size = 220
         heart_img.setFixedSize(self.heart_base_size + 20, self.heart_base_size + 20)
         heart_img.setAlignment(Qt.AlignCenter)
@@ -332,6 +332,10 @@ class Dashboard(QWidget):
         from ecg.twelve_lead_test import ECGTestPage
         self.ecg_test_page = ECGTestPage("12 Lead ECG Test", self.page_stack)
         self.ecg_test_page.dashboard_callback = self.update_ecg_metrics
+
+        if hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
+            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
+        
         self.page_stack.addWidget(self.ecg_test_page)
         # --- Main layout ---
         main_layout = QVBoxLayout(self)
@@ -398,6 +402,9 @@ class Dashboard(QWidget):
             self.metric_labels['st_segment'].setText(
                 f"{int(round(intervals['ST']))} ms" if isinstance(intervals['ST'], (int, float)) else str(intervals['ST'])
             )
+        # Also update the ECG test page theme if it exists
+        if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
+            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
             
     def generate_pdf_report(self):
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
@@ -532,6 +539,9 @@ class Dashboard(QWidget):
         self.sign_btn.setText("Sign In")
         self.close()
     def go_to_lead_test(self):
+        if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
+            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
+            
         self.page_stack.setCurrentWidget(self.ecg_test_page)
     def go_to_dashboard(self):
         self.page_stack.setCurrentWidget(self.dashboard_page)
@@ -555,6 +565,9 @@ class Dashboard(QWidget):
             self.setStyleSheet("")
             self.medical_btn.setText("Medical Mode")
             self.medical_btn.setStyleSheet("background: #00b894; color: white; border-radius: 10px; padding: 4px 18px;")
+        # Update ECG test page theme if it exists
+        if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
+            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
             
     def toggle_dark_mode(self):
         self.dark_mode = not self.dark_mode
@@ -602,6 +615,9 @@ class Dashboard(QWidget):
                     cal.setStyleSheet("")
                 for txt in child.findChildren(QTextEdit):
                     txt.setStyleSheet("")
+        # Update ECG test page theme if it exists
+        if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
+            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
         
     def center_on_screen(self):
         qr = self.frameGeometry()
