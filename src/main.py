@@ -63,7 +63,7 @@ class LoginRegisterDialog(QDialog):
         self.result = False
         self.username = None
         self.user_details = {}
-        self.center_on_screen()
+        self.center_on_screen( )
 
     def center_on_screen(self):
         qr = self.frameGeometry()
