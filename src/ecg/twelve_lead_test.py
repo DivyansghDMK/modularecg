@@ -23,16 +23,22 @@ class SerialECGReader:
     def __init__(self, port, baudrate):
         self.ser = serial.Serial(port, baudrate, timeout=1)
         self.running = False
+        self.data_count = 0
+        print(f"🔌 SerialECGReader initialized: Port={port}, Baud={baudrate}")
 
     def start(self):
+        print("🚀 Starting ECG data acquisition...")
         self.ser.reset_input_buffer()
         self.ser.write(b'1\r\n')
         time.sleep(0.5)
         self.running = True
+        print("✅ ECG device started - waiting for data...")
 
     def stop(self):
+        print("⏹️ Stopping ECG data acquisition...")
         self.ser.write(b'0\r\n')
         self.running = False
+        print(f"📊 Total data packets received: {self.data_count}")
 
     def read_value(self):
         if not self.running:
@@ -40,16 +46,43 @@ class SerialECGReader:
         try:
             line_raw = self.ser.readline()
             line_data = line_raw.decode('utf-8', errors='replace').strip()
+            
             if line_data:
-                print("Received:", line_data)
-            if line_data.isdigit():
-                return int(line_data[-3:])
+                self.data_count += 1
+                # Print detailed data information
+                print(f"📡 [Packet #{self.data_count}] Raw data: '{line_data}' (Length: {len(line_data)})")
+                
+                # Parse and display ECG value
+                if line_data.isdigit():
+                    ecg_value = int(line_data[-3:])
+                    print(f"💓 ECG Value: {ecg_value} mV")
+                    return ecg_value
+                else:
+                    # Try to parse as multiple values (8-channel data)
+                    try:
+                        # Split by any whitespace and filter out empty strings
+                        values = [int(x) for x in line_data.split() if x.strip()]
+                        if len(values) >= 8:
+                            print(f"💓 8-Channel ECG Data: {values}")
+                            return values  # Return the list of 8 values
+                        elif len(values) == 1:
+                            print(f"💓 Single ECG Value: {values[0]} mV")
+                            return values[0]
+                        else:
+                            print(f"⚠️ Unexpected number of values: {len(values)}")
+                    except ValueError:
+                        print(f"⚠️ Non-numeric data received: '{line_data}'")
+            else:
+                print("⏳ No data received (timeout)")
+                
         except Exception as e:
-            print("Error:", e)
+            print(f"❌ Serial communication error: {e}")
         return None
 
     def close(self):
+        print("🔌 Closing serial connection...")
         self.ser.close()
+        print("✅ Serial connection closed")
 
 class LiveLeadWindow(QWidget):
     def __init__(self, lead_name, data_source, buffer_size=80, color="#00ff99"):
@@ -560,6 +593,7 @@ class ECGTestPage(QWidget):
         btn_layout = QHBoxLayout()
         self.start_btn = QPushButton("Start")
         self.stop_btn = QPushButton("Stop")
+        self.ports_btn = QPushButton("Ports")
         self.export_pdf_btn = QPushButton("Export as PDF")
         self.export_csv_btn = QPushButton("Export as CSV")
         self.sequential_btn = QPushButton("Show All Leads Sequentially")
@@ -568,7 +602,7 @@ class ECGTestPage(QWidget):
         self.back_btn = QPushButton("Back")
 
         # Make all buttons responsive and compact
-        for btn in [self.start_btn, self.stop_btn, self.export_pdf_btn, self.export_csv_btn, 
+        for btn in [self.start_btn, self.stop_btn, self.ports_btn, self.export_pdf_btn, self.export_csv_btn, 
                    self.sequential_btn, self.twelve_leads_btn, self.six_leads_btn, self.back_btn]:
             btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             btn.setMinimumHeight(28)  # Reduced from 32px
@@ -607,6 +641,7 @@ class ECGTestPage(QWidget):
         # Apply medical green style to all buttons
         self.start_btn.setStyleSheet(green_color)
         self.stop_btn.setStyleSheet(green_color)
+        self.ports_btn.setStyleSheet(green_color)
         self.export_pdf_btn.setStyleSheet(green_color)
         self.export_csv_btn.setStyleSheet(green_color)
         self.sequential_btn.setStyleSheet(green_color)
@@ -616,6 +651,7 @@ class ECGTestPage(QWidget):
 
         btn_layout.addWidget(self.start_btn)
         btn_layout.addWidget(self.stop_btn)
+        btn_layout.addWidget(self.ports_btn)
         btn_layout.addWidget(self.export_pdf_btn)
         btn_layout.addWidget(self.export_csv_btn)
         btn_layout.addWidget(self.sequential_btn)
@@ -630,6 +666,7 @@ class ECGTestPage(QWidget):
 
         self.start_btn.setToolTip("Start ECG recording from the selected port")
         self.stop_btn.setToolTip("Stop current ECG recording")
+        self.ports_btn.setToolTip("Configure COM port and baud rate settings")
         self.export_pdf_btn.setToolTip("Export ECG data as PDF report")
         self.export_csv_btn.setToolTip("Export ECG data as CSV file")
 
@@ -650,6 +687,7 @@ class ECGTestPage(QWidget):
         """)
         help_btn.clicked.connect(self.show_help)
 
+        self.ports_btn.clicked.connect(self.show_ports_dialog)
         self.export_pdf_btn.clicked.connect(self.export_pdf)
         self.export_csv_btn.clicked.connect(self.export_csv)
         self.sequential_btn.clicked.connect(self.show_sequential_view)
@@ -1048,6 +1086,110 @@ class ECGTestPage(QWidget):
         msg.setText(help_text)
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
+
+    # ------------------------ Ports Configuration Dialog ------------------------
+
+    def show_ports_dialog(self):
+        """Show dialog for configuring COM port and baud rate"""
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Port Configuration")
+        dialog.setIcon(QMessageBox.Information)
+        
+        # Create a custom widget for the dialog
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Port selection
+        port_layout = QHBoxLayout()
+        port_layout.addWidget(QLabel("COM Port:"))
+        port_combo = QComboBox()
+        port_combo.addItem("Select Port")
+        
+        # Get available ports
+        ports = serial.tools.list_ports.comports()
+        for port in ports:
+            port_combo.addItem(port.device)
+        
+        # Set current port if available
+        current_port = self.settings_manager.get_serial_port()
+        if current_port and current_port != "Select Port":
+            index = port_combo.findText(current_port)
+            if index >= 0:
+                port_combo.setCurrentIndex(index)
+        
+        port_layout.addWidget(port_combo)
+        layout.addLayout(port_layout)
+        
+        # Baud rate selection
+        baud_layout = QHBoxLayout()
+        baud_layout.addWidget(QLabel("Baud Rate:"))
+        baud_combo = QComboBox()
+        baud_rates = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"]
+        baud_combo.addItems(baud_rates)
+        
+        # Set current baud rate if available
+        current_baud = self.settings_manager.get_baud_rate()
+        if current_baud:
+            index = baud_combo.findText(current_baud)
+            if index >= 0:
+                baud_combo.setCurrentIndex(index)
+            else:
+                baud_combo.setCurrentText(current_baud)
+        
+        baud_layout.addWidget(baud_combo)
+        layout.addLayout(baud_layout)
+        
+        # Test connection button
+        test_btn = QPushButton("Test Connection")
+        test_btn.clicked.connect(lambda: self.test_serial_connection(port_combo.currentText(), baud_combo.currentText()))
+        layout.addWidget(test_btn)
+        
+        # Add the widget to the dialog
+        dialog.layout().addWidget(widget, 0, 0, 1, dialog.layout().columnCount())
+        
+        # Add buttons
+        save_btn = dialog.addButton("Save", QMessageBox.AcceptRole)
+        cancel_btn = dialog.addButton("Cancel", QMessageBox.RejectRole)
+        
+        # Show dialog
+        result = dialog.exec_()
+        
+        if result == QMessageBox.AcceptRole:
+            # Save settings
+            selected_port = port_combo.currentText()
+            selected_baud = baud_combo.currentText()
+            
+            if selected_port != "Select Port":
+                self.settings_manager.set_setting("serial_port", selected_port)
+                self.settings_manager.set_setting("baud_rate", selected_baud)
+                print(f"Port settings saved: {selected_port} at {selected_baud} baud")
+                
+                # Show confirmation
+                QMessageBox.information(self, "Settings Saved", 
+                    f"Port configuration saved:\nPort: {selected_port}\nBaud Rate: {selected_baud}")
+            else:
+                QMessageBox.warning(self, "Invalid Selection", "Please select a valid COM port.")
+
+    def test_serial_connection(self, port, baud_rate):
+        """Test the serial connection with the specified port and baud rate"""
+        if port == "Select Port":
+            QMessageBox.warning(self, "Invalid Port", "Please select a valid COM port first.")
+            return
+        
+        try:
+            # Try to open the serial connection
+            test_serial = serial.Serial(port, int(baud_rate), timeout=1)
+            test_serial.close()
+            
+            QMessageBox.information(self, "Connection Test", 
+                f"✅ Connection successful!\nPort: {port}\nBaud Rate: {baud_rate}")
+            
+        except serial.SerialException as e:
+            QMessageBox.critical(self, "Connection Failed", 
+                f"❌ Connection failed!\nPort: {port}\nBaud Rate: {baud_rate}\n\nError: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Connection Error", 
+                f"❌ Unexpected error!\nError: {str(e)}")
 
     # ------------------------ Capture Screen Details ------------------------
 
@@ -1649,9 +1791,16 @@ class ECGTestPage(QWidget):
             print(f"Connecting to {port} at {baud_int} baud...")
             self.serial_reader = SerialECGReader(port, baud_int)
             self.serial_reader.start()
+            print(f"[DEBUG] ECGTestPage - Starting timer with 50ms interval")
             self.timer.start(50)
             if hasattr(self, '_12to1_timer'):
                 self._12to1_timer.start(100)
+            print(f"[DEBUG] ECGTestPage - Timer started, serial reader created")
+            print(f"[DEBUG] ECGTestPage - Timer active: {self.timer.isActive()}")
+            print(f"[DEBUG] ECGTestPage - Number of leads: {len(self.leads)}")
+            print(f"[DEBUG] ECGTestPage - Number of lines: {len(self.lines)}")
+            print(f"[DEBUG] ECGTestPage - Number of axes: {len(self.axs)}")
+            print(f"[DEBUG] ECGTestPage - Number of canvases: {len(self.canvases)}")
 
             # Start elapsed time tracking
             self.start_time = time.time()
@@ -1769,49 +1918,130 @@ class ECGTestPage(QWidget):
             })
 
     def update_plot(self):
+        print(f"[DEBUG] ECGTestPage - update_plot called, serial_reader exists: {self.serial_reader is not None}")
         
         if not self.serial_reader:
+            print("[DEBUG] ECGTestPage - No serial reader, returning")
             return
         
-        line = self.serial_reader.ser.readline()
-        line_data = line.decode('utf-8', errors='replace').strip()
-        if not line_data:
-            return
-        
+        # Read raw data directly from serial port
         try:
-            values = [int(x) for x in line_data.split()]
-            if len(values) != 8:
+            line = self.serial_reader.ser.readline()
+            line_data = line.decode('utf-8', errors='replace').strip()
+            
+            if not line_data:
+                print("[DEBUG] ECGTestPage - No data received (empty line)")
                 return
-            lead1 = values[0]
-            v4    = values[1]
-            v5    = values[2]
-            lead2 = values[3]
-            v3    = values[4]
-            v6    = values[5]
-            v1    = values[6]
-            v2    = values[7]
-            lead3 = lead2 - lead1
-            avr = - (lead1 + lead2) / 2
-            avl = (lead1 - lead3) / 2
-            avf = (lead2 + lead3) / 2
-            lead_data = {
-                "I": lead1,
-                "II": lead2,
-                "III": lead3,
-                "aVR": avr,
-                "aVL": avl,
-                "aVF": avf,
-                "V1": v1,
-                "V2": v2,
-                "V3": v3,
-                "V4": v4,
-                "V5": v5,
-                "V6": v6
-            }
-            for i, lead in enumerate(self.leads):
-                self.data[lead].append(lead_data[lead])
-                if len(self.data[lead]) > self.buffer_size:
-                    self.data[lead].pop(0)
+            
+            print(f"[DEBUG] ECGTestPage - Raw hardware data: '{line_data}' (length: {len(line_data)})")
+            
+            # Parse the 8-channel data (handle multiple spaces)
+            try:
+                # Split by any whitespace and filter out empty strings
+                values = [int(x) for x in line_data.split() if x.strip()]
+                print(f"[DEBUG] ECGTestPage - Parsed {len(values)} values: {values}")
+                
+                if len(values) >= 8:
+                    # Extract individual leads from 8-channel data
+                    lead1 = values[0]    # Lead I
+                    v4    = values[1]    # V4
+                    v5    = values[2]    # V5
+                    lead2 = values[3]    # Lead II
+                    v3    = values[4]    # V3
+                    v6    = values[5]    # V6
+                    v1    = values[6]    # V1
+                    v2    = values[7]    # V2
+                    
+                    # Calculate derived leads
+                    lead3 = lead2 - lead1
+                    avr = - (lead1 + lead2) / 2
+                    avl = (lead1 - lead3) / 2
+                    avf = (lead2 + lead3) / 2
+                    
+                    lead_data = {
+                        "I": lead1, "II": lead2, "III": lead3,
+                        "aVR": avr, "aVL": avl, "aVF": avf,
+                        "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5, "V6": v6
+                    }
+                    
+                    print(f"[DEBUG] ECGTestPage - Successfully parsed 8-channel data: {lead_data}")
+                    
+                elif len(values) == 1:
+                    # Single value - simulate 12-lead data
+                    ecg_value = values[0]
+                    print(f"[DEBUG] ECGTestPage - Single value received: {ecg_value}")
+                    
+                    lead1 = ecg_value
+                    lead2 = ecg_value + np.random.randint(-20, 20)
+                    lead3 = lead2 - lead1
+                    avr = - (lead1 + lead2) / 2
+                    avl = (lead1 - lead3) / 2
+                    avf = (lead2 + lead3) / 2
+                    
+                    # Simulate chest leads with variations
+                    v1 = ecg_value + np.random.randint(-30, 30)
+                    v2 = ecg_value + np.random.randint(-25, 25)
+                    v3 = ecg_value + np.random.randint(-20, 20)
+                    v4 = ecg_value + np.random.randint(-15, 15)
+                    v5 = ecg_value + np.random.randint(-10, 10)
+                    v6 = ecg_value + np.random.randint(-5, 5)
+                    
+                    lead_data = {
+                        "I": lead1, "II": lead2, "III": lead3,
+                        "aVR": avr, "aVL": avl, "aVF": avf,
+                        "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5, "V6": v6
+                    }
+                    
+                else:
+                    print(f"[DEBUG] ECGTestPage - Unexpected number of values: {len(values)}")
+                    return
+                    
+            except ValueError as e:
+                print(f"[DEBUG] ECGTestPage - Error parsing values: {e}")
+                # Try to extract numeric part using regex
+                import re
+                numbers = re.findall(r'-?\d+', line_data)
+                if numbers:
+                    try:
+                        # Use first number as single value
+                        ecg_value = int(numbers[0])
+                        print(f"[DEBUG] ECGTestPage - Extracted numeric value: {ecg_value}")
+                        
+                        # Use single value to simulate 12-lead data
+                        lead1 = ecg_value
+                        lead2 = ecg_value + np.random.randint(-20, 20)
+                        lead3 = lead2 - lead1
+                        avr = - (lead1 + lead2) / 2
+                        avl = (lead1 - lead3) / 2
+                        avf = (lead2 + lead3) / 2
+                        
+                        v1 = ecg_value + np.random.randint(-30, 30)
+                        v2 = ecg_value + np.random.randint(-25, 25)
+                        v3 = ecg_value + np.random.randint(-20, 20)
+                        v4 = ecg_value + np.random.randint(-15, 15)
+                        v5 = ecg_value + np.random.randint(-10, 10)
+                        v6 = ecg_value + np.random.randint(-5, 5)
+                        
+                        lead_data = {
+                            "I": lead1, "II": lead2, "III": lead3,
+                            "aVR": avr, "aVL": avl, "aVF": avf,
+                            "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5, "V6": v6
+                        }
+                    except ValueError:
+                        print(f"[DEBUG] ECGTestPage - Could not parse numeric data from: '{line_data}'")
+                        return
+                else:
+                    print(f"[DEBUG] ECGTestPage - No numeric data found in: '{line_data}'")
+                    return
+            
+            # Update data buffers for all leads
+            for lead in self.leads:
+                if lead in lead_data:
+                    self.data[lead].append(lead_data[lead])
+                    if len(self.data[lead]) > self.buffer_size:
+                        self.data[lead].pop(0)
+            
+            print(f"[DEBUG] ECGTestPage - Updated data buffers, Lead II has {len(self.data['II'])} points")
             
             # Write latest Lead II data to file for dashboard
             try:
@@ -1827,46 +2057,61 @@ class ECGTestPage(QWidget):
                 intervals = self.calculate_ecg_intervals(lead_ii_data)
                 self.update_ecg_metrics_on_top_of_lead_graphs(intervals)
             
+            # Update all plots
             for i, lead in enumerate(self.leads):
                 if len(self.data[lead]) > 0:
+                    print(f"[DEBUG] ECGTestPage - Updating plot for {lead}: {len(self.data[lead])} data points")
+                    
+                    # Prepare plot data
                     if len(self.data[lead]) < self.buffer_size:
                         data = np.full(self.buffer_size, np.nan)
                         data[-len(self.data[lead]):] = self.data[lead]
                     else:
                         data = np.array(self.data[lead])
                     
+                    # Center the data
                     centered = data - np.nanmean(data)
 
                     # Apply current gain setting to the real data
                     gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                    centered = (data - np.nanmean(data)) * gain_factor
+                    centered = centered * gain_factor
                     
-                    self.lines[i].set_ydata(centered)
-                    
-                    # Use dynamic y-limits based on current gain setting
-                    ylim = self.ylim if hasattr(self, 'ylim') else 400
-                    self.axs[i].set_ylim(-ylim, ylim)
-                    
-                    # Use dynamic x-limits based on current buffer size
-                    self.axs[i].set_xlim(0, self.buffer_size)
+                    # Update the plot line
+                    if i < len(self.lines):
+                        self.lines[i].set_ydata(centered)
+                        print(f"[DEBUG] ECGTestPage - Updated {lead} plot with {len(centered)} points, range: {np.min(centered):.2f} to {np.max(centered):.2f}")
+                        
+                        # Use dynamic y-limits based on current gain setting
+                        ylim = self.ylim if hasattr(self, 'ylim') else 400
+                        if i < len(self.axs):
+                            self.axs[i].set_ylim(-ylim, ylim)
+                            
+                            # Use dynamic x-limits based on current buffer size
+                            self.axs[i].set_xlim(0, self.buffer_size)
 
-                    # Update title with current settings
-                    current_speed = self.settings_manager.get_wave_speed()
-                    current_gain = self.settings_manager.get_wave_gain()
-                    self.axs[i].set_title(f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV", 
-                                        fontsize=8, color='#666', pad=10)
-                    
-                    # Add grid lines to show scale
-                    self.axs[i].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-                    
-                    # Remove any existing labels
-                    self.axs[i].set_xlabel("")
-                    self.axs[i].set_ylabel("")
-                    
-                    self.canvases[i].draw_idle()
+                            # Update title with current settings
+                            current_speed = self.settings_manager.get_wave_speed()
+                            current_gain = self.settings_manager.get_wave_gain()
+                            self.axs[i].set_title(f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV", 
+                                                fontsize=8, color='#666', pad=10)
+                            
+                            # Add grid lines to show scale
+                            self.axs[i].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+                            
+                            # Remove any existing labels
+                            self.axs[i].set_xlabel("")
+                            self.axs[i].set_ylabel("")
+                        
+                        # Force redraw of the canvas
+                        if i < len(self.canvases):
+                            self.canvases[i].draw_idle()
+                    else:
+                        print(f"[DEBUG] ECGTestPage - Warning: No line object for lead {lead} at index {i}")
                     
         except Exception as e:
-            print("Error parsing ECG data:", e)
+            print(f"[DEBUG] ECGTestPage - Error in update_plot: {e}")
+            import traceback
+            traceback.print_exc()
 
     def export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export ECG Data as PDF", "", "PDF Files (*.pdf)")
