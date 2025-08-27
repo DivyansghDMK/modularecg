@@ -333,6 +333,8 @@ class ECGTestPage(QWidget):
 
         # Create ECGMenu instance to use its methods
         self.ecg_menu = ECGMenu(parent=self, dashboard=self.stacked_widget.parent())
+        # Connect ECGMenu to this ECG test page for data communication
+        self.ecg_menu.set_ecg_test_page(self)
 
         self.ecg_menu.settings_manager = self.settings_manager
 
@@ -1622,6 +1624,39 @@ class ECGTestPage(QWidget):
                         # Redraw canvas
                         if i < len(self.canvases):
                             self.canvases[i].draw_idle()
+
+    def update_ecg_lead(self, lead_index, data_array):
+        """Update a specific ECG lead with new data from serial communication"""
+        try:
+            if 0 <= lead_index < len(self.lines) and len(data_array) > 0:
+                # Apply current settings to the incoming data
+                gain_factor = self.settings_manager.get_wave_gain() / 10.0
+                centered = (np.array(data_array) - np.nanmean(data_array)) * gain_factor
+                
+                # Update line data with new buffer size
+                if len(centered) < self.buffer_size:
+                    plot_data = np.full(self.buffer_size, np.nan)
+                    plot_data[-len(centered):] = centered
+                else:
+                    plot_data = centered[-self.buffer_size:]
+                
+                # Update the specific lead line
+                self.lines[lead_index].set_ydata(plot_data)
+                
+                # Update axis limits
+                if lead_index < len(self.axs):
+                    ylim = self.ylim if hasattr(self, 'ylim') else 400
+                    self.axs[lead_index].set_ylim(-ylim, ylim)
+                    self.axs[lead_index].set_xlim(0, self.buffer_size)
+                
+                # Redraw the specific canvas
+                if lead_index < len(self.canvases):
+                    self.canvases[lead_index].draw_idle()
+                    
+                print(f"Updated ECG lead {lead_index} with {len(data_array)} samples")
+                
+        except Exception as e:
+            print(f"Error updating ECG lead {lead_index}: {str(e)}")
 
     # ---------------------- Start Button Functionality ----------------------
 

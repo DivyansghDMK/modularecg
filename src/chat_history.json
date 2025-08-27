@@ -105,6 +105,18 @@
     {
       "question": "what is html",
       "answer": "HTML stands for **HyperText Markup Language**.  It's the standard markup language for creating web pages and web applications.  Think of it as the foundation upon which all websites are built.\n\nInstead of using programming instructions, HTML uses *tags* enclosed in angle brackets (`< >`) to structure content. These tags tell the web browser how to display the content, such as headings, paragraphs, images, and links.  For example:\n\n* `<h1>` creates a level 1 heading.\n* `<p>` creates a paragraph.\n* `<img>` inserts an image.\n* `<a>` creates a hyperlink.\n\nHTML doesn't handle complex logic or dynamic content on its own.  That's where other technologies like CSS (for styling) and JavaScript (for interactivity) come in.  But HTML provides the basic structure and organization of the content.  It's the essential starting point for any website.\n"
+    },
+    {
+      "question": "how are u",
+      "answer": "I am doing well, thank you for asking!  As a large language model, I don't experience emotions or feelings in the same way humans do, but I'm functioning optimally and ready to assist you. How can I help you today?\n"
+    },
+    {
+      "question": "what is your source google or gpt",
+      "answer": "I am a large language model, trained by Google.\n"
+    },
+    {
+      "question": "can i restrict u for medical purposes in my software",
+      "answer": "You cannot directly restrict me, as I am a large language model.  I don't have a physical body or the ability to be restricted in the way a human or a physical device can.\n\nHowever, you can *indirectly* restrict my output for medical purposes within your software by:\n\n* **Filtering my responses:** You can program your software to filter my responses based on keywords, phrases, or topics related to medical advice.  This would prevent me from generating responses that could be interpreted as medical advice, diagnoses, or treatment recommendations.  This is crucial because I am not a medical professional and providing inaccurate medical information could be harmful.\n\n* **Using a predefined knowledge base:** Instead of allowing me free reign, you can feed me a curated dataset of medically accurate information and restrict my responses to only that information.  This would ensure that my responses are consistent with established medical knowledge.\n\n* **Integrating with a medical professional's workflow:**  The best approach is to design your software so that I am only a tool *assisting* a medical professional. My output would be reviewed and validated by a human doctor before being presented to a patient.\n\n* **Implementing clear disclaimers:**  Even with filtering, always include prominent disclaimers stating that I am not a substitute for professional medical advice and that users should consult a doctor for any health concerns.\n\n**In short:** You can't restrict *me*, but you can and *must* restrict my *output* to ensure responsible and safe use in a medical context.  Failing to do so could have serious legal and ethical consequences.  Always prioritize user safety and seek expert advice from healthcare professionals and legal counsel when developing medical software.\n"
     }
   ]
 }

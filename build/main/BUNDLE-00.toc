@@ -1,0 +1,1 @@
+([('main', '/Users/deckmount/Pratyaksh1/modularecg/dist/main', 'EXECUTABLE')],)

@@ -395,6 +395,7 @@ class ECGMenu(QGroupBox):
         
         # Store parent reference for responsive updates
         self.parent_widget = None
+        self.ecg_test_page = None  # Reference to the ECG test page
         
         # Connect to parent resize events
         if parent:
@@ -402,6 +403,11 @@ class ECGMenu(QGroupBox):
         
         # Setup global resize monitoring
         QTimer.singleShot(100, self.setup_global_resize_monitoring)
+
+    def set_ecg_test_page(self, ecg_page):
+        """Set reference to the ECG test page for data communication"""
+        self.ecg_test_page = ecg_page
+        print(f"ECGMenu connected to ECG test page: {ecg_page}")
 
     def setup_parent_monitoring(self, parent):
         """Setup monitoring for parent widget changes"""
@@ -424,7 +430,7 @@ class ECGMenu(QGroupBox):
             
             # Replace the resize event handler
             parent.resizeEvent = enhanced_resize_event
-
+            
     def create_resize_handler(self, original_resize_event):
         def resize_handler(event):
             # Call original resize event
@@ -574,6 +580,14 @@ class ECGMenu(QGroupBox):
 
     def hide_sliding_panel(self):
         if self.sliding_panel and self.sliding_panel.is_visible:
+            # Clean up serial connection if system setup is open
+            if hasattr(self, 'serial_connection') and self.serial_connection:
+                try:
+                    if self.serial_connection.is_open:
+                        self.disconnect_serial()
+                except:
+                    pass
+            
             self.sliding_panel.slide_out()
             self.current_open_panel = None
 
@@ -898,7 +912,7 @@ class ECGMenu(QGroupBox):
                 QLabel {{
                     font: bold {max(10, int(margin_size * 0.3))}pt Arial;
                     color: {color};
-                    background: transparent;
+                background: transparent;
                     text-align: center;
                     padding: 2px;
                 }}
@@ -1128,8 +1142,8 @@ class ECGMenu(QGroupBox):
                 color: #666;
                 background: #f8f9fa;
                 padding: 10px;
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 6px;
                 min-height: {max(25, int(margin_size * 1.2))}px;
             }}
         """)
@@ -1142,7 +1156,7 @@ class ECGMenu(QGroupBox):
                 font: bold {max(11, int(margin_size * 0.55))}pt Arial;
                 color: #2c3e50;
                 background: transparent;
-                padding: 5px;
+                            padding: 5px;
             }}
         """)
         file_layout.addWidget(format_label)
@@ -1152,18 +1166,18 @@ class ECGMenu(QGroupBox):
         self.format_combo.setStyleSheet(f"""
             QComboBox {{
                 font: {max(10, int(margin_size * 0.5))}pt Arial;
-                color: #2c3e50;
-                background: white;
-                border: 2px solid #e0e0e0;
-                border-radius: 6px;
+                    color: #2c3e50;
+                    background: white;
+                        border: 2px solid #e0e0e0;
+                        border-radius: 6px;
                 padding: 8px;
                 min-height: {max(30, int(margin_size * 1.5))}px;
             }}
             QComboBox:hover {{
-                border: 2px solid #ffb347;
+                        border: 2px solid #ffb347;
             }}
             QComboBox:focus {{
-                border: 2px solid #ff6600;
+                        border: 2px solid #ff6600;
             }}
         """)
         file_layout.addWidget(self.format_combo)
@@ -1515,59 +1529,882 @@ class ECGMenu(QGroupBox):
     # ----------------------------- System Setup -----------------------------
 
     def create_system_setup_content(self):
-        # Define sections for system setup
-        sections = [
-            {
-                'title': 'BEAT VOL',
-                'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "on"}
-            },
-            {
-                'title': 'ALARM VOL',
-                'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "on"}
-            },
-            {
-                'title': 'KEY TONE',
-                'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "on"}
-            },
-            {
-                'title': 'AUTO POWER OFF',
-                'options': [("5min", "5"), ("10min", "10"), ("15min", "15"), ("Off", "off")],
-                'variable': {"value": "10"}
-            },
-            {
-                'title': 'LANGUAGE',
-                'options': [("English", "en"), ("Spanish", "es"), ("French", "fr")],
-                'variable': {"value": "en"}
-            },
-            {
-                'title': 'DATE FORMAT',
-                'options': [("MM/DD/YYYY", "mmdd"), ("DD/MM/YYYY", "ddmm"), ("YYYY/MM/DD", "yyyymm")],
-                'variable': {"value": "mmdd"}
-            }
-        ]
+        # Create main widget
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        # Define buttons
-        buttons = [
-            {
-                'text': 'Save',
-                'action': self.save_system_settings,
-                'style': 'primary'
-            },
-            {
-                'text': 'Exit',
-                'action': self.hide_sliding_panel,
-                'style': 'danger'
+        # Title
+        title_label = QLabel("System Setup")
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                color: #2c3e50;
+                padding: 10px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #3498db, stop:1 #2980b9);
+                color: white;
+                border-radius: 8px;
+                margin-bottom: 15px;
             }
-        ]
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
         
-        return self.create_unified_control_panel("System Setup", sections, buttons)
+        # Serial Communication Section
+        serial_group = QGroupBox("Serial Communication")
+        serial_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                    color: #2c3e50;
+                border: 2px solid #bdc3c7;
+                    border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+            }
+        """)
+        serial_layout = QFormLayout(serial_group)
+        serial_layout.setSpacing(10)
+        
+        # COM Port Selection
+        self.com_port_combo = QComboBox()
+        self.com_port_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                background: white;
+                font-size: 12px;
+                min-width: 120px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #2c3e50;
+                margin-right: 5px;
+            }
+        """)
+        serial_layout.addRow("COM Port:", self.com_port_combo)
+        
+        # Refresh COM Ports Button
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #3498db;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #2980b9;
+            }
+            QPushButton:pressed {
+                background: #21618c;
+            }
+        """)
+        refresh_btn.clicked.connect(self.refresh_com_ports)
+        serial_layout.addRow("", refresh_btn)
+        
+        # Baud Rate Selection
+        self.baud_rate_combo = QComboBox()
+        self.baud_rate_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                background: white;
+                font-size: 12px;
+                min-width: 120px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #2c3e50;
+                margin-right: 5px;
+            }
+        """)
+        baud_rates = ["9600", "19200", "38400", "57600", "115200"]
+        self.baud_rate_combo.addItems(baud_rates)
+        self.baud_rate_combo.setCurrentText("115200")
+        serial_layout.addRow("Baud Rate:", self.baud_rate_combo)
+        
+        # Connection Controls
+        connection_layout = QHBoxLayout()
+        
+        self.connect_btn = QPushButton("🔌 Connect")
+        self.connect_btn.setStyleSheet("""
+            QPushButton {
+                background: #27ae60;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: #229954;
+            }
+            QPushButton:pressed {
+                background: #1e8449;
+            }
+            QPushButton:disabled {
+                background: #95a5a6;
+            }
+        """)
+        self.connect_btn.clicked.connect(self.toggle_serial_connection)
+        connection_layout.addWidget(self.connect_btn)
+        
+        self.disconnect_btn = QPushButton("🔌 Disconnect")
+        self.disconnect_btn.setStyleSheet("""
+            QPushButton {
+                background: #e74c3c;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: #c0392b;
+            }
+            QPushButton:pressed {
+                background: #a93226;
+            }
+            QPushButton:disabled {
+                background: #95a5a6;
+            }
+        """)
+        self.disconnect_btn.clicked.connect(self.disconnect_serial)
+        self.disconnect_btn.setEnabled(False)
+        connection_layout.addWidget(self.disconnect_btn)
+        
+        serial_layout.addRow("", connection_layout)
+        layout.addWidget(serial_group)
+        
+        # Real-time ECG Data Display Section
+        ecg_data_group = QGroupBox("Real-time ECG Data")
+        ecg_data_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                    color: #2c3e50;
+                border: 2px solid #bdc3c7;
+                    border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+                }
+            """)
+        ecg_layout = QVBoxLayout(ecg_data_group)
+        
+        # Status Display
+        self.status_display = QLabel("Waiting for connection...")
+        self.status_display.setStyleSheet("""
+            QLabel {
+                background: #2c3e50;
+                color: #00ff00;
+                font-family: 'Arial', sans-serif;
+                font-size: 12px;
+                padding: 10px;
+                border-radius: 6px;
+                border: 2px solid #34495e;
+                    min-height: 40px;
+                }
+        """)
+        self.status_display.setAlignment(Qt.AlignCenter)
+        ecg_layout.addWidget(self.status_display)
+        
+        # Data Controls
+        data_controls = QHBoxLayout()
+        
+        self.clear_data_btn = QPushButton("🗑️ Clear Data")
+        self.clear_data_btn.setStyleSheet("""
+            QPushButton {
+                background: #f39c12;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #e67e22;
+            }
+            QPushButton:pressed {
+                background: #d35400;
+            }
+        """)
+        self.clear_data_btn.clicked.connect(self.clear_ecg_data)
+        data_controls.addWidget(self.clear_data_btn)
+        
+        self.save_data_btn = QPushButton("💾 Save Data")
+        self.save_data_btn.setStyleSheet("""
+            QPushButton {
+                background: #9b59b6;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #8e44ad;
+            }
+            QPushButton:pressed {
+                background: #7d3c98;
+            }
+        """)
+        self.save_data_btn.clicked.connect(self.save_wave_data)
+        data_controls.addWidget(self.save_data_btn)
+        
+        # Test Data Button
+        self.test_data_btn = QPushButton("🧪 Test Data")
+        self.test_data_btn.setStyleSheet("""
+            QPushButton {
+                background: #e74c3c;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #c0392b;
+            }
+            QPushButton:pressed {
+                background: #a93226;
+            }
+        """)
+        self.test_data_btn.clicked.connect(self.generate_test_ecg_data)
+        data_controls.addWidget(self.test_data_btn)
+        
+        ecg_layout.addLayout(data_controls)
+        layout.addWidget(ecg_data_group)
+        
+        # System Settings Section
+        system_group = QGroupBox("System Settings")
+        system_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                color: #2c3e50;
+                border: 2px solid #bdc3c7;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+            }
+        """)
+        system_layout = QFormLayout(system_group)
+        system_layout.setSpacing(10)
+        
+        # System settings options
+        self.beat_vol_combo = QComboBox()
+        self.beat_vol_combo.addItems(["On", "Off"])
+        self.beat_vol_combo.setCurrentText("On")
+        self.beat_vol_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background: white;
+                font-size: 11px;
+                min-width: 80px;
+            }
+        """)
+        system_layout.addRow("Beat Volume:", self.beat_vol_combo)
+        
+        self.alarm_vol_combo = QComboBox()
+        self.alarm_vol_combo.addItems(["On", "Off"])
+        self.alarm_vol_combo.setCurrentText("On")
+        self.alarm_vol_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background: white;
+                font-size: 11px;
+                min-width: 80px;
+            }
+        """)
+        system_layout.addRow("Alarm Volume:", self.alarm_vol_combo)
+        
+        self.auto_power_combo = QComboBox()
+        self.auto_power_combo.addItems(["5min", "10min", "15min", "Off"])
+        self.auto_power_combo.setCurrentText("10min")
+        self.auto_power_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background: white;
+                font-size: 11px;
+                min-width: 80px;
+            }
+        """)
+        system_layout.addRow("Auto Power Off:", self.auto_power_combo)
+
+        layout.addWidget(system_group)
+
+        # Action Buttons
+        button_layout = QHBoxLayout()
+
+        save_btn = QPushButton("💾 Save Settings")
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background: #27ae60;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background: #229954;
+            }
+            QPushButton:pressed {
+                background: #1e8449;
+            }
+        """)
+        save_btn.clicked.connect(self.save_system_settings)
+        button_layout.addWidget(save_btn)
+
+        exit_btn = QPushButton("❌ Exit")
+        exit_btn.setStyleSheet("""
+            QPushButton {
+                background: #e74c3c;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background: #c0392b;
+            }
+            QPushButton:pressed {
+                background: #a93226;
+            }
+        """)
+        exit_btn.clicked.connect(self.hide_sliding_panel)
+        button_layout.addWidget(exit_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Initialize serial connection
+        self.serial_connection = None
+        self.serial_data_buffer = []
+        self.ecg_data_buffer = [[] for _ in range(12)]  # 12 leads
+        self.ecg_update_timer = QTimer()
+        self.ecg_update_timer.timeout.connect(self.update_ecg_graphs)
+        
+        # Initialize COM ports after UI is created
+        self.refresh_com_ports()
+        
+        return content_widget
 
     def save_system_settings(self):
         QMessageBox.information(self.parent(), "Saved", "System settings saved successfully!")
         self.hide_sliding_panel()
+
+    # ----------------------------- Serial Communication Methods -----------------------------
+    
+    def refresh_com_ports(self):
+        """Refresh the list of available COM ports"""
+        try:
+            print(f"🔍 Refreshing available COM ports...")
+            import serial.tools.list_ports
+            ports = serial.tools.list_ports.comports()
+            self.com_port_combo.clear()
+            
+            if ports:
+                print(f"✅ Found {len(ports)} COM port(s):")
+                for i, port in enumerate(ports):
+                    port_info = f"{port.device} - {port.description}"
+                    print(f"   {i+1}. {port_info}")
+                    self.com_port_combo.addItem(port_info)
+                
+                self.com_port_combo.setCurrentIndex(0)
+                selected_port = self.com_port_combo.currentText()
+                print(f"📌 Selected port: {selected_port}")
+                self.status_display.setText(f"Found {len(ports)} COM port(s)")
+            else:
+                print(f"⚠️  No COM ports detected")
+                self.com_port_combo.addItem("No COM ports found")
+                self.status_display.setText("No COM ports detected")
+                
+        except ImportError:
+            error_msg = "pyserial library not available"
+            print(f"❌ {error_msg}")
+            self.com_port_combo.addItem("pyserial not installed")
+            self.status_display.setText(f"Error: {error_msg}")
+        except Exception as e:
+            error_msg = f"Error detecting ports: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.com_port_combo.addItem("Error detecting ports")
+            self.status_display.setText(error_msg)
+
+    def toggle_serial_connection(self):
+        """Toggle serial connection on/off"""
+        if self.serial_connection and self.serial_connection.is_open:
+            self.disconnect_serial()
+        else:
+            self.connect_serial()
+
+    def connect_serial(self):
+        """Establish serial connection"""
+        try:
+            if not self.com_port_combo.currentText() or "No COM ports" in self.com_port_combo.currentText():
+                QMessageBox.warning(self.parent(), "Connection Error", "Please select a valid COM port first!")
+                return
+            
+            port = self.com_port_combo.currentText().split(" - ")[0]
+            baud_rate = int(self.baud_rate_combo.currentText())
+            
+            print(f"🔌 Attempting to connect to {port} at {baud_rate} baud...")
+            
+            import serial
+            self.serial_connection = serial.Serial(
+                port=port,
+                baudrate=baud_rate,
+                timeout=1,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE
+            )
+            
+            if self.serial_connection.is_open:
+                print(f"✅ Successfully connected to {port} at {baud_rate} baud")
+                print(f"📡 Serial port details: {self.serial_connection}")
+                
+                self.connect_btn.setText("🔌 Connected")
+                self.connect_btn.setEnabled(False)
+                self.disconnect_btn.setEnabled(True)
+                self.status_display.setText(f"Connected to {port} at {baud_rate} baud - Receiving ECG data...")
+                
+                # Start reading data
+                self.start_serial_reading()
+                
+        except Exception as e:
+            error_msg = f"Failed to connect: {str(e)}"
+            print(f"❌ Connection error: {error_msg}")
+            QMessageBox.critical(self.parent(), "Connection Error", error_msg)
+            self.status_display.setText(f"Connection failed: {str(e)}")
+
+    def disconnect_serial(self):
+        """Disconnect serial connection"""
+        try:
+            if self.serial_connection and self.serial_connection.is_open:
+                print(f"🔌 Disconnecting from serial port...")
+                self.serial_connection.close()
+                print(f"✅ Serial connection closed successfully")
+            else:
+                print(f"ℹ️  No active serial connection to disconnect")
+            
+            self.serial_connection = None
+            self.connect_btn.setText("🔌 Connect")
+            self.connect_btn.setEnabled(True)
+            self.disconnect_btn.setEnabled(False)
+            self.status_display.setText("Disconnected from serial port")
+            
+            # Stop reading data
+            self.stop_serial_reading()
+            
+        except Exception as e:
+            error_msg = f"Error disconnecting: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.status_display.setText(error_msg)
+
+    def start_serial_reading(self):
+        """Start reading data from serial port"""
+        try:
+            if self.serial_connection and self.serial_connection.is_open:
+                print(f"📡 Starting serial data reading (50ms intervals)...")
+                # Start timer to read data periodically
+                self.ecg_update_timer.start(50)  # Read every 50ms for real-time ECG
+                print(f"✅ Data reading timer started successfully")
+                
+        except Exception as e:
+            error_msg = f"Error starting data reading: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.status_display.setText(error_msg)
+
+    def stop_serial_reading(self):
+        """Stop reading data from serial port"""
+        try:
+            print(f"📡 Stopping serial data reading...")
+            self.ecg_update_timer.stop()
+            print(f"✅ Data reading timer stopped successfully")
+        except Exception as e:
+            print(f"❌ Error stopping data reading: {str(e)}")
+
+    def update_ecg_graphs(self):
+        """Update ECG graphs with incoming serial data"""
+        try:
+            if self.serial_connection and self.serial_connection.is_open and self.serial_connection.in_waiting:
+                # Read available data
+                data = self.serial_connection.read(self.serial_connection.in_waiting)
+                
+                if data:
+                    print(f"📡 Received {len(data)} bytes of data from serial port")
+                    print(f"🔍 Raw data: {data}")
+                    
+                    # Parse ECG data and update graphs
+                    self.parse_and_update_ecg_data(data)
+                    
+        except Exception as e:
+            error_msg = f"Error reading ECG data: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.status_display.setText(error_msg)
+            self.stop_serial_reading()
+
+    def parse_and_update_ecg_data(self, data):
+        """Parse incoming data and update ECG graphs"""
+        try:
+            print(f"🔄 Processing {len(data)} bytes of incoming data...")
+            
+            # Try to decode as text first
+            try:
+                data_str = data.decode('utf-8', errors='ignore').strip()
+                print(f"📝 Decoded as text: '{data_str}'")
+                
+                lines = data_str.split('\n')
+                print(f"📊 Found {len(lines)} data lines")
+                
+                processed_count = 0
+                for line_num, line in enumerate(lines):
+                    if line.strip():
+                        print(f"📋 Processing line {line_num + 1}: '{line}'")
+                        
+                        # Parse ECG data line - handle multiple formats
+                        # Format 1: "lead,value" (e.g., "1,234")
+                        # Format 2: tab-separated values (e.g., "86 4083 65 2179 0 4085 4085")
+                        if ',' in line:
+                            # Format 1: lead,value
+                            parts = line.split(',')
+                            if len(parts) == 2:
+                                lead_str = parts[0].strip()
+                                value_str = parts[1].strip()
+                                
+                                print(f"   🏷️  Lead: '{lead_str}', Value: '{value_str}'")
+                                
+                                # Convert lead identifier to index (0-11)
+                                lead_index = self.get_lead_index(lead_str)
+                                
+                                if lead_index is not None and value_str.replace('.', '').replace('-', '').isdigit():
+                                    value = float(value_str)
+                                    print(f"   ✅ Valid data: Lead {lead_str} (index {lead_index}) = {value:.2f} mV")
+                                    
+                                    # Add to ECG data buffer
+                                    self.ecg_data_buffer[lead_index].append(value)
+                                    
+                                    # Keep only last 1000 samples per lead
+                                    if len(self.ecg_data_buffer[lead_index]) > 1000:
+                                        self.ecg_data_buffer[lead_index] = self.ecg_data_buffer[lead_index][-1000:]
+                                    
+                                    processed_count += 1
+                                else:
+                                    if lead_index is None:
+                                        print(f"   ❌ Invalid lead identifier: '{lead_str}'")
+                                    else:
+                                        print(f"   ❌ Invalid value format: '{value_str}'")
+                            else:
+                                print(f"   ❌ Invalid comma format: expected 'lead,value', got '{line}'")
+                        else:
+                            # Format 2: tab-separated or space-separated values (your machine's format)
+                            # Try tab first, then space as fallback
+                            if '\t' in line:
+                                values = line.split('\t')
+                                separator = 'tab'
+                            else:
+                                values = line.split()
+                                separator = 'space'
+                            
+                            if len(values) >= 8:  # Expecting 8 values per line
+                                print(f"   🔢 {separator.capitalize()}-separated values: {len(values)} values detected")
+                                
+                                # Map the 8 values to 8 leads (assuming first 8 leads)
+                                for i, value_str in enumerate(values[:8]):
+                                    if value_str.strip() and value_str.strip().replace('.', '').replace('-', '').isdigit():
+                                        value = float(value_str.strip())
+                                        lead_index = i  # Map directly to lead index 0-7
+                                        
+                                        print(f"   📊 Lead {lead_index}: {value:.1f} mV")
+                                        
+                                        # Add to ECG data buffer
+                                        self.ecg_data_buffer[lead_index].append(value)
+                                        
+                                        # Keep only last 1000 samples per lead
+                                        if len(self.ecg_data_buffer[lead_index]) > 1000:
+                                            self.ecg_data_buffer[lead_index] = self.ecg_data_buffer[lead_index][-1000:]
+                                        
+                                        processed_count += 1
+                                    else:
+                                        print(f"   ⚠️  Skipping invalid value: '{value_str}'")
+                            else:
+                                print(f"   ❌ Insufficient values: expected 8, got {len(values)}")
+                
+                if processed_count > 0:
+                    print(f"✅ Successfully processed {processed_count} valid data points")
+                    # Update status
+                    self.status_display.setText(f"Processed {processed_count} values - Receiving data...")
+                    # Send data to parent for plotting
+                    self.send_ecg_data_to_parent()
+                else:
+                    print(f"⚠️  No valid data points processed from this batch")
+                
+            except UnicodeDecodeError:
+                print(f"🔢 Data is binary format, processing as raw bytes...")
+                
+                # Handle binary data - assume it's raw ECG values
+                # Convert bytes to integer values
+                for i, byte_val in enumerate(data):
+                    # Distribute bytes across leads (simple approach)
+                    lead_index = i % 12
+                    value = (byte_val - 128) * 2  # Convert 0-255 to -256 to 256 range
+                    
+                    if i < 5:  # Print first 5 bytes for debugging
+                        print(f"   📊 Byte {i}: {byte_val} -> Lead {lead_index}: {value:.1f} mV")
+                    
+                    self.ecg_data_buffer[lead_index].append(value)
+                    
+                    # Keep only last 1000 samples per lead
+                    if len(self.ecg_data_buffer[lead_index]) > 1000:
+                        self.ecg_data_buffer[lead_index] = self.ecg_data_buffer[lead_index][-1000:]
+                
+                print(f"✅ Processed {len(data)} binary bytes across 12 leads")
+                self.status_display.setText(f"Binary data received - {len(data)} bytes processed")
+                
+                # Send data to parent for plotting
+                self.send_ecg_data_to_parent()
+                
+        except Exception as e:
+            error_msg = f"Error parsing ECG data: {str(e)}"
+            print(f"❌ {error_msg}")
+            print(f"🔍 Data that caused error: {data}")
+
+    def get_lead_index(self, lead_str):
+        """Convert lead string to index (0-11)"""
+        lead_mapping = {
+            'I': 0, 'II': 1, 'III': 2,
+            'aVR': 3, 'aVL': 4, 'aVF': 5,
+            'V1': 6, 'V2': 7, 'V3': 8, 'V4': 9, 'V5': 10, 'V6': 11,
+            '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5,
+            '7': 6, '8': 7, '9': 8, '10': 9, '11': 10, '12': 11
+        }
+        return lead_mapping.get(lead_str, None)
+
+    def send_ecg_data_to_parent(self):
+        """Send ECG data to parent widget for plotting"""
+        try:
+            print(f"📤 Attempting to send ECG data to parent widget...")
+            
+            # First try to use the direct reference to ECG test page
+            if hasattr(self, 'ecg_test_page') and self.ecg_test_page and hasattr(self.ecg_test_page, 'update_ecg_lead'):
+                print(f"✅ Using direct reference to ECG test page")
+                
+                # Send data for each lead directly to ECG test page
+                sent_count = 0
+                for lead_index, lead_data in enumerate(self.ecg_data_buffer):
+                    if lead_data:
+                        # Convert to numpy array and send to parent
+                        data_array = np.array(lead_data)
+                        self.ecg_test_page.update_ecg_lead(lead_index, data_array)
+                        print(f"   📊 Sent {len(data_array)} samples to lead {lead_index} via direct reference")
+                        sent_count += 1
+                
+                print(f"✅ Successfully sent data to {sent_count} leads via direct reference")
+                return
+            
+            # Fallback: Find the parent widget that has ECG graphs
+            print(f"🔍 Direct reference not available, searching for parent widget...")
+            parent = self.parent()
+            max_depth = 10  # Prevent infinite loop
+            depth = 0
+            
+            while parent and depth < max_depth and not hasattr(parent, 'update_ecg_lead'):
+                parent = parent.parent()
+                depth += 1
+            
+            if parent and hasattr(parent, 'update_ecg_lead'):
+                print(f"✅ Found parent widget with update_ecg_lead method at depth {depth}")
+                
+                # Send data for each lead
+                sent_count = 0
+                for lead_index, lead_data in enumerate(self.ecg_data_buffer):
+                    if lead_data:
+                        # Convert to numpy array and send to parent
+                        data_array = np.array(lead_data)
+                        parent.update_ecg_lead(lead_index, data_array)
+                        print(f"   📊 Sent {len(data_array)} samples to lead {lead_index}")
+                        sent_count += 1
+                
+                print(f"✅ Successfully sent data to {sent_count} leads via parent search")
+            else:
+                print(f"❌ Could not find parent widget with update_ecg_lead method")
+                # Try to find the main ECG test page
+                main_parent = self.parent()
+                while main_parent and depth < max_depth:
+                    if hasattr(main_parent, 'lines') and hasattr(main_parent, 'canvases'):
+                        print(f"🔍 Found ECG widget at depth {depth}")
+                        break
+                    main_parent = main_parent.parent()
+                    depth += 1
+                        
+        except Exception as e:
+            error_msg = f"Error sending ECG data to parent: {str(e)}"
+            print(f"❌ {error_msg}")
+
+    def generate_test_ecg_data(self):
+        """Generate test ECG data to demonstrate wave plotting"""
+        try:
+            import numpy as np
+            
+            # Generate realistic ECG-like data for each lead
+            sample_count = 500
+            time = np.linspace(0, 2*np.pi, sample_count)
+            
+            for lead_index in range(12):
+                # Create different ECG patterns for each lead
+                if lead_index == 0:  # Lead I - Normal sinus rhythm
+                    data = 100 * np.sin(2 * time) + 50 * np.sin(6 * time) + np.random.normal(0, 5, sample_count)
+                elif lead_index == 1:  # Lead II - Strong R wave
+                    data = 150 * np.sin(2 * time) + 30 * np.sin(6 * time) + np.random.normal(0, 3, sample_count)
+                elif lead_index == 2:  # Lead III - Inverted
+                    data = -100 * np.sin(2 * time) + 40 * np.sin(6 * time) + np.random.normal(0, 4, sample_count)
+                elif lead_index == 3:  # aVR - Usually inverted
+                    data = -80 * np.sin(2 * time) + 20 * np.sin(6 * time) + np.random.normal(0, 6, sample_count)
+                elif lead_index == 4:  # aVL - Small amplitude
+                    data = 60 * np.sin(2 * time) + 15 * np.sin(6 * time) + np.random.normal(0, 5, sample_count)
+                elif lead_index == 5:  # aVF - Moderate amplitude
+                    data = 90 * np.sin(2 * time) + 25 * np.sin(6 * time) + np.random.normal(0, 4, sample_count)
+                else:  # V1-V6 - Precordial leads with varying patterns
+                    v_factor = (lead_index - 5) * 0.3
+                    data = (80 + v_factor * 20) * np.sin(2 * time) + (20 + v_factor * 10) * np.sin(6 * time) + np.random.normal(0, 5, sample_count)
+                
+                # Add to ECG data buffer
+                self.ecg_data_buffer[lead_index] = data.tolist()
+            
+            # Update status
+            self.status_display.setText(f"Generated test data for all 12 leads - {sample_count} samples each")
+            
+            # Send data to parent for plotting
+            self.send_ecg_data_to_parent()
+            
+            QMessageBox.information(self.parent(), "Test Data", f"Generated {sample_count} test samples for all 12 ECG leads!")
+            
+        except Exception as e:
+            QMessageBox.critical(self.parent(), "Error", f"Failed to generate test data: {str(e)}")
+            print(f"Error generating test data: {str(e)}")
+
+    def clear_ecg_data(self):
+        """Clear the ECG data buffers"""
+        self.ecg_data_buffer = [[] for _ in range(12)]
+        self.status_display.setText("ECG data cleared")
+
+    def save_wave_data(self):
+        """Save the received ECG wave data to a file"""
+        try:
+            # Check if we have any ECG data
+            total_samples = sum(len(lead_data) for lead_data in self.ecg_data_buffer)
+            if total_samples == 0:
+                QMessageBox.information(self.parent(), "No Data", "No ECG data to save!")
+                return
+            
+            from PyQt5.QtWidgets import QFileDialog
+            filename, _ = QFileDialog.getSaveFileName(
+                self.parent(),
+                "Save ECG Wave Data",
+                "",
+                "CSV Files (*.csv);;Text Files (*.txt);;All Files (*.*)"
+            )
+            
+            if filename:
+                if filename.endswith('.csv'):
+                    # Save as CSV
+                    import csv
+                    with open(filename, 'w', newline='') as csvfile:
+                        writer = csv.writer(csvfile)
+                        # Write header
+                        lead_names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+                        writer.writerow(['Sample'] + lead_names)
+                        
+                        # Find max length
+                        max_length = max(len(lead_data) for lead_data in self.ecg_data_buffer)
+                        
+                        # Write data rows
+                        for i in range(max_length):
+                            row = [i]
+                            for lead_data in self.ecg_data_buffer:
+                                if i < len(lead_data):
+                                    row.append(lead_data[i])
+                                else:
+                                    row.append('')
+                            writer.writerow(row)
+                else:
+                    # Save as text
+                    with open(filename, 'w') as f:
+                        f.write("ECG Wave Data\n")
+                        f.write("=" * 50 + "\n")
+                        f.write(f"Timestamp: {QTimer().remainingTime()}\n")
+                        f.write(f"COM Port: {self.com_port_combo.currentText()}\n")
+                        f.write(f"Baud Rate: {self.baud_rate_combo.currentText()}\n")
+                        f.write("=" * 50 + "\n\n")
+                        
+                        lead_names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+                        for i, lead_name in enumerate(lead_names):
+                            f.write(f"Lead {lead_name}: {len(self.ecg_data_buffer[i])} samples\n")
+                            if self.ecg_data_buffer[i]:
+                                f.write(f"Values: {', '.join(map(str, self.ecg_data_buffer[i][:100]))}...\n")
+                            f.write("\n")
+                
+                QMessageBox.information(self.parent(), "Success", f"ECG data saved to {filename}")
+                
+        except Exception as e:
+            QMessageBox.critical(self.parent(), "Error", f"Failed to save ECG data: {str(e)}")
 
     # ----------------------------- Load Default -----------------------------
 
@@ -1839,7 +2676,7 @@ class ECGMenu(QGroupBox):
         confirm_msg.setStyleSheet(f"""
             QLabel {{
                 font: bold {max(12, int(margin_size * 0.6))}pt Arial;
-                color: #2c3e50;
+                        color: #2c3e50;
                 background: transparent;
                 padding: 10px;
                 text-align: center;
@@ -1870,9 +2707,9 @@ class ECGMenu(QGroupBox):
         btn_frame.setStyleSheet("""
             QFrame {
                 background: transparent;
-                margin: 10px;
-            }
-        """)
+                        margin: 10px;
+                    }
+                """)
         btn_layout = QHBoxLayout(btn_frame)
         btn_layout.setSpacing(max(10, int(margin_size * 0.5)))
 
