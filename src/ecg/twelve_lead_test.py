@@ -1499,134 +1499,150 @@ class ECGTestPage(QWidget):
                         print(f"Warning: Could not remove text: {e}")
                 # Optionally, clear all lines if you want only labels visible (no ECG trace):
                 # ax.lines.clear()
-                if lead == "II":
-                    # Use the same detection logic as in main.py
-                    from scipy.signal import find_peaks
-                    sampling_rate = 80
-                    ecg_signal = centered
-                    window_size = min(500, len(ecg_signal))
-                    if len(ecg_signal) > window_size:
-                        ecg_signal = ecg_signal[-window_size:]
-                        x = x[-window_size:]
-                    # R peak detection
-                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.2 * sampling_rate), prominence=0.6 * np.std(ecg_signal))
-                    # Q and S: local minima before and after R
-                    q_peaks = []
-                    s_peaks = []
-                    for r in r_peaks:
-                        q_start = max(0, r - int(0.06 * sampling_rate))
-                        q_end = r
-                        if q_end > q_start:
-                            q_idx = np.argmin(ecg_signal[q_start:q_end]) + q_start
-                            q_peaks.append(q_idx)
-                        s_start = r
-                        s_end = min(len(ecg_signal), r + int(0.06 * sampling_rate))
-                        if s_end > s_start:
-                            s_idx = np.argmin(ecg_signal[s_start:s_end]) + s_start
-                            s_peaks.append(s_idx)
-                    # P: positive peak before Q (within 0.1-0.2s)
-                    p_peaks = []
-                    for q in q_peaks:
-                        p_start = max(0, q - int(0.2 * sampling_rate))
-                        p_end = q - int(0.08 * sampling_rate)
-                        if p_end > p_start:
-                            p_candidates, _ = find_peaks(ecg_signal[p_start:p_end], prominence=0.1 * np.std(ecg_signal))
-                            if len(p_candidates) > 0:
-                                p_peaks.append(p_start + p_candidates[-1])
-                    # T: positive peak after S (within 0.1-0.4s)
-                    t_peaks = []
-                    for s in s_peaks:
-                        t_start = s + int(0.08 * sampling_rate)
-                        t_end = min(len(ecg_signal), s + int(0.4 * sampling_rate))
-                        if t_end > t_start:
-                            t_candidates, _ = find_peaks(ecg_signal[t_start:t_end], prominence=0.1 * np.std(ecg_signal))
-                            if len(t_candidates) > 0:
-                                t_peaks.append(t_start + t_candidates[np.argmax(ecg_signal[t_start + t_candidates])])
-                    # Only show the most recent peak for each label (if any)
-                    peak_dict = {'P': p_peaks, 'Q': q_peaks, 'R': r_peaks, 'S': s_peaks, 'T': t_peaks}
-                    for label, idxs in peak_dict.items():
-                        if len(idxs) > 0:
-                            idx = idxs[-1]
-                            ax.plot(idx, ecg_signal[idx], 'o', color='green', markersize=8, zorder=10)
-                            y_offset = 0.12 * (np.max(ecg_signal) - np.min(ecg_signal))
-                            if label in ['P', 'T']:
-                                ax.text(idx, ecg_signal[idx]+y_offset, label, color='green', fontsize=12, fontweight='bold', ha='center', va='bottom', zorder=11, bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, boxstyle='round,pad=0.1'))
-                            else:
-                                ax.text(idx, ecg_signal[idx]-y_offset, label, color='green', fontsize=12, fontweight='bold', ha='center', va='top', zorder=11, bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, boxstyle='round,pad=0.1'))
-                # --- Metrics (for Lead II only, based on R peaks) ---
-                if lead == "II":
-                    heart_rate = None
-                    pr_interval = None
-                    qrs_duration = None
-                    qt_interval = None
-                    qtc_interval = None
-                    rr_intervals = None
-
-                    if len(r_peaks) > 1:
-                        rr_intervals = np.diff(r_peaks) / sampling_rate  # in seconds
-                        mean_rr = np.mean(rr_intervals)
-                        if mean_rr > 0:
-                            heart_rate = 60 / mean_rr
-                    if len(p_peaks) > 0 and len(r_peaks) > 0:
-                        pr_interval = (r_peaks[-1] - p_peaks[-1]) * 1000 / sampling_rate  # ms
-                    if len(q_peaks) > 0 and len(s_peaks) > 0:
-                        qrs_duration = (s_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate  # ms
-                    if len(q_peaks) > 0 and len(t_peaks) > 0:
-                        qt_interval = (t_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate  # ms
-                    if qt_interval and heart_rate:
-                        qtc_interval = qt_interval / np.sqrt(60 / heart_rate)  # Bazett's formula
-
-                    # Update ECG metrics labels with calculated values for Lead2 graph
-
-                    if isinstance(pr_interval, (int, float)):
-                        pr_label.setText(f"{int(round(pr_interval))} ms")
-                    else:
-                        pr_label.setText("-- ms")
-
-                    if isinstance(qrs_duration, (int, float)):
-                        qrs_label.setText(f"{int(round(qrs_duration))} ms")
-                    else:
-                        qrs_label.setText("-- ms")
-
-                    if isinstance(qtc_interval, (int, float)) and qtc_interval >= 0:
-                        qtc_label.setText(f"{int(round(qtc_interval))} ms")
-                    else:
-                        qtc_label.setText("-- ms")
-                    
-                    # Calculate QRS axis using Lead I and aVF
-                    lead_I = self.data.get("I", [])
-                    lead_aVF = self.data.get("aVF", [])
-                    qrs_axis = calculate_qrs_axis(lead_I, lead_aVF, r_peaks)
-
-                    # Calculate ST segment using Lead II and r_peaks
-                    lead_ii = self.data.get("II", [])
-                    st_segment = calculate_st_segment(lead_ii, r_peaks, fs=500)
-
-                    if hasattr(self, 'dashboard_callback'):
-                        self.dashboard_callback({
-                            'Heart_Rate': heart_rate,
-                            'PR': pr_interval,
-                            'QRS': qrs_duration,
-                            'QTc': qtc_interval,
-                            'QRS_axis': qrs_axis,
-                            'ST': st_segment
-                        })
-
-                    # --- Arrhythmia detection ---
-                    arrhythmia_result = detect_arrhythmia(heart_rate, qrs_duration, rr_intervals)
-                    arrhythmia_label.setText(arrhythmia_result)
+                # PQRST detection for ALL leads
+                from scipy.signal import find_peaks
+                sampling_rate = 500
+                ecg_signal = centered
+                window_size = min(500, len(ecg_signal))
+                if len(ecg_signal) > window_size:
+                    ecg_signal = ecg_signal[-window_size:]
+                    x = x[-window_size:]
+                
+                # R peak detection - use different parameters for different leads
+                if lead in ["I", "II", "III", "aVR", "aVL", "aVF"]:
+                    # Limb leads - more sensitive detection
+                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.6 * sampling_rate), prominence=0.4 * np.std(ecg_signal))
                 else:
-                    pr_label.setText("-- ms")
-                    qrs_label.setText("-- ms")
-                    qtc_label.setText("-- ms")
-                    arrhythmia_label.setText("--")
+                    # Chest leads - standard detection
+                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.8 * sampling_rate), prominence=0.6 * np.std(ecg_signal))
+                
+                # If no R peaks found, try more sensitive detection
+                if len(r_peaks) == 0:
+                    print(f"[DEBUG] No R peaks found for {lead}, trying more sensitive detection...")
+                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.2 * sampling_rate), prominence=0.1 * np.std(ecg_signal))
+                
+                print(f"[DEBUG] Found {len(r_peaks)} R peaks for {lead}")
+                
+                # Q and S peaks
+                q_peaks = []
+                s_peaks = []
+                for r in r_peaks:
+                    q_start = max(0, r - int(0.06 * sampling_rate))
+                    q_end = r
+                    if q_end > q_start:
+                        q_idx = np.argmin(ecg_signal[q_start:q_end]) + q_start
+                        q_peaks.append(q_idx)
+                    s_start = r
+                    s_end = min(len(ecg_signal), r + int(0.06 * sampling_rate))
+                    if s_end > s_start:
+                        s_idx = np.argmin(ecg_signal[s_start:s_end]) + s_start
+                        s_peaks.append(s_idx)
+                
+                # P peaks - more sensitive detection
+                p_peaks = []
+                for r in r_peaks:
+                    p_start = max(0, r - int(0.25 * sampling_rate))
+                    p_end = r - int(0.05 * sampling_rate)
+                    if p_end > p_start:
+                        # More sensitive P wave detection
+                        p_candidates, _ = find_peaks(ecg_signal[p_start:p_end], prominence=0.05 * np.std(ecg_signal))
+                        if len(p_candidates) > 0:
+                            p_peaks.append(p_start + p_candidates[-1])
+                
+                # T peaks - more sensitive detection
+                t_peaks = []
+                for s in s_peaks:
+                    t_start = s + int(0.05 * sampling_rate)
+                    t_end = min(len(ecg_signal), s + int(0.4 * sampling_rate))
+                    if t_end > t_start:
+                        t_candidates, _ = find_peaks(ecg_signal[t_start:t_end], prominence=0.05 * np.std(ecg_signal))
+                        if len(t_candidates) > 0:
+                            t_peaks.append(t_start + t_candidates[np.argmax(ecg_signal[t_start + t_candidates])])
+                
+                print(f"[DEBUG] PQRST peaks for {lead}: P={len(p_peaks)}, Q={len(q_peaks)}, R={len(r_peaks)}, S={len(s_peaks)}, T={len(t_peaks)}")
+                
+                # Plot PQRST markers for ALL leads
+                peak_dict = {'P': p_peaks, 'Q': q_peaks, 'R': r_peaks, 'S': s_peaks, 'T': t_peaks}
+                colors = {'P': '#ff6b6b', 'Q': '#4ecdc4', 'R': '#45b7d1', 'S': '#96ceb4', 'T': '#feca57'}
+                
+                for label, idxs in peak_dict.items():
+                    if len(idxs) > 0:
+                        idx = idxs[-1]
+                        # Make sure the index is within bounds
+                        if 0 <= idx < len(ecg_signal):
+                            y_offset = 0.2 * (np.max(ecg_signal) - np.min(ecg_signal))
+                            if y_offset == 0:
+                                y_offset = 50  # Default offset if signal is flat
+
+                            ax.plot(idx, ecg_signal[idx], 'o', color=colors[label], 
+                                    markersize=8, markeredgecolor='white', markeredgewidth=2, zorder=10)
+                            
+                            if label in ['P', 'T']:
+                                ax.text(idx, ecg_signal[idx]+y_offset, label, color=colors[label], 
+                                    fontsize=16, fontweight='bold', ha='center', va='bottom', zorder=11,
+                                    bbox=dict(facecolor='white', edgecolor=colors[label], alpha=0.9, 
+                                            boxstyle='round,pad=0.3'))
+                            else:
+                                ax.text(idx, ecg_signal[idx]-y_offset, label, color=colors[label], 
+                                    fontsize=16, fontweight='bold', ha='center', va='top', zorder=11,
+                                    bbox=dict(facecolor='white', edgecolor=colors[label], alpha=0.9, 
+                                            boxstyle='round,pad=0.3'))
+                            print(f"[DEBUG] Plotted {label} at index {idx}, value {ecg_signal[idx]:.2f}")
+
+                # Calculate metrics for ALL leads
+                heart_rate = None
+                pr_interval = None
+                qrs_duration = None
+                qt_interval = None
+                qtc_interval = None
+                rr_intervals = None
+
+                if len(r_peaks) > 1:
+                    rr_intervals = np.diff(r_peaks) / sampling_rate
+                    mean_rr = np.mean(rr_intervals)
+                    if mean_rr > 0:
+                        heart_rate = 60 / mean_rr
+                
+                if len(p_peaks) > 0 and len(r_peaks) > 0:
+                    pr_interval = (r_peaks[-1] - p_peaks[-1]) * 1000 / sampling_rate
+                
+                if len(q_peaks) > 0 and len(s_peaks) > 0:
+                    qrs_duration = (s_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate
+                
+                if len(q_peaks) > 0 and len(t_peaks) > 0:
+                    qt_interval = (t_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate
+                
+                if qt_interval and heart_rate:
+                    qtc_interval = qt_interval / np.sqrt(60 / heart_rate)
+
+                # Update metric labels for ALL leads
+                pr_label.setText(f"{int(round(pr_interval))}" if isinstance(pr_interval, (int, float)) else "--")
+                qrs_label.setText(f"{int(round(qrs_duration))}" if isinstance(qrs_duration, (int, float)) else "--")
+                qtc_label.setText(f"{int(round(qtc_interval))}" if isinstance(qtc_interval, (int, float)) and qtc_interval >= 0 else "--")
+                
+                # Arrhythmia detection for ALL leads
+                arrhythmia_result = detect_arrhythmia(heart_rate, qrs_duration, rr_intervals)
+                arrhythmia_label.setText(arrhythmia_result)
+                
+                # Update dashboard callback ONLY for Lead II
+                if lead == "II" and hasattr(self, 'dashboard_callback'):
+                    self.dashboard_callback({
+                        'Heart_Rate': heart_rate,
+                        'PR': pr_interval,
+                        'QRS': qrs_duration,
+                        'QTc': qtc_interval,
+                        'QRS_axis': calculate_qrs_axis(self.data.get("I", []), self.data.get("aVF", []), r_peaks),
+                        'ST': calculate_st_segment(self.data.get("II", []), r_peaks, fs=500)
+                    })
             else:
                 line.set_data([], [])
                 ax.set_xlim(0, 1)
                 ax.set_ylim(-500, 500)
-                pr_label.setText("-- ms")
-                qrs_label.setText("-- ms")
-                qtc_label.setText("-- ms")
+                pr_label.setText("--")
+                qrs_label.setText("--")
+                qtc_label.setText("--")
+                arrhythmia_label.setText("No Data")
+            
             canvas.draw_idle()
         self._detailed_timer.timeout.connect(update_detailed_plot)
         self._detailed_timer.start(100)
