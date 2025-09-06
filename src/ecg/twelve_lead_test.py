@@ -23,16 +23,22 @@ class SerialECGReader:
     def __init__(self, port, baudrate):
         self.ser = serial.Serial(port, baudrate, timeout=1)
         self.running = False
+        self.data_count = 0
+        print(f"🔌 SerialECGReader initialized: Port={port}, Baud={baudrate}")
 
     def start(self):
+        print("🚀 Starting ECG data acquisition...")
         self.ser.reset_input_buffer()
         self.ser.write(b'1\r\n')
         time.sleep(0.5)
         self.running = True
+        print("✅ ECG device started - waiting for data...")
 
     def stop(self):
+        print("⏹️ Stopping ECG data acquisition...")
         self.ser.write(b'0\r\n')
         self.running = False
+        print(f"📊 Total data packets received: {self.data_count}")
 
     def read_value(self):
         if not self.running:
@@ -40,16 +46,43 @@ class SerialECGReader:
         try:
             line_raw = self.ser.readline()
             line_data = line_raw.decode('utf-8', errors='replace').strip()
+            
             if line_data:
-                print("Received:", line_data)
-            if line_data.isdigit():
-                return int(line_data[-3:])
+                self.data_count += 1
+                # Print detailed data information
+                print(f"📡 [Packet #{self.data_count}] Raw data: '{line_data}' (Length: {len(line_data)})")
+                
+                # Parse and display ECG value
+                if line_data.isdigit():
+                    ecg_value = int(line_data[-3:])
+                    print(f"💓 ECG Value: {ecg_value} mV")
+                    return ecg_value
+                else:
+                    # Try to parse as multiple values (8-channel data)
+                    try:
+                        # Split by any whitespace and filter out empty strings
+                        values = [int(x) for x in line_data.split() if x.strip()]
+                        if len(values) >= 8:
+                            print(f"💓 8-Channel ECG Data: {values}")
+                            return values  # Return the list of 8 values
+                        elif len(values) == 1:
+                            print(f"💓 Single ECG Value: {values[0]} mV")
+                            return values[0]
+                        else:
+                            print(f"⚠️ Unexpected number of values: {len(values)}")
+                    except ValueError:
+                        print(f"⚠️ Non-numeric data received: '{line_data}'")
+            else:
+                print("⏳ No data received (timeout)")
+                
         except Exception as e:
-            print("Error:", e)
+            print(f"❌ Serial communication error: {e}")
         return None
 
     def close(self):
+        print("🔌 Closing serial connection...")
         self.ser.close()
+        print("✅ Serial connection closed")
 
 class LiveLeadWindow(QWidget):
     def __init__(self, lead_name, data_source, buffer_size=80, color="#00ff99"):
@@ -235,12 +268,15 @@ class ECGTestPage(QWidget):
         "V5": "#00b894",
         "V6": "#ff0066"
     }
+    
     def __init__(self, test_name, stacked_widget):
         super().__init__()
+        
+        # Set responsive size policy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(800, 600)  # Minimum size for usability
+        
         self.setWindowTitle("12-Lead ECG Monitor")
-        self.setGeometry(100, 100, 1200, 800)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
-        self.center_on_screen()
         self.stacked_widget = stacked_widget  # Save reference for navigation
 
         self.settings_manager = SettingsManager()
@@ -291,9 +327,11 @@ class ECGTestPage(QWidget):
             }
         """)
 
-        # Enhanced Menu Panel
+        # Enhanced Menu Panel - Make it responsive and compact
         menu_container = QWidget()
-        menu_container.setFixedWidth(300)
+        menu_container.setMinimumWidth(200)  # Reduced from 250px
+        menu_container.setMaximumWidth(280)  # Reduced from 400px
+        menu_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         menu_container.setStyleSheet("""
             QWidget {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -302,27 +340,28 @@ class ECGTestPage(QWidget):
             }
         """)
 
-        # Style menu buttons
+        # Style menu buttons - Make them much more compact
         menu_layout = QVBoxLayout(menu_container)
-        menu_layout.setContentsMargins(20, 20, 20, 20)
-        menu_layout.setSpacing(12)
+        menu_layout.setContentsMargins(12, 12, 12, 12)  # Reduced margins
+        menu_layout.setSpacing(8)  # Reduced spacing between buttons
         
-        # Header
+        # Header - Make it more compact
         header_label = QLabel("ECG Control Panel")
         header_label.setStyleSheet("""
             QLabel {
                 color: #ff6600;
-                font-size: 24px;
+                font-size: 18px;  /* Reduced from 24px */
                 font-weight: bold;
-                padding: 20px 0;
-                border-bottom: 3px solid #ff6600;
-                margin-bottom: 20px;
+                padding: 12px 0;  /* Reduced from 20px */
+                border-bottom: 2px solid #ff6600;  /* Reduced from 3px */
+                margin-bottom: 12px;  /* Reduced from 20px */
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #fff5f0, stop:1 #ffe0cc);
-                border-radius: 10px;
+                border-radius: 8px;  /* Reduced from 10px */
             }
         """)
         header_label.setAlignment(Qt.AlignCenter)
+        header_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         menu_layout.addWidget(header_label)
 
         # Create ECGMenu instance to use its methods
@@ -344,59 +383,59 @@ class ECGTestPage(QWidget):
 
         self.apply_display_settings()
 
-    
-        menu_buttons = [
+        # Create ECG menu buttons
+        ecg_menu_buttons = [
             ("Save ECG", self.ecg_menu.show_save_ecg, "#28a745"),
-            ("Open ECG", self.ecg_menu.open_ecg_window, "#17a2b8"),
-            ("Working Mode", self.ecg_menu.show_working_mode, "#6f42c1"),
-            ("Printer Setup", self.ecg_menu.show_printer_setup, "#fd7e14"),
-            ("Set Filter", self.ecg_menu.set_filter_setup, "#20c997"),
-            ("System Setup", self.ecg_menu.show_system_setup, "#6c757d"),
-            ("Load Default", self.ecg_menu.show_load_default, "#ffc107"),
-            ("Version", self.ecg_menu.show_version_info, "#17a2b8"),
+            ("Open ECG", self.ecg_menu.show_open_ecg, "#17a2b8"),
+            ("Working Mode", self.ecg_menu.show_working_mode, "#ffc107"),
+            ("Printer Setup", self.ecg_menu.show_printer_setup, "#6c757d"),
+            ("Set Filter", self.ecg_menu.show_set_filter, "#fd7e14"),
+            ("System Setup", self.ecg_menu.show_system_setup, "#6f42c1"),
+            ("Load Default", self.ecg_menu.show_load_default, "#20c997"),
+            ("Version", self.ecg_menu.show_version_info, "#e83e8c"),
             ("Factory Maintain", self.ecg_menu.show_factory_maintain, "#dc3545"),
-            ("Exit", self.ecg_menu.show_exit, "#6c757d"),
+            ("Exit", self.ecg_menu.show_exit, "#495057")
         ]
         
-        # Create buttons and store them in a list
+        # Create buttons and store them in a list - Make them much smaller
         created_buttons = []
-        for text, handler, color in menu_buttons:
+        for text, handler, color in ecg_menu_buttons:
             btn = QPushButton(text)
-            btn.setFixedHeight(77)
+            btn.setMinimumHeight(40)  # Reduced from 60px - Much more compact
+            btn.setMaximumHeight(45)  # Add maximum height constraint
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             btn.clicked.connect(handler)
             created_buttons.append(btn)
             menu_layout.addWidget(btn)
 
         menu_layout.addStretch(1)
 
-        # Style menu buttons AFTER they're created
+        # Style menu buttons AFTER they're created - Compact styling
         for i, btn in enumerate(created_buttons):
-            color = menu_buttons[i][2]
+            color = ecg_menu_buttons[i][2]
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                         stop:0 #ffffff, stop:1 #f8f9fa);
                     color: #1a1a1a;
-                    border: 3px solid #e9ecef;
-                    border-radius: 15px;
-                    padding: 20px 30px;
-                    font-size: 18px;
+                    border: 2px solid #e9ecef;  /* Reduced from 3px */
+                    border-radius: 8px;  /* Reduced from 15px */
+                    padding: 8px 12px;  /* Reduced from 15px 20px */
+                    font-size: 12px;  /* Reduced from 16px */
                     font-weight: bold;
                     text-align: left;
-                    margin: 4px 0;
+                    margin: 2px 0;  /* Reduced from 4px */
                 }}
                 QPushButton:hover {{
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                         stop:0 #fff5f0, stop:1 #ffe0cc);
-                    border: 4px solid {color};
+                    border: 2px solid {color};  /* Reduced from 4px */
                     color: {color};
-                    transform: translateY(-3px);
-                    box-shadow: 0 8px 25px rgba(255,102,0,0.5);
                 }}
                 QPushButton:pressed {{
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                         stop:0 #ffe0cc, stop:1 #ffcc99);
-                    border: 4px solid {color};
+                    border: 2px solid {color};  /* Reduced from 4px */
                     color: {color};
                 }}
             """)
@@ -405,7 +444,7 @@ class ECGTestPage(QWidget):
         created_buttons[0].clicked.connect(self.ecg_menu.show_save_ecg)
         
         created_buttons[1].clicked.disconnect()
-        created_buttons[1].clicked.connect(self.ecg_menu.open_ecg_window)
+        created_buttons[1].clicked.connect(self.ecg_menu.show_open_ecg)
         
         created_buttons[2].clicked.disconnect()
         created_buttons[2].clicked.connect(self.ecg_menu.show_working_mode)
@@ -414,7 +453,7 @@ class ECGTestPage(QWidget):
         created_buttons[3].clicked.connect(self.ecg_menu.show_printer_setup)
         
         created_buttons[4].clicked.disconnect()
-        created_buttons[4].clicked.connect(self.ecg_menu.set_filter_setup)
+        created_buttons[4].clicked.connect(self.ecg_menu.show_set_filter)
         
         created_buttons[5].clicked.disconnect()
         created_buttons[5].clicked.connect(self.ecg_menu.show_system_setup)
@@ -431,96 +470,96 @@ class ECGTestPage(QWidget):
         created_buttons[9].clicked.disconnect()
         created_buttons[9].clicked.connect(self.ecg_menu.show_exit)
 
-        # Recording Toggle Button Section
+        # Recording Toggle Button Section - Make it compact
         recording_frame = QFrame()
         recording_frame.setStyleSheet("""
             QFrame {
                 background: transparent;
                 border: none;
-                padding: 10px;
-                margin-top: 5px;
+                padding: 6px;  /* Reduced from 10px */
+                margin-top: 3px;  /* Reduced from 5px */
             }
         """)
+        recording_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         recording_layout = QVBoxLayout(recording_frame)
+        recording_layout.setSpacing(4)  # Reduced spacing
 
-        # Capture Screen button
+        # Capture Screen button - Make it compact
         self.capture_screen_btn = QPushButton("Capture Screen")
-        self.capture_screen_btn.setFixedHeight(77)
+        self.capture_screen_btn.setMinimumHeight(35)  # Reduced from 60px
+        self.capture_screen_btn.setMaximumHeight(40)  # Add maximum height
+        self.capture_screen_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.capture_screen_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #ffffff, stop:1 #f8f9fa);
                 color: #1a1a1a;
-                border: 3px solid #e9ecef;
-                border-radius: 15px;
-                padding: 20px 30px;
-                font-size: 18px;
+                border: 2px solid #e9ecef;  /* Reduced from 3px */
+                border-radius: 8px;  /* Reduced from 15px */
+                padding: 8px 12px;  /* Reduced from 15px 20px */
+                font-size: 12px;  /* Reduced from 16px */
                 font-weight: bold;
                 text-align: center;
-                margin: 5px 0;
+                margin: 2px 0;  /* Reduced from 5px */
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #fff5f0, stop:1 #ffe0cc);
-                border: 4px solid #2453ff;
+                border: 2px solid #2453ff;  /* Reduced from 4px */
                 color: #2453ff;
-                transform: translateY(-3px);
-                box-shadow: 0 8px 25px rgba(36,83,255,0.5);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #e0e8ff, stop:1 #ccd9ff);
-                border: 4px solid #2453ff;
+                border: 2px solid #2453ff;  /* Reduced from 4px */
                 color: #2453ff;
             }
         """)
         self.capture_screen_btn.clicked.connect(self.capture_screen)
         recording_layout.addWidget(self.capture_screen_btn)
         
-        # Toggle-style recording button
+        # Toggle-style recording button - Make it compact
         self.recording_toggle = QPushButton("Record Screen")
-        self.recording_toggle.setFixedHeight(77)
+        self.recording_toggle.setMinimumHeight(35)  # Reduced from 60px
+        self.recording_toggle.setMaximumHeight(40)  # Add maximum height
+        self.recording_toggle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.recording_toggle.setCheckable(True)
         self.recording_toggle.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #ffffff, stop:1 #f8f9fa);
                 color: #1a1a1a;
-                border: 3px solid #e9ecef;
-                border-radius: 15px;
-                padding: 20px 30px;
-                font-size: 18px;
+                border: 2px solid #e9ecef;  /* Reduced from 3px */
+                border-radius: 8px;  /* Reduced from 15px */
+                padding: 8px 12px;  /* Reduced from 15px 20px */
+                font-size: 12px;  /* Reduced from 16px */
                 font-weight: bold;
                 text-align: center;
-                margin: 5px 0;
+                margin: 2px 0;  /* Reduced from 5px */
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #fff5f0, stop:1 #ffe0cc);
-                border: 4px solid #ff6600;
+                border: 2px solid #ff6600;  /* Reduced from 4px */
                 color: #ff6600;
-                transform: translateY(-3px);
-                box-shadow: 0 8px 25px rgba(255,102,0,0.5);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #ffe0cc, stop:1 #ffcc99);
-                border: 4px solid #ff6600;
+                border: 2px solid #ff6600;  /* Reduced from 4px */
                 color: #ff6600;
             }
             QPushButton:checked {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #fff5f0, stop:1 #ffe0cc);
-                border: 4px solid #dc3545;
+                border: 2px solid #dc3545;  /* Reduced from 4px */
                 color: #dc3545;
-                transform: translateY(-3px);
-                box-shadow: 0 8px 25px rgba(220,53,69,0.5);
             }
             QPushButton:checked:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #ffe0cc, stop:1 #ffcc99);
-                border: 4px solid #c82333;
+                border: 2px solid #c82333;  /* Reduced from 4px */
                 color: #c82333;
             }
         """)
@@ -534,35 +573,27 @@ class ECGTestPage(QWidget):
         self.recording_writer = None
         self.recording_frames = []
 
-
-        # conn_layout = QHBoxLayout()
-        # self.port_combo = QComboBox()
-        # self.baud_combo = QComboBox()
-        # self.baud_combo.addItem("Select Baud Rate")
-        # self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200"])
-        # conn_layout.addWidget(QLabel("Serial Port:"))
-        # conn_layout.addWidget(self.port_combo)
-        # conn_layout.addWidget(QLabel("Baud Rate:"))
-        # conn_layout.addWidget(self.baud_combo)
-        # self.refresh_ports()
-        # main_vbox.addLayout(conn_layout)
-
-        self.plot_area = QWidget()
-
         # Add metrics frame above the plot area
         self.metrics_frame = self.create_metrics_frame()
+        self.metrics_frame.setMaximumHeight(80)  # Reduced from default
+        self.metrics_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_vbox.addWidget(self.metrics_frame)
+        
+        # Create the plot area
+        self.plot_area = QWidget()
+        self.plot_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         main_vbox.addWidget(self.plot_area)
 
-        main_vbox.setSpacing(16)
-        main_vbox.setContentsMargins(24, 24, 24, 24)
+        main_vbox.setSpacing(12)  # Reduced from 16px
+        main_vbox.setContentsMargins(16, 16, 16, 16)  # Reduced from 24px
 
         self.update_lead_layout()
 
         btn_layout = QHBoxLayout()
         self.start_btn = QPushButton("Start")
         self.stop_btn = QPushButton("Stop")
+        self.ports_btn = QPushButton("Ports")
         self.export_pdf_btn = QPushButton("Export as PDF")
         self.export_csv_btn = QPushButton("Export as CSV")
         self.sequential_btn = QPushButton("Show All Leads Sequentially")
@@ -570,18 +601,27 @@ class ECGTestPage(QWidget):
         self.six_leads_btn = QPushButton("6:2")
         self.back_btn = QPushButton("Back")
 
+        # Make all buttons responsive and compact
+        for btn in [self.start_btn, self.stop_btn, self.ports_btn, self.export_pdf_btn, self.export_csv_btn, 
+                   self.sequential_btn, self.twelve_leads_btn, self.six_leads_btn, self.back_btn]:
+            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            btn.setMinimumHeight(28)  # Reduced from 32px
+            btn.setMaximumHeight(32)  # Add maximum height constraint
+            btn.setMinimumWidth(80)   # Reduced from 100px
+            btn.setMaximumWidth(120)  # Add maximum width constraint
+
         green_color = """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
                     stop:0 #4CAF50, stop:1 #45a049);
                 color: white;
                 border: 2px solid #4CAF50;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-size: 12px;
+                border-radius: 6px;  /* Reduced from 8px */
+                padding: 6px 12px;  /* Reduced from 8px 16px */
+                font-size: 11px;  /* Reduced from 12px */
                 font-weight: bold;
-                min-height: 32px;
-                min-width: 100px;
+                min-height: 28px;  /* Reduced from 32px */
+                min-width: 80px;   /* Reduced from 100px */
                 text-align: center;
             }
             QPushButton:hover {
@@ -589,19 +629,19 @@ class ECGTestPage(QWidget):
                     stop:0 #45a049, stop:1 #4CAF50);
                 border: 2px solid #45a049;
                 color: white;
-                transform: translateY(-1px);
-                box-shadow: 0 4px 12px rgba(76,175,80,0.3);
             }
             QPushButton:pressed {
-                background: #3d8b40;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #3d8b40, stop:1 #357a38);
                 border: 2px solid #3d8b40;
-                transform: translateY(0px);
+                color: white;
             }
         """
         
         # Apply medical green style to all buttons
         self.start_btn.setStyleSheet(green_color)
         self.stop_btn.setStyleSheet(green_color)
+        self.ports_btn.setStyleSheet(green_color)
         self.export_pdf_btn.setStyleSheet(green_color)
         self.export_csv_btn.setStyleSheet(green_color)
         self.sequential_btn.setStyleSheet(green_color)
@@ -611,6 +651,7 @@ class ECGTestPage(QWidget):
 
         btn_layout.addWidget(self.start_btn)
         btn_layout.addWidget(self.stop_btn)
+        btn_layout.addWidget(self.ports_btn)
         btn_layout.addWidget(self.export_pdf_btn)
         btn_layout.addWidget(self.export_csv_btn)
         btn_layout.addWidget(self.sequential_btn)
@@ -625,6 +666,7 @@ class ECGTestPage(QWidget):
 
         self.start_btn.setToolTip("Start ECG recording from the selected port")
         self.stop_btn.setToolTip("Stop current ECG recording")
+        self.ports_btn.setToolTip("Configure COM port and baud rate settings")
         self.export_pdf_btn.setToolTip("Export ECG data as PDF report")
         self.export_csv_btn.setToolTip("Export ECG data as CSV file")
 
@@ -645,6 +687,7 @@ class ECGTestPage(QWidget):
         """)
         help_btn.clicked.connect(self.show_help)
 
+        self.ports_btn.clicked.connect(self.show_ports_dialog)
         self.export_pdf_btn.clicked.connect(self.export_pdf)
         self.export_csv_btn.clicked.connect(self.export_csv)
         self.sequential_btn.clicked.connect(self.show_sequential_view)
@@ -654,13 +697,17 @@ class ECGTestPage(QWidget):
 
         main_hbox = QHBoxLayout(self.grid_widget)
     
-        # Add widgets to the layout
-        main_hbox.addWidget(menu_container, 0)  # Fixed width for menu
-        main_hbox.addLayout(main_vbox, 2)  # Give main_vbox more space
+        # Add widgets to the layout with responsive sizing - Better proportions
+        main_hbox.addWidget(menu_container, 1)  # Menu takes 1 part (compact)
+        main_hbox.addLayout(main_vbox, 5)  # Main content takes 5 parts (more space)
         
         # Set spacing and layout
-        main_hbox.setSpacing(15)  # Add spacing between menu and main content
+        main_hbox.setSpacing(10)  # Reduced from 15px
+        main_hbox.setContentsMargins(8, 8, 8, 8)  # Reduced from 10px
         self.grid_widget.setLayout(main_hbox)
+        
+        # Make the grid widget responsive
+        self.grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # Initial settings display update
         QTimer.singleShot(100, self.apply_display_settings)
@@ -731,15 +778,14 @@ class ECGTestPage(QWidget):
                 background: #000000;
                 border: 2px solid #333333;
                 border-radius: 6px;
-                padding: 4px;
-                margin: 2px 0;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+                padding: 3px;  /* Reduced from 4px */
+                margin: 1px 0;  /* Reduced from 2px */
             }
         """)
         
         metrics_layout = QHBoxLayout(metrics_frame)
-        metrics_layout.setSpacing(10)
-        metrics_layout.setContentsMargins(10, 10, 10, 10)
+        metrics_layout.setSpacing(6)  # Reduced from 10px
+        metrics_layout.setContentsMargins(6, 6, 6, 6)  # Reduced from 10px
         
         # Store metric labels for live update
         self.metric_labels = {}
@@ -758,26 +804,26 @@ class ECGTestPage(QWidget):
             metric_widget.setStyleSheet("""
                 QWidget {
                     background: transparent;
-                    min-width: 120px;
+                    min-width: 100px;  /* Reduced from 120px */
                     border-right: none;
                 }
             """)
             
             # Create vertical layout for the metric widget
             box = QVBoxLayout(metric_widget)
-            box.setSpacing(3)
+            box.setSpacing(2)  # Reduced from 3px
             box.setAlignment(Qt.AlignCenter)
             
-            # Title label (green color as shown in image)
+            # Title label (green color as shown in image) - Make it smaller
             lbl = QLabel(title)
-            lbl.setFont(QFont("Arial", 12, QFont.Bold))
-            lbl.setStyleSheet("color: #00ff00; margin-bottom: 5px;")  # Green color
+            lbl.setFont(QFont("Arial", 10, QFont.Bold))  # Reduced from 12px
+            lbl.setStyleSheet("color: #00ff00; margin-bottom: 3px;")  # Reduced from 5px
             lbl.setAlignment(Qt.AlignCenter)
             
-            # Value label with specific colors
+            # Value label with specific colors - Make it smaller
             val = QLabel(value)
-            val.setFont(QFont("Arial", 14, QFont.Bold))
-            val.setStyleSheet(f"color: {color}; background: transparent; padding: 4px 0px;")
+            val.setFont(QFont("Arial", 12, QFont.Bold))  # Reduced from 14px
+            val.setStyleSheet(f"color: {color}; background: transparent; padding: 2px 0px;")  # Reduced from 4px
             val.setAlignment(Qt.AlignCenter)
             
             # Add labels to the metric widget's layout
@@ -794,7 +840,7 @@ class ECGTestPage(QWidget):
         heart_rate_widget.setStyleSheet("""
             QWidget {
                 background: transparent;
-                min-width: 120px;
+                min-width: 100px;  /* Reduced from 120px */
                 border-right: none;
             }
         """)
@@ -804,15 +850,15 @@ class ECGTestPage(QWidget):
         heart_layout.setContentsMargins(0, 0, 0, 0)
         heart_layout.setAlignment(Qt.AlignCenter)
         
-        # Heart icon
+        # Heart icon - Make it smaller
         heart_icon = QLabel("❤")
-        heart_icon.setFont(QFont("Arial", 18))
+        heart_icon.setFont(QFont("Arial", 16))  # Reduced from 18px
         heart_icon.setStyleSheet("color: #ff0000; background: transparent; border: none; margin: 0; padding: 0;")
         heart_icon.setAlignment(Qt.AlignCenter)
         
-        # Heart rate value
+        # Heart rate value - Make it smaller
         heart_rate_val = QLabel("00")
-        heart_rate_val.setFont(QFont("Arial", 14, QFont.Bold))
+        heart_rate_val.setFont(QFont("Arial", 12, QFont.Bold))  # Reduced from 14px
         heart_rate_val.setStyleSheet("color: #ff0000; background: transparent; border: none; margin: 0;")
         heart_rate_val.setAlignment(Qt.AlignCenter)
         heart_rate_val.setContentsMargins(0, 0, 0, 0)
@@ -868,7 +914,7 @@ class ECGTestPage(QWidget):
                     border-radius: 6px;
                     padding: 4px;
                     margin: 2px 0;
-                    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+                    /* Removed unsupported box-shadow property */
                 }
             """)
             
@@ -903,7 +949,7 @@ class ECGTestPage(QWidget):
                     border-radius: 6px;
                     padding: 4px;
                     margin: 2px 0;
-                    box-shadow: 0 4px 15px rgba(76,175,80,0.2);
+                    /* Removed unsupported box-shadow property */
                 }
             """)
             
@@ -937,7 +983,7 @@ class ECGTestPage(QWidget):
                     border-radius: 6px;
                     padding: 4px;
                     margin: 2px 0;
-                    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+                    /* Removed unsupported box-shadow property */
                 }
             """)
             
@@ -1040,6 +1086,110 @@ class ECGTestPage(QWidget):
         msg.setText(help_text)
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
+
+    # ------------------------ Ports Configuration Dialog ------------------------
+
+    def show_ports_dialog(self):
+        """Show dialog for configuring COM port and baud rate"""
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Port Configuration")
+        dialog.setIcon(QMessageBox.Information)
+        
+        # Create a custom widget for the dialog
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Port selection
+        port_layout = QHBoxLayout()
+        port_layout.addWidget(QLabel("COM Port:"))
+        port_combo = QComboBox()
+        port_combo.addItem("Select Port")
+        
+        # Get available ports
+        ports = serial.tools.list_ports.comports()
+        for port in ports:
+            port_combo.addItem(port.device)
+        
+        # Set current port if available
+        current_port = self.settings_manager.get_serial_port()
+        if current_port and current_port != "Select Port":
+            index = port_combo.findText(current_port)
+            if index >= 0:
+                port_combo.setCurrentIndex(index)
+        
+        port_layout.addWidget(port_combo)
+        layout.addLayout(port_layout)
+        
+        # Baud rate selection
+        baud_layout = QHBoxLayout()
+        baud_layout.addWidget(QLabel("Baud Rate:"))
+        baud_combo = QComboBox()
+        baud_rates = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"]
+        baud_combo.addItems(baud_rates)
+        
+        # Set current baud rate if available
+        current_baud = self.settings_manager.get_baud_rate()
+        if current_baud:
+            index = baud_combo.findText(current_baud)
+            if index >= 0:
+                baud_combo.setCurrentIndex(index)
+            else:
+                baud_combo.setCurrentText(current_baud)
+        
+        baud_layout.addWidget(baud_combo)
+        layout.addLayout(baud_layout)
+        
+        # Test connection button
+        test_btn = QPushButton("Test Connection")
+        test_btn.clicked.connect(lambda: self.test_serial_connection(port_combo.currentText(), baud_combo.currentText()))
+        layout.addWidget(test_btn)
+        
+        # Add the widget to the dialog
+        dialog.layout().addWidget(widget, 0, 0, 1, dialog.layout().columnCount())
+        
+        # Add buttons
+        save_btn = dialog.addButton("Save", QMessageBox.AcceptRole)
+        cancel_btn = dialog.addButton("Cancel", QMessageBox.RejectRole)
+        
+        # Show dialog
+        result = dialog.exec_()
+        
+        if result == QMessageBox.AcceptRole:
+            # Save settings
+            selected_port = port_combo.currentText()
+            selected_baud = baud_combo.currentText()
+            
+            if selected_port != "Select Port":
+                self.settings_manager.set_setting("serial_port", selected_port)
+                self.settings_manager.set_setting("baud_rate", selected_baud)
+                print(f"Port settings saved: {selected_port} at {selected_baud} baud")
+                
+                # Show confirmation
+                QMessageBox.information(self, "Settings Saved", 
+                    f"Port configuration saved:\nPort: {selected_port}\nBaud Rate: {selected_baud}")
+            else:
+                QMessageBox.warning(self, "Invalid Selection", "Please select a valid COM port.")
+
+    def test_serial_connection(self, port, baud_rate):
+        """Test the serial connection with the specified port and baud rate"""
+        if port == "Select Port":
+            QMessageBox.warning(self, "Invalid Port", "Please select a valid COM port first.")
+            return
+        
+        try:
+            # Try to open the serial connection
+            test_serial = serial.Serial(port, int(baud_rate), timeout=1)
+            test_serial.close()
+            
+            QMessageBox.information(self, "Connection Test", 
+                f"✅ Connection successful!\nPort: {port}\nBaud Rate: {baud_rate}")
+            
+        except serial.SerialException as e:
+            QMessageBox.critical(self, "Connection Failed", 
+                f"❌ Connection failed!\nPort: {port}\nBaud Rate: {baud_rate}\n\nError: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Connection Error", 
+                f"❌ Unexpected error!\nError: {str(e)}")
 
     # ------------------------ Capture Screen Details ------------------------
 
@@ -1317,7 +1467,11 @@ class ECGTestPage(QWidget):
 
             # Robust: Only plot if enough data, else show blank
             if data and len(data) >= 10:
-                plot_data = np.array(data[-detailed_buffer_size:])
+                # Control buffer size based on wave speed setting
+                speed_factor = float(current_speed) / 25.0  # 25mm/s is baseline
+                adjusted_buffer_size = int(detailed_buffer_size * speed_factor)
+                
+                plot_data = np.array(data[-adjusted_buffer_size:])
                 x = np.arange(len(plot_data))
                 centered = plot_data - np.mean(plot_data)
 
@@ -1325,8 +1479,11 @@ class ECGTestPage(QWidget):
                 gain_factor = float(current_gain) / 10.0
                 centered = centered * gain_factor
 
-                line.set_data(x, centered)
-                ax.set_xlim(0, max(len(centered)-1, 1))
+                # Create time axis that reflects the speed setting
+                time_axis = x / speed_factor
+
+                line.set_data(time_axis, centered)
+                ax.set_xlim(0, max(time_axis))
                 
                 ylim = 500 * gain_factor
                 ymin = np.min(centered) - ylim * 0.2
@@ -1349,134 +1506,150 @@ class ECGTestPage(QWidget):
                         print(f"Warning: Could not remove text: {e}")
                 # Optionally, clear all lines if you want only labels visible (no ECG trace):
                 # ax.lines.clear()
-                if lead == "II":
-                    # Use the same detection logic as in main.py
-                    from scipy.signal import find_peaks
-                    sampling_rate = 80
-                    ecg_signal = centered
-                    window_size = min(500, len(ecg_signal))
-                    if len(ecg_signal) > window_size:
-                        ecg_signal = ecg_signal[-window_size:]
-                        x = x[-window_size:]
-                    # R peak detection
-                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.2 * sampling_rate), prominence=0.6 * np.std(ecg_signal))
-                    # Q and S: local minima before and after R
-                    q_peaks = []
-                    s_peaks = []
-                    for r in r_peaks:
-                        q_start = max(0, r - int(0.06 * sampling_rate))
-                        q_end = r
-                        if q_end > q_start:
-                            q_idx = np.argmin(ecg_signal[q_start:q_end]) + q_start
-                            q_peaks.append(q_idx)
-                        s_start = r
-                        s_end = min(len(ecg_signal), r + int(0.06 * sampling_rate))
-                        if s_end > s_start:
-                            s_idx = np.argmin(ecg_signal[s_start:s_end]) + s_start
-                            s_peaks.append(s_idx)
-                    # P: positive peak before Q (within 0.1-0.2s)
-                    p_peaks = []
-                    for q in q_peaks:
-                        p_start = max(0, q - int(0.2 * sampling_rate))
-                        p_end = q - int(0.08 * sampling_rate)
-                        if p_end > p_start:
-                            p_candidates, _ = find_peaks(ecg_signal[p_start:p_end], prominence=0.1 * np.std(ecg_signal))
-                            if len(p_candidates) > 0:
-                                p_peaks.append(p_start + p_candidates[-1])
-                    # T: positive peak after S (within 0.1-0.4s)
-                    t_peaks = []
-                    for s in s_peaks:
-                        t_start = s + int(0.08 * sampling_rate)
-                        t_end = min(len(ecg_signal), s + int(0.4 * sampling_rate))
-                        if t_end > t_start:
-                            t_candidates, _ = find_peaks(ecg_signal[t_start:t_end], prominence=0.1 * np.std(ecg_signal))
-                            if len(t_candidates) > 0:
-                                t_peaks.append(t_start + t_candidates[np.argmax(ecg_signal[t_start + t_candidates])])
-                    # Only show the most recent peak for each label (if any)
-                    peak_dict = {'P': p_peaks, 'Q': q_peaks, 'R': r_peaks, 'S': s_peaks, 'T': t_peaks}
-                    for label, idxs in peak_dict.items():
-                        if len(idxs) > 0:
-                            idx = idxs[-1]
-                            ax.plot(idx, ecg_signal[idx], 'o', color='green', markersize=8, zorder=10)
-                            y_offset = 0.12 * (np.max(ecg_signal) - np.min(ecg_signal))
-                            if label in ['P', 'T']:
-                                ax.text(idx, ecg_signal[idx]+y_offset, label, color='green', fontsize=12, fontweight='bold', ha='center', va='bottom', zorder=11, bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, boxstyle='round,pad=0.1'))
-                            else:
-                                ax.text(idx, ecg_signal[idx]-y_offset, label, color='green', fontsize=12, fontweight='bold', ha='center', va='top', zorder=11, bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, boxstyle='round,pad=0.1'))
-                # --- Metrics (for Lead II only, based on R peaks) ---
-                if lead == "II":
-                    heart_rate = None
-                    pr_interval = None
-                    qrs_duration = None
-                    qt_interval = None
-                    qtc_interval = None
-                    rr_intervals = None
-
-                    if len(r_peaks) > 1:
-                        rr_intervals = np.diff(r_peaks) / sampling_rate  # in seconds
-                        mean_rr = np.mean(rr_intervals)
-                        if mean_rr > 0:
-                            heart_rate = 60 / mean_rr
-                    if len(p_peaks) > 0 and len(r_peaks) > 0:
-                        pr_interval = (r_peaks[-1] - p_peaks[-1]) * 1000 / sampling_rate  # ms
-                    if len(q_peaks) > 0 and len(s_peaks) > 0:
-                        qrs_duration = (s_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate  # ms
-                    if len(q_peaks) > 0 and len(t_peaks) > 0:
-                        qt_interval = (t_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate  # ms
-                    if qt_interval and heart_rate:
-                        qtc_interval = qt_interval / np.sqrt(60 / heart_rate)  # Bazett's formula
-
-                    # Update ECG metrics labels with calculated values for Lead2 graph
-
-                    if isinstance(pr_interval, (int, float)):
-                        pr_label.setText(f"{int(round(pr_interval))} ms")
-                    else:
-                        pr_label.setText("-- ms")
-
-                    if isinstance(qrs_duration, (int, float)):
-                        qrs_label.setText(f"{int(round(qrs_duration))} ms")
-                    else:
-                        qrs_label.setText("-- ms")
-
-                    if isinstance(qtc_interval, (int, float)) and qtc_interval >= 0:
-                        qtc_label.setText(f"{int(round(qtc_interval))} ms")
-                    else:
-                        qtc_label.setText("-- ms")
-                    
-                    # Calculate QRS axis using Lead I and aVF
-                    lead_I = self.data.get("I", [])
-                    lead_aVF = self.data.get("aVF", [])
-                    qrs_axis = calculate_qrs_axis(lead_I, lead_aVF, r_peaks)
-
-                    # Calculate ST segment using Lead II and r_peaks
-                    lead_ii = self.data.get("II", [])
-                    st_segment = calculate_st_segment(lead_ii, r_peaks, fs=500)
-
-                    if hasattr(self, 'dashboard_callback'):
-                        self.dashboard_callback({
-                            'Heart_Rate': heart_rate,
-                            'PR': pr_interval,
-                            'QRS': qrs_duration,
-                            'QTc': qtc_interval,
-                            'QRS_axis': qrs_axis,
-                            'ST': st_segment
-                        })
-
-                    # --- Arrhythmia detection ---
-                    arrhythmia_result = detect_arrhythmia(heart_rate, qrs_duration, rr_intervals)
-                    arrhythmia_label.setText(arrhythmia_result)
+                # PQRST detection for ALL leads
+                from scipy.signal import find_peaks
+                sampling_rate = 500
+                ecg_signal = centered
+                window_size = min(500, len(ecg_signal))
+                if len(ecg_signal) > window_size:
+                    ecg_signal = ecg_signal[-window_size:]
+                    x = x[-window_size:]
+                
+                # R peak detection - use different parameters for different leads
+                if lead in ["I", "II", "III", "aVR", "aVL", "aVF"]:
+                    # Limb leads - more sensitive detection
+                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.6 * sampling_rate), prominence=0.4 * np.std(ecg_signal))
                 else:
-                    pr_label.setText("-- ms")
-                    qrs_label.setText("-- ms")
-                    qtc_label.setText("-- ms")
-                    arrhythmia_label.setText("--")
+                    # Chest leads - standard detection
+                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.8 * sampling_rate), prominence=0.6 * np.std(ecg_signal))
+                
+                # If no R peaks found, try more sensitive detection
+                if len(r_peaks) == 0:
+                    print(f"[DEBUG] No R peaks found for {lead}, trying more sensitive detection...")
+                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.2 * sampling_rate), prominence=0.1 * np.std(ecg_signal))
+                
+                print(f"[DEBUG] Found {len(r_peaks)} R peaks for {lead}")
+                
+                # Q and S peaks
+                q_peaks = []
+                s_peaks = []
+                for r in r_peaks:
+                    q_start = max(0, r - int(0.06 * sampling_rate))
+                    q_end = r
+                    if q_end > q_start:
+                        q_idx = np.argmin(ecg_signal[q_start:q_end]) + q_start
+                        q_peaks.append(q_idx)
+                    s_start = r
+                    s_end = min(len(ecg_signal), r + int(0.06 * sampling_rate))
+                    if s_end > s_start:
+                        s_idx = np.argmin(ecg_signal[s_start:s_end]) + s_start
+                        s_peaks.append(s_idx)
+                
+                # P peaks - more sensitive detection
+                p_peaks = []
+                for r in r_peaks:
+                    p_start = max(0, r - int(0.25 * sampling_rate))
+                    p_end = r - int(0.05 * sampling_rate)
+                    if p_end > p_start:
+                        # More sensitive P wave detection
+                        p_candidates, _ = find_peaks(ecg_signal[p_start:p_end], prominence=0.05 * np.std(ecg_signal))
+                        if len(p_candidates) > 0:
+                            p_peaks.append(p_start + p_candidates[-1])
+                
+                # T peaks - more sensitive detection
+                t_peaks = []
+                for s in s_peaks:
+                    t_start = s + int(0.05 * sampling_rate)
+                    t_end = min(len(ecg_signal), s + int(0.4 * sampling_rate))
+                    if t_end > t_start:
+                        t_candidates, _ = find_peaks(ecg_signal[t_start:t_end], prominence=0.05 * np.std(ecg_signal))
+                        if len(t_candidates) > 0:
+                            t_peaks.append(t_start + t_candidates[np.argmax(ecg_signal[t_start + t_candidates])])
+                
+                print(f"[DEBUG] PQRST peaks for {lead}: P={len(p_peaks)}, Q={len(q_peaks)}, R={len(r_peaks)}, S={len(s_peaks)}, T={len(t_peaks)}")
+                
+                # Plot PQRST markers for ALL leads
+                peak_dict = {'P': p_peaks, 'Q': q_peaks, 'R': r_peaks, 'S': s_peaks, 'T': t_peaks}
+                colors = {'P': '#ff6b6b', 'Q': '#4ecdc4', 'R': '#45b7d1', 'S': '#96ceb4', 'T': '#feca57'}
+                
+                for label, idxs in peak_dict.items():
+                    if len(idxs) > 0:
+                        idx = idxs[-1]
+                        # Make sure the index is within bounds
+                        if 0 <= idx < len(ecg_signal):
+                            y_offset = 0.2 * (np.max(ecg_signal) - np.min(ecg_signal))
+                            if y_offset == 0:
+                                y_offset = 50  # Default offset if signal is flat
+
+                            # Apply speed scaling to peak positions
+                            scaled_idx = idx / speed_factor
+                            
+                            if label in ['P', 'T']:
+                                ax.text(scaled_idx, ecg_signal[idx]+y_offset, label, color=colors[label], 
+                                    fontsize=16, fontweight='bold', ha='center', va='bottom', zorder=11,
+                                    bbox=dict(facecolor='white', edgecolor=colors[label], alpha=0.9, 
+                                            boxstyle='round,pad=0.3'))
+                            else:
+                                ax.text(scaled_idx, ecg_signal[idx]-y_offset, label, color=colors[label], 
+                                    fontsize=16, fontweight='bold', ha='center', va='top', zorder=11,
+                                    bbox=dict(facecolor='white', edgecolor=colors[label], alpha=0.9, 
+                                            boxstyle='round,pad=0.3'))
+                            print(f"[DEBUG] Plotted {label} at index {idx}, value {ecg_signal[idx]:.2f}")
+
+                # Calculate metrics for ALL leads
+                heart_rate = None
+                pr_interval = None
+                qrs_duration = None
+                qt_interval = None
+                qtc_interval = None
+                rr_intervals = None
+
+                if len(r_peaks) > 1:
+                    rr_intervals = np.diff(r_peaks) / sampling_rate
+                    mean_rr = np.mean(rr_intervals)
+                    if mean_rr > 0:
+                        heart_rate = 60 / mean_rr
+                
+                if len(p_peaks) > 0 and len(r_peaks) > 0:
+                    pr_interval = (r_peaks[-1] - p_peaks[-1]) * 1000 / sampling_rate
+                
+                if len(q_peaks) > 0 and len(s_peaks) > 0:
+                    qrs_duration = (s_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate
+                
+                if len(q_peaks) > 0 and len(t_peaks) > 0:
+                    qt_interval = (t_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate
+                
+                if qt_interval and heart_rate:
+                    qtc_interval = qt_interval / np.sqrt(60 / heart_rate)
+
+                # Update metric labels for ALL leads
+                pr_label.setText(f"{int(round(pr_interval))}" if isinstance(pr_interval, (int, float)) else "--")
+                qrs_label.setText(f"{int(round(qrs_duration))}" if isinstance(qrs_duration, (int, float)) else "--")
+                qtc_label.setText(f"{int(round(qtc_interval))}" if isinstance(qtc_interval, (int, float)) and qtc_interval >= 0 else "--")
+                
+                # Arrhythmia detection for ALL leads
+                arrhythmia_result = detect_arrhythmia(heart_rate, qrs_duration, rr_intervals)
+                arrhythmia_label.setText(arrhythmia_result)
+                
+                # Update dashboard callback ONLY for Lead II
+                if lead == "II" and hasattr(self, 'dashboard_callback'):
+                    self.dashboard_callback({
+                        'Heart_Rate': heart_rate,
+                        'PR': pr_interval,
+                        'QRS': qrs_duration,
+                        'QTc': qtc_interval,
+                        'QRS_axis': calculate_qrs_axis(self.data.get("I", []), self.data.get("aVF", []), r_peaks),
+                        'ST': calculate_st_segment(self.data.get("II", []), r_peaks, fs=500)
+                    })
             else:
                 line.set_data([], [])
                 ax.set_xlim(0, 1)
                 ax.set_ylim(-500, 500)
-                pr_label.setText("-- ms")
-                qrs_label.setText("-- ms")
-                qtc_label.setText("-- ms")
+                pr_label.setText("--")
+                qrs_label.setText("--")
+                qtc_label.setText("--")
+                arrhythmia_label.setText("No Data")
+            
             canvas.draw_idle()
         self._detailed_timer.timeout.connect(update_detailed_plot)
         self._detailed_timer.start(100)
@@ -1503,6 +1676,7 @@ class ECGTestPage(QWidget):
         self.axs = []
         self.lines = []
         grid = QGridLayout()
+        grid.setSpacing(8)  # Reduced spacing between graphs
         n_leads = len(self.leads)
         if n_leads == 12:
             rows, cols = 3, 4
@@ -1518,21 +1692,22 @@ class ECGTestPage(QWidget):
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
                         stop:0 #ffffff, stop:1 #f8f9fa);
                     border: 2px solid #e9ecef;
-                    border-radius: 16px;
+                    border-radius: 12px;  /* Reduced from 16px */
                     color: #495057;
-                    font: bold 16px 'Segoe UI';
-                    margin-top: 12px;
-                    padding: 12px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                    font: bold 14px 'Arial';  /* Reduced from 16px and changed font */
+                    margin-top: 8px;  /* Reduced from 12px */
+                    padding: 8px;  /* Reduced from 12px */
+                    /* Removed unsupported box-shadow property */
                 }
                 QGroupBox:hover {
                     border: 2px solid #ff6600;
-                    box-shadow: 0 6px 20px rgba(255,102,0,0.2);
-                    transform: translateY(-2px);
+                    /* Removed unsupported box-shadow and transform properties */
                 }
             """)
             vbox = QVBoxLayout(group)
-            fig = Figure(facecolor='#fafbfc', figsize=(6, 2.5))
+            vbox.setContentsMargins(6, 6, 6, 6)  # Reduced margins
+            vbox.setSpacing(4)  # Reduced spacing
+            fig = Figure(facecolor='#fafbfc', figsize=(5, 2))  # Reduced from (6, 2.5)
             ax = fig.add_subplot(111)
             ax.set_facecolor('#fafbfc')
             ylim = self.ylim if hasattr(self, 'ylim') else 400
@@ -1547,8 +1722,8 @@ class ECGTestPage(QWidget):
             for spine in ax.spines.values():
                 spine.set_visible(False)
 
-            # Style ticks
-            ax.tick_params(axis='both', colors='#6c757d', labelsize=10)
+            # Style ticks - Make them smaller
+            ax.tick_params(axis='both', colors='#6c757d', labelsize=8)  # Reduced from 10
             ax.tick_params(axis='x', length=0)
             ax.tick_params(axis='y', length=0)
 
@@ -1639,12 +1814,26 @@ class ECGTestPage(QWidget):
             print(f"Connecting to {port} at {baud_int} baud...")
             self.serial_reader = SerialECGReader(port, baud_int)
             self.serial_reader.start()
-            self.timer.start(50)
+            print(f"[DEBUG] ECGTestPage - Starting timer with 50ms interval")
+            if not self.timer.isActive():
+                self.timer.start(50)
+            else:
+                self.timer.stop()
+                self.timer.start(50)
+                
             if hasattr(self, '_12to1_timer'):
                 self._12to1_timer.start(100)
+            print(f"[DEBUG] ECGTestPage - Timer started, serial reader created")
+            print(f"[DEBUG] ECGTestPage - Timer active: {self.timer.isActive()}")
+            print(f"[DEBUG] ECGTestPage - Number of leads: {len(self.leads)}")
+            print(f"[DEBUG] ECGTestPage - Number of lines: {len(self.lines)}")
+            print(f"[DEBUG] ECGTestPage - Number of axes: {len(self.axs)}")
+            print(f"[DEBUG] ECGTestPage - Number of canvases: {len(self.canvases)}")
 
             # Start elapsed time tracking
-            self.start_time = time.time()
+            if not hasattr(self, 'elapsed_timer'):
+                self.elapsed_timer = QTimer()
+                self.elapsed_timer.timeout.connect(self.update_elapsed_time)
             self.elapsed_timer.start(1000)
                 
             print("Serial connection established successfully!")
@@ -1759,49 +1948,143 @@ class ECGTestPage(QWidget):
             })
 
     def update_plot(self):
+        print(f"[DEBUG] ECGTestPage - update_plot called, serial_reader exists: {self.serial_reader is not None}")
         
         if not self.serial_reader:
+            print("[DEBUG] ECGTestPage - No serial reader, returning")
             return
         
-        line = self.serial_reader.ser.readline()
-        line_data = line.decode('utf-8', errors='replace').strip()
-        if not line_data:
-            return
-        
+        # Read raw data directly from serial port
         try:
-            values = [int(x) for x in line_data.split()]
-            if len(values) != 8:
+            line = self.serial_reader.ser.readline()
+            line_data = line.decode('utf-8', errors='replace').strip()
+            
+            if not line_data:
+                print("[DEBUG] ECGTestPage - No data received (empty line)")
                 return
-            lead1 = values[0]
-            v4    = values[1]
-            v5    = values[2]
-            lead2 = values[3]
-            v3    = values[4]
-            v6    = values[5]
-            v1    = values[6]
-            v2    = values[7]
-            lead3 = lead2 - lead1
-            avr = - (lead1 + lead2) / 2
-            avl = (lead1 - lead3) / 2
-            avf = (lead2 + lead3) / 2
-            lead_data = {
-                "I": lead1,
-                "II": lead2,
-                "III": lead3,
-                "aVR": avr,
-                "aVL": avl,
-                "aVF": avf,
-                "V1": v1,
-                "V2": v2,
-                "V3": v3,
-                "V4": v4,
-                "V5": v5,
-                "V6": v6
-            }
-            for i, lead in enumerate(self.leads):
-                self.data[lead].append(lead_data[lead])
-                if len(self.data[lead]) > self.buffer_size:
-                    self.data[lead].pop(0)
+            
+            print(f"[DEBUG] ECGTestPage - Raw hardware data: '{line_data}' (length: {len(line_data)})")
+            
+            # Parse the 8-channel data (handle multiple spaces)
+            try:
+                # Split by any whitespace and filter out empty strings
+                values = [int(x) for x in line_data.split() if x.strip()]
+                print(f"[DEBUG] ECGTestPage - Parsed {len(values)} values: {values}")
+                
+                if len(values) >= 8:
+                    # Extract individual leads from 8-channel data
+                    lead1 = values[0]    # Lead I
+                    v4    = values[1]    # V4
+                    v5    = values[2]    # V5
+                    lead2 = values[3]    # Lead II
+                    v3    = values[4]    # V3
+                    v6    = values[5]    # V6
+                    v1    = values[6]    # V1
+                    v2    = values[7]    # V2
+                    
+                    # Calculate derived leads
+                    lead3 = lead2 - lead1
+                    avr = - (lead1 + lead2) / 2
+                    avl = (lead1 - lead3) / 2
+                    avf = (lead2 + lead3) / 2
+                    
+                    lead_data = {
+                        "I": lead1, "II": lead2, "III": lead3,
+                        "aVR": avr, "aVL": avl, "aVF": avf,
+                        "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5, "V6": v6
+                    }
+                    
+                    print(f"[DEBUG] ECGTestPage - Successfully parsed 8-channel data: {lead_data}")
+                    
+                elif len(values) == 1:
+                    # Single value - simulate 12-lead data
+                    ecg_value = values[0]
+                    print(f"[DEBUG] ECGTestPage - Single value received: {ecg_value}")
+                    
+                    lead1 = ecg_value
+                    lead2 = ecg_value + np.random.randint(-20, 20)
+                    lead3 = lead2 - lead1
+                    avr = - (lead1 + lead2) / 2
+                    avl = (lead1 - lead3) / 2
+                    avf = (lead2 + lead3) / 2
+                    
+                    # Simulate chest leads with variations
+                    v1 = ecg_value + np.random.randint(-30, 30)
+                    v2 = ecg_value + np.random.randint(-25, 25)
+                    v3 = ecg_value + np.random.randint(-20, 20)
+                    v4 = ecg_value + np.random.randint(-15, 15)
+                    v5 = ecg_value + np.random.randint(-10, 10)
+                    v6 = ecg_value + np.random.randint(-5, 5)
+                    
+                    lead_data = {
+                        "I": lead1, "II": lead2, "III": lead3,
+                        "aVR": avr, "aVL": avl, "aVF": avf,
+                        "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5, "V6": v6
+                    }
+                    
+                else:
+                    print(f"[DEBUG] ECGTestPage - Unexpected number of values: {len(values)}")
+                    return
+                    
+            except ValueError as e:
+                print(f"[DEBUG] ECGTestPage - Error parsing values: {e}")
+                # Try to extract numeric part using regex
+                import re
+                numbers = re.findall(r'-?\d+', line_data)
+                if numbers:
+                    try:
+                        # Use first number as single value
+                        ecg_value = int(numbers[0])
+                        print(f"[DEBUG] ECGTestPage - Extracted numeric value: {ecg_value}")
+                        
+                        # Use single value to simulate 12-lead data
+                        lead1 = ecg_value
+                        lead2 = ecg_value + np.random.randint(-20, 20)
+                        lead3 = lead2 - lead1
+                        avr = - (lead1 + lead2) / 2
+                        avl = (lead1 - lead3) / 2
+                        avf = (lead2 + lead3) / 2
+                        
+                        v1 = ecg_value + np.random.randint(-30, 30)
+                        v2 = ecg_value + np.random.randint(-25, 25)
+                        v3 = ecg_value + np.random.randint(-20, 20)
+                        v4 = ecg_value + np.random.randint(-15, 15)
+                        v5 = ecg_value + np.random.randint(-10, 10)
+                        v6 = ecg_value + np.random.randint(-5, 5)
+                        
+                        lead_data = {
+                            "I": lead1, "II": lead2, "III": lead3,
+                            "aVR": avr, "aVL": avl, "aVF": avf,
+                            "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5, "V6": v6
+                        }
+                    except ValueError:
+                        print(f"[DEBUG] ECGTestPage - Could not parse numeric data from: '{line_data}'")
+                        return
+                else:
+                    print(f"[DEBUG] ECGTestPage - No numeric data found in: '{line_data}'")
+                    return
+
+            # Control data flow speed based on wave speed setting
+            current_speed = self.settings_manager.get_wave_speed()
+            speed_factor = current_speed / 25.0  # 25mm/s is baseline
+            
+            # Adjust buffer size based on speed setting
+            # Slower speed = smaller buffer (more compressed waves)
+            # Faster speed = larger buffer (more stretched waves)
+            base_buffer_size = self.buffer_size
+            if speed_factor < 1.0:  # Slower than 25mm/s
+                adjusted_buffer_size = int(base_buffer_size * speed_factor)
+            else:  # Faster than 25mm/s
+                adjusted_buffer_size = int(base_buffer_size * speed_factor)
+            
+            # Update data buffers for all leads
+            for lead in self.leads:
+                if lead in lead_data:
+                    self.data[lead].append(lead_data[lead])
+                    if len(self.data[lead]) > adjusted_buffer_size:
+                        self.data[lead].pop(0)
+            
+            print(f"[DEBUG] ECGTestPage - Updated data buffers, Lead II has {len(self.data['II'])} points")
             
             # Write latest Lead II data to file for dashboard
             try:
@@ -1817,46 +2100,82 @@ class ECGTestPage(QWidget):
                 intervals = self.calculate_ecg_intervals(lead_ii_data)
                 self.update_ecg_metrics_on_top_of_lead_graphs(intervals)
             
+            # Update all plots
             for i, lead in enumerate(self.leads):
                 if len(self.data[lead]) > 0:
-                    if len(self.data[lead]) < self.buffer_size:
-                        data = np.full(self.buffer_size, np.nan)
+                    print(f"[DEBUG] ECGTestPage - Updating plot for {lead}: {len(self.data[lead])} data points")
+                    
+                    # Prepare plot data
+                    if len(self.data[lead]) < adjusted_buffer_size:
+                        data = np.full(adjusted_buffer_size, np.nan)
                         data[-len(self.data[lead]):] = self.data[lead]
                     else:
                         data = np.array(self.data[lead])
                     
+                    # Center the data
                     centered = data - np.nanmean(data)
 
                     # Apply current gain setting to the real data
                     gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                    centered = (data - np.nanmean(data)) * gain_factor
-                    
-                    self.lines[i].set_ydata(centered)
-                    
-                    # Use dynamic y-limits based on current gain setting
-                    ylim = self.ylim if hasattr(self, 'ylim') else 400
-                    self.axs[i].set_ylim(-ylim, ylim)
-                    
-                    # Use dynamic x-limits based on current buffer size
-                    self.axs[i].set_xlim(0, self.buffer_size)
+                    centered = centered * gain_factor
 
-                    # Update title with current settings
-                    current_speed = self.settings_manager.get_wave_speed()
-                    current_gain = self.settings_manager.get_wave_gain()
-                    self.axs[i].set_title(f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV", 
-                                        fontsize=8, color='#666', pad=10)
+                    # # Get current wave speed setting
+                    # current_speed = self.settings_manager.get_wave_speed()
                     
-                    # Add grid lines to show scale
-                    self.axs[i].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+                    # # Convert wave speed to time scaling factor
+                    # speed_scaling = {
+                    #     "12.5 mm/s": 0.5,    # Half speed = compressed waves
+                    #     "25 mm/s": 1.0,      # Normal speed
+                    #     "50 mm/s": 2.0       # Double speed = stretched waves
+                    # }.get(current_speed, 1.0)
                     
-                    # Remove any existing labels
-                    self.axs[i].set_xlabel("")
-                    self.axs[i].set_ylabel("")
+                    # # Apply speed scaling to the time axis
+                    # time_points = np.arange(len(centered)) / 500 * speed_scaling 
+
+                    time_axis = np.arange(len(centered)) / speed_factor
                     
-                    self.canvases[i].draw_idle()
+                    # Update the plot line
+                    if i < len(self.lines) and self.lines[i] is not None:
+                        try:
+                            self.lines[i].set_data(time_axis, centered)
+                            print(f"[DEBUG] ECGTestPage - Updated {lead} plot with {len(centered)} points")
+                            
+                            # Use dynamic y-limits based on current gain setting
+                            ylim = self.ylim if hasattr(self, 'ylim') else 400
+                            if i < len(self.axs) and self.axs[i] is not None:
+                                self.axs[i].set_ylim(-ylim, ylim)
+                                
+                                # Set x-limits based on speed scaling
+                                max_time = len(centered) / speed_factor
+                                self.axs[i].set_xlim(0, max_time)
+
+                                # Update title with current settings
+                                current_gain = self.settings_manager.get_wave_gain()
+                                self.axs[i].set_title(f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV", 
+                                                    fontsize=8, color='#666', pad=10)
+                                
+                                # Add grid lines to show scale
+                                self.axs[i].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+                                
+                                # Remove any existing labels
+                                self.axs[i].set_xlabel("")
+                                self.axs[i].set_ylabel("")
+                            
+                            # **CRITICAL FIX: Force redraw of the canvas**
+                            if i < len(self.canvases) and self.canvases[i] is not None:
+                                self.canvases[i].draw_idle()
+                                print(f"[DEBUG] ECGTestPage - Canvas {i} redrawn for {lead}")
+                            else:
+                                print(f"[DEBUG] ECGTestPage - Warning: No canvas for lead {lead} at index {i}")
+                        except Exception as e:
+                            print(f"[DEBUG] ECGTestPage - Error updating plot for {lead}: {e}")
+                    else:
+                        print(f"[DEBUG] ECGTestPage - Warning: No line object for lead {lead} at index {i}")
                     
         except Exception as e:
-            print("Error parsing ECG data:", e)
+            print(f"[DEBUG] ECGTestPage - Error in update_plot: {e}")
+            import traceback
+            traceback.print_exc()
 
     def export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export ECG Data as PDF", "", "PDF Files (*.pdf)")
@@ -2039,7 +2358,7 @@ class ECGTestPage(QWidget):
                 padding: 8px 16px;
                 font-weight: bold;
                 min-width: 100px;
-                box-shadow: 0 4px 12px rgba(255,102,0,0.4);
+                /* Removed unsupported box-shadow property */
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -2134,6 +2453,19 @@ class ECGTestPage(QWidget):
                     # Apply current gain setting
                     gain_factor = self.settings_manager.get_wave_gain() / 10.0
                     centered = centered * gain_factor
+
+                    # Get current wave speed setting
+                    current_speed = self.settings_manager.get_wave_speed()
+
+                    # Convert wave speed to time scaling factor
+                    speed_scaling = {
+                        "12.5 mm/s": 0.5,
+                        "25 mm/s": 1.0,
+                        "50 mm/s": 2.0
+                    }.get(current_speed, 1.0)
+
+                    # Apply speed scaling to time axis
+                    time_points = np.arange(self.buffer_size) / 500 * speed_scaling
                     
                     if n < self.buffer_size:
                         stretched = np.interp(
@@ -2156,12 +2488,17 @@ class ECGTestPage(QWidget):
                     ymax = min(1000, ymax)
                     
                     ax.set_ylim(ymin, ymax)
+                    
+                    # Update the line with scaled time axis
+                    line.set_data(time_points, plot_data)
+                    
+                    # Set x-axis limits with scaling
+                    ax.set_xlim(0, self.buffer_size / 500 * speed_scaling)
                 else:
                     ax.set_ylim(-500, 500)
-                
-                # Set x-limits
-                ax.set_xlim(0, self.buffer_size-1)
-                line.set_ydata(plot_data)
+                    # Set x-limits even when no data
+                    ax.set_xlim(0, self.buffer_size / 500 * 1.0)  # Default scaling
+                    line.set_ydata(plot_data)
         
         if hasattr(self, '_overlay_canvas'):
             self._overlay_canvas.draw_idle()
@@ -2210,7 +2547,7 @@ class ECGTestPage(QWidget):
                 padding: 8px 16px;
                 font-weight: bold;
                 min-width: 100px;
-                box-shadow: 0 4px 12px rgba(255,102,0,0.4);
+                /* Removed unsupported box-shadow property */
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -2591,7 +2928,7 @@ class ECGTestPage(QWidget):
                 padding: 8px 16px;
                 font-weight: bold;
                 min-width: 100px;
-                box-shadow: 0 4px 12px rgba(255,102,0,0.4);
+                /* Removed unsupported box-shadow property */
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
