@@ -1467,7 +1467,11 @@ class ECGTestPage(QWidget):
 
             # Robust: Only plot if enough data, else show blank
             if data and len(data) >= 10:
-                plot_data = np.array(data[-detailed_buffer_size:])
+                # Control buffer size based on wave speed setting
+                speed_factor = float(current_speed) / 25.0  # 25mm/s is baseline
+                adjusted_buffer_size = int(detailed_buffer_size * speed_factor)
+                
+                plot_data = np.array(data[-adjusted_buffer_size:])
                 x = np.arange(len(plot_data))
                 centered = plot_data - np.mean(plot_data)
 
@@ -1475,8 +1479,11 @@ class ECGTestPage(QWidget):
                 gain_factor = float(current_gain) / 10.0
                 centered = centered * gain_factor
 
-                line.set_data(x, centered)
-                ax.set_xlim(0, max(len(centered)-1, 1))
+                # Create time axis that reflects the speed setting
+                time_axis = x / speed_factor
+
+                line.set_data(time_axis, centered)
+                ax.set_xlim(0, max(time_axis))
                 
                 ylim = 500 * gain_factor
                 ymin = np.min(centered) - ylim * 0.2
@@ -1574,16 +1581,16 @@ class ECGTestPage(QWidget):
                             if y_offset == 0:
                                 y_offset = 50  # Default offset if signal is flat
 
-                            ax.plot(idx, ecg_signal[idx], 'o', color=colors[label], 
-                                    markersize=8, markeredgecolor='white', markeredgewidth=2, zorder=10)
+                            # Apply speed scaling to peak positions
+                            scaled_idx = idx / speed_factor
                             
                             if label in ['P', 'T']:
-                                ax.text(idx, ecg_signal[idx]+y_offset, label, color=colors[label], 
+                                ax.text(scaled_idx, ecg_signal[idx]+y_offset, label, color=colors[label], 
                                     fontsize=16, fontweight='bold', ha='center', va='bottom', zorder=11,
                                     bbox=dict(facecolor='white', edgecolor=colors[label], alpha=0.9, 
                                             boxstyle='round,pad=0.3'))
                             else:
-                                ax.text(idx, ecg_signal[idx]-y_offset, label, color=colors[label], 
+                                ax.text(scaled_idx, ecg_signal[idx]-y_offset, label, color=colors[label], 
                                     fontsize=16, fontweight='bold', ha='center', va='top', zorder=11,
                                     bbox=dict(facecolor='white', edgecolor=colors[label], alpha=0.9, 
                                             boxstyle='round,pad=0.3'))
@@ -1808,7 +1815,12 @@ class ECGTestPage(QWidget):
             self.serial_reader = SerialECGReader(port, baud_int)
             self.serial_reader.start()
             print(f"[DEBUG] ECGTestPage - Starting timer with 50ms interval")
-            self.timer.start(50)
+            if not self.timer.isActive():
+                self.timer.start(50)
+            else:
+                self.timer.stop()
+                self.timer.start(50)
+                
             if hasattr(self, '_12to1_timer'):
                 self._12to1_timer.start(100)
             print(f"[DEBUG] ECGTestPage - Timer started, serial reader created")
@@ -1819,7 +1831,9 @@ class ECGTestPage(QWidget):
             print(f"[DEBUG] ECGTestPage - Number of canvases: {len(self.canvases)}")
 
             # Start elapsed time tracking
-            self.start_time = time.time()
+            if not hasattr(self, 'elapsed_timer'):
+                self.elapsed_timer = QTimer()
+                self.elapsed_timer.timeout.connect(self.update_elapsed_time)
             self.elapsed_timer.start(1000)
                 
             print("Serial connection established successfully!")
@@ -2049,12 +2063,25 @@ class ECGTestPage(QWidget):
                 else:
                     print(f"[DEBUG] ECGTestPage - No numeric data found in: '{line_data}'")
                     return
+
+            # Control data flow speed based on wave speed setting
+            current_speed = self.settings_manager.get_wave_speed()
+            speed_factor = current_speed / 25.0  # 25mm/s is baseline
+            
+            # Adjust buffer size based on speed setting
+            # Slower speed = smaller buffer (more compressed waves)
+            # Faster speed = larger buffer (more stretched waves)
+            base_buffer_size = self.buffer_size
+            if speed_factor < 1.0:  # Slower than 25mm/s
+                adjusted_buffer_size = int(base_buffer_size * speed_factor)
+            else:  # Faster than 25mm/s
+                adjusted_buffer_size = int(base_buffer_size * speed_factor)
             
             # Update data buffers for all leads
             for lead in self.leads:
                 if lead in lead_data:
                     self.data[lead].append(lead_data[lead])
-                    if len(self.data[lead]) > self.buffer_size:
+                    if len(self.data[lead]) > adjusted_buffer_size:
                         self.data[lead].pop(0)
             
             print(f"[DEBUG] ECGTestPage - Updated data buffers, Lead II has {len(self.data['II'])} points")
@@ -2079,8 +2106,8 @@ class ECGTestPage(QWidget):
                     print(f"[DEBUG] ECGTestPage - Updating plot for {lead}: {len(self.data[lead])} data points")
                     
                     # Prepare plot data
-                    if len(self.data[lead]) < self.buffer_size:
-                        data = np.full(self.buffer_size, np.nan)
+                    if len(self.data[lead]) < adjusted_buffer_size:
+                        data = np.full(adjusted_buffer_size, np.nan)
                         data[-len(self.data[lead]):] = self.data[lead]
                     else:
                         data = np.array(self.data[lead])
@@ -2091,36 +2118,57 @@ class ECGTestPage(QWidget):
                     # Apply current gain setting to the real data
                     gain_factor = self.settings_manager.get_wave_gain() / 10.0
                     centered = centered * gain_factor
+
+                    # # Get current wave speed setting
+                    # current_speed = self.settings_manager.get_wave_speed()
+                    
+                    # # Convert wave speed to time scaling factor
+                    # speed_scaling = {
+                    #     "12.5 mm/s": 0.5,    # Half speed = compressed waves
+                    #     "25 mm/s": 1.0,      # Normal speed
+                    #     "50 mm/s": 2.0       # Double speed = stretched waves
+                    # }.get(current_speed, 1.0)
+                    
+                    # # Apply speed scaling to the time axis
+                    # time_points = np.arange(len(centered)) / 500 * speed_scaling 
+
+                    time_axis = np.arange(len(centered)) / speed_factor
                     
                     # Update the plot line
-                    if i < len(self.lines):
-                        self.lines[i].set_ydata(centered)
-                        print(f"[DEBUG] ECGTestPage - Updated {lead} plot with {len(centered)} points, range: {np.min(centered):.2f} to {np.max(centered):.2f}")
-                        
-                        # Use dynamic y-limits based on current gain setting
-                        ylim = self.ylim if hasattr(self, 'ylim') else 400
-                        if i < len(self.axs):
-                            self.axs[i].set_ylim(-ylim, ylim)
+                    if i < len(self.lines) and self.lines[i] is not None:
+                        try:
+                            self.lines[i].set_data(time_axis, centered)
+                            print(f"[DEBUG] ECGTestPage - Updated {lead} plot with {len(centered)} points")
                             
-                            # Use dynamic x-limits based on current buffer size
-                            self.axs[i].set_xlim(0, self.buffer_size)
+                            # Use dynamic y-limits based on current gain setting
+                            ylim = self.ylim if hasattr(self, 'ylim') else 400
+                            if i < len(self.axs) and self.axs[i] is not None:
+                                self.axs[i].set_ylim(-ylim, ylim)
+                                
+                                # Set x-limits based on speed scaling
+                                max_time = len(centered) / speed_factor
+                                self.axs[i].set_xlim(0, max_time)
 
-                            # Update title with current settings
-                            current_speed = self.settings_manager.get_wave_speed()
-                            current_gain = self.settings_manager.get_wave_gain()
-                            self.axs[i].set_title(f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV", 
-                                                fontsize=8, color='#666', pad=10)
+                                # Update title with current settings
+                                current_gain = self.settings_manager.get_wave_gain()
+                                self.axs[i].set_title(f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV", 
+                                                    fontsize=8, color='#666', pad=10)
+                                
+                                # Add grid lines to show scale
+                                self.axs[i].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+                                
+                                # Remove any existing labels
+                                self.axs[i].set_xlabel("")
+                                self.axs[i].set_ylabel("")
                             
-                            # Add grid lines to show scale
-                            self.axs[i].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-                            
-                            # Remove any existing labels
-                            self.axs[i].set_xlabel("")
-                            self.axs[i].set_ylabel("")
-                        
-                        # Force redraw of the canvas
-                        if i < len(self.canvases):
-                            self.canvases[i].draw_idle()
+                            # **CRITICAL FIX: Force redraw of the canvas**
+                            if i < len(self.canvases) and self.canvases[i] is not None:
+                                self.canvases[i].draw_idle()
+                                print(f"[DEBUG] ECGTestPage - Canvas {i} redrawn for {lead}")
+                            else:
+                                print(f"[DEBUG] ECGTestPage - Warning: No canvas for lead {lead} at index {i}")
+                        except Exception as e:
+                            print(f"[DEBUG] ECGTestPage - Error updating plot for {lead}: {e}")
                     else:
                         print(f"[DEBUG] ECGTestPage - Warning: No line object for lead {lead} at index {i}")
                     
@@ -2405,6 +2453,19 @@ class ECGTestPage(QWidget):
                     # Apply current gain setting
                     gain_factor = self.settings_manager.get_wave_gain() / 10.0
                     centered = centered * gain_factor
+
+                    # Get current wave speed setting
+                    current_speed = self.settings_manager.get_wave_speed()
+
+                    # Convert wave speed to time scaling factor
+                    speed_scaling = {
+                        "12.5 mm/s": 0.5,
+                        "25 mm/s": 1.0,
+                        "50 mm/s": 2.0
+                    }.get(current_speed, 1.0)
+
+                    # Apply speed scaling to time axis
+                    time_points = np.arange(self.buffer_size) / 500 * speed_scaling
                     
                     if n < self.buffer_size:
                         stretched = np.interp(
@@ -2427,12 +2488,17 @@ class ECGTestPage(QWidget):
                     ymax = min(1000, ymax)
                     
                     ax.set_ylim(ymin, ymax)
+                    
+                    # Update the line with scaled time axis
+                    line.set_data(time_points, plot_data)
+                    
+                    # Set x-axis limits with scaling
+                    ax.set_xlim(0, self.buffer_size / 500 * speed_scaling)
                 else:
                     ax.set_ylim(-500, 500)
-                
-                # Set x-limits
-                ax.set_xlim(0, self.buffer_size-1)
-                line.set_ydata(plot_data)
+                    # Set x-limits even when no data
+                    ax.set_xlim(0, self.buffer_size / 500 * 1.0)  # Default scaling
+                    line.set_ydata(plot_data)
         
         if hasattr(self, '_overlay_canvas'):
             self._overlay_canvas.draw_idle()
