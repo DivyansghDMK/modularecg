@@ -53,3 +53,8 @@ users.json
 
 # PyInstaller
 *.spec
+# Build artifacts
+build/
+dist/
+*.pyc
+__pycache__/
