@@ -53,3 +53,13 @@ users.json
 
 # PyInstaller
 *.spec
+# Build artifacts
+build/
+dist/
+*.pyc
+__pycache__/
+
+# Generated files
+ecg_report.html
+lead_ii_live.json
+*.log
