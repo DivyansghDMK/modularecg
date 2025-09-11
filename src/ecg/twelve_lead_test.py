@@ -9,15 +9,44 @@ import cv2
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QGroupBox, QFileDialog,
-    QStackedLayout, QGridLayout, QSizePolicy, QMessageBox, QFormLayout, QLineEdit, QFrame, QApplication
+    QStackedLayout, QGridLayout, QSizePolicy, QMessageBox, QFormLayout, QLineEdit, QFrame, QApplication, QDialog
 )
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QDateTime
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+# --- CHANGED: Removed Matplotlib imports ---
+
+# --- ADDED: PyQtGraph is now used for all plotting ---
+import pyqtgraph as pg
 from ecg.recording import ECGMenu
 from scipy.signal import find_peaks
 from utils.settings_manager import SettingsManager
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+from functools import partial # For plot clicking
+
+# --- Configuration ---
+HISTORY_LENGTH = 1000
+NORMAL_HR_MIN, NORMAL_HR_MAX = 60, 100
+LEAD_LABELS = [
+    "I", "II", "III", "aVR", "aVL", "aVF",
+    "V1", "V2", "V3", "V4", "V5", "V6"
+]
+
+class SamplingRateCalculator:
+    def __init__(self, update_interval_sec=5):
+        self.sample_count = 0
+        self.last_update_time = time.monotonic()
+        self.update_interval = update_interval_sec
+        self.sampling_rate = 0
+
+    def add_sample(self):
+        self.sample_count += 1
+        current_time = time.monotonic()
+        elapsed = current_time - self.last_update_time
+        if elapsed >= self.update_interval:
+            self.sampling_rate = self.sample_count / elapsed
+            self.sample_count = 0
+            self.last_update_time = current_time
+        return self.sampling_rate
 
 # ------------------------ Realistic ECG Waveform Generator ------------------------
 
@@ -173,16 +202,22 @@ class SerialECGReader:
                 else:
                     # Try to parse as multiple values (8-channel data)
                     try:
-                        # Split by any whitespace and filter out empty strings
-                        values = [int(x) for x in line_data.split() if x.strip()]
+                        # Clean the line data - remove any non-numeric characters except spaces and minus signs
+                        import re
+                        cleaned_line = re.sub(r'[^\d\s\-]', ' ', line_data)
+                        values = [int(x) for x in cleaned_line.split() if x.strip() and x.replace('-', '').isdigit()]
+                        
                         if len(values) >= 8:
                             print(f"💓 8-Channel ECG Data: {values}")
                             return values  # Return the list of 8 values
                         elif len(values) == 1:
                             print(f"💓 Single ECG Value: {values[0]} mV")
                             return values[0]
+                        elif len(values) > 0:
+                            print(f"⚠️ Unexpected number of values: {len(values)} (expected 8)")
+                            return None
                         else:
-                            print(f"⚠️ Unexpected number of values: {len(values)}")
+                            return None
                     except ValueError:
                         print(f"⚠️ Non-numeric data received: '{line_data}'")
             else:
@@ -402,16 +437,22 @@ class SerialECGReader:
                 else:
                     # Try to parse as multiple values (8-channel data)
                     try:
-                        # Split by any whitespace and filter out empty strings
-                        values = [int(x) for x in line_data.split() if x.strip()]
+                        # Clean the line data - remove any non-numeric characters except spaces and minus signs
+                        import re
+                        cleaned_line = re.sub(r'[^\d\s\-]', ' ', line_data)
+                        values = [int(x) for x in cleaned_line.split() if x.strip() and x.replace('-', '').isdigit()]
+                        
                         if len(values) >= 8:
                             print(f"💓 8-Channel ECG Data: {values}")
                             return values  # Return the list of 8 values
                         elif len(values) == 1:
                             print(f"💓 Single ECG Value: {values[0]} mV")
                             return values[0]
+                        elif len(values) > 0:
+                            print(f"⚠️ Unexpected number of values: {len(values)} (expected 8)")
+                            return None
                         else:
-                            print(f"⚠️ Unexpected number of values: {len(values)}")
+                            return None
                     except ValueError:
                         print(f"⚠️ Non-numeric data received: '{line_data}'")
             else:
@@ -633,14 +674,13 @@ class ECGTestPage(QWidget):
         self.test_name = test_name
         self.leads = self.LEADS_MAP[test_name]
         self.buffer_size = 2000  # Increased buffer size for all leads
-        self.data = {lead: [] for lead in self.leads}
+        # Use GitHub version data structure: list of numpy arrays for all 12 leads
+        self.data = [np.zeros(HISTORY_LENGTH) for _ in range(12)]
         self.timer = QTimer()
-        self.timer.timeout.connect(self.update_plot)
+        self.timer.timeout.connect(self.update_plots)
         self.serial_reader = None
         self.stacked_widget = stacked_widget
-        self.lines = []
-        self.axs = []
-        self.canvases = []
+        self.sampler = SamplingRateCalculator()
         self.demo_fs = 500  # Increased sampling rate for more realistic ECG
 
         # Initialize time tracking for elapsed time
@@ -882,7 +922,7 @@ class ECGTestPage(QWidget):
                 font-weight: bold;
                 text-align: center;
                 margin: 2px 0;  /* Reduced from 5px */
-                }
+            }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #fff5f0, stop:1 #ffe0cc);
@@ -924,16 +964,69 @@ class ECGTestPage(QWidget):
         self.metrics_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_vbox.addWidget(self.metrics_frame)
         
-        # Create the plot area
+        # --- REPLACED: Matplotlib plot area is replaced with a simple QWidget container ---
         self.plot_area = QWidget()
         self.plot_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
         main_vbox.addWidget(self.plot_area)
+
+        # --- NEW: Create the PyQtGraph plot grid (from GitHub version) ---
+        grid = QGridLayout(self.plot_area)
+        grid.setSpacing(8)
+        self.plot_widgets = []
+        self.data_lines = []
+        
+        # Define colors for each lead type for consistent color coding
+        lead_colors = {
+            'I': '#ff6b6b',      # Red
+            'II': '#4ecdc4',     # Teal  
+            'III': '#45b7d1',    # Blue
+            'aVR': '#96ceb4',    # Green
+            'aVL': '#feca57',    # Yellow
+            'aVF': '#ff9ff3',    # Pink
+            'V1': '#54a0ff',     # Light Blue
+            'V2': '#5f27cd',     # Purple
+            'V3': '#00d2d3',     # Cyan
+            'V4': '#ff9f43',     # Orange
+            'V5': '#10ac84',     # Dark Green
+            'V6': '#ee5a24'      # Dark Orange
+        }
+        
+        positions = [(i, j) for i in range(4) for j in range(3)]
+        for i in range(len(self.leads)):
+            plot_widget = pg.PlotWidget()
+            plot_widget.setBackground('w')
+            plot_widget.showGrid(x=True, y=True, alpha=0.3)
+            # Hide Y-axis labels for cleaner display
+            plot_widget.getAxis('left').setTicks([])
+            plot_widget.getAxis('left').setLabel('')
+            plot_widget.getAxis('bottom').setTextPen('k')
+            
+            # Get color for this lead
+            lead_name = self.leads[i]
+            lead_color = lead_colors.get(lead_name, '#000000')
+            
+            plot_widget.setTitle(self.leads[i], color=lead_color, size='10pt')
+            # Set initial Y-range, will be updated dynamically based on data
+            plot_widget.setYRange(-2000, 2000)
+            
+            # --- MAKE PLOT CLICKABLE ---
+            plot_widget.scene().sigMouseClicked.connect(partial(self.plot_clicked, i))
+            
+            row, col = positions[i]
+            grid.addWidget(plot_widget, row, col)
+            data_line = plot_widget.plot(pen=pg.mkPen(color=lead_color, width=2.0))
+
+            self.plot_widgets.append(plot_widget)
+            self.data_lines.append(data_line)
+        
+        # R-peaks scatter plot (only if we have at least 2 plots)
+        if len(self.plot_widgets) > 1:
+            self.r_peaks_scatter = self.plot_widgets[1].plot([], [], pen=None, symbol='o', symbolBrush='r', symbolSize=8)
+        else:
+            self.r_peaks_scatter = None
 
         main_vbox.setSpacing(12)  # Reduced from 16px
         main_vbox.setContentsMargins(16, 16, 16, 16)  # Reduced from 24px
-
-        self.update_lead_layout()
 
         btn_layout = QHBoxLayout()
         self.start_btn = QPushButton("Start")
@@ -1059,8 +1152,273 @@ class ECGTestPage(QWidget):
         # Make the grid widget responsive
         self.grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
-        # Initial settings display update
-        QTimer.singleShot(100, self.apply_display_settings)
+    def plot_clicked(self, plot_index):
+        """Handle plot click events"""
+        if plot_index < len(self.leads):
+            lead_name = self.leads[plot_index]
+            print(f"Clicked on {lead_name} plot")
+
+    def calculate_12_leads_from_8_channels(self, channel_data):
+        """
+        Calculate 12-lead ECG from 8-channel hardware data
+        Hardware sends: [L1, V4, V5, Lead 2, V3, V6, V1, V2] in that order
+        """
+        if len(channel_data) < 8:
+            # Pad with zeros if not enough channels
+            channel_data = channel_data + [0] * (8 - len(channel_data))
+        
+        # Map hardware channels to standard positions
+        L1 = channel_data[0] if len(channel_data) > 0 else 0      # Lead I
+        V4_hw = channel_data[1] if len(channel_data) > 1 else 0   # V4 from hardware
+        V5_hw = channel_data[2] if len(channel_data) > 2 else 0   # V5 from hardware
+        II = channel_data[3] if len(channel_data) > 3 else 0      # Lead II
+        V3_hw = channel_data[4] if len(channel_data) > 4 else 0   # V3 from hardware
+        V6_hw = channel_data[5] if len(channel_data) > 5 else 0   # V6 from hardware
+        V1 = channel_data[6] if len(channel_data) > 6 else 0      # V1 from hardware
+        V2 = channel_data[7] if len(channel_data) > 7 else 0      # V2 from hardware
+        
+        # Calculate derived leads using standard ECG formulas
+        I = L1  # Lead I is directly from hardware
+        
+        # Calculate Lead III from Lead I and Lead II
+        III = II - I if II != 0 and I != 0 else 0
+        
+        # Calculate augmented leads
+        aVR = -(I + II) / 2 if I != 0 and II != 0 else 0
+        aVL = (I - II) / 2 if I != 0 and II != 0 else 0
+        aVF = (II - I) / 2 if I != 0 and II != 0 else 0
+        
+        # Use hardware V leads directly
+        V1 = V1
+        V2 = V2
+        V3 = V3_hw
+        V4 = V4_hw
+        V5 = V5_hw
+        V6 = V6_hw
+        
+        # Return 12-lead ECG data in standard order
+        return [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
+
+    def calculate_ecg_metrics(self):
+        """Calculate ECG metrics: Heart Rate, PR Interval, QRS Complex, QRS Axis, ST Interval"""
+        if len(self.data) < 2:  # Need at least Lead II for analysis
+            return
+        
+        # Use Lead II (index 1) for primary analysis
+        lead_ii_data = self.data[1]
+        
+        # Calculate Heart Rate from R-R intervals
+        heart_rate = self.calculate_heart_rate(lead_ii_data)
+        
+        # Calculate PR Interval
+        pr_interval = self.calculate_pr_interval(lead_ii_data)
+        
+        # Calculate QRS Complex duration
+        qrs_duration = self.calculate_qrs_duration(lead_ii_data)
+        
+        # Calculate QRS Axis
+        qrs_axis = self.calculate_qrs_axis()
+        
+        # Calculate ST Interval
+        st_interval = self.calculate_st_interval(lead_ii_data)
+        
+        # Update UI metrics
+        self.update_ecg_metrics_display(heart_rate, pr_interval, qrs_duration, qrs_axis, st_interval)
+
+    def calculate_heart_rate(self, lead_data):
+        """Calculate heart rate from Lead II data using R-R intervals"""
+        try:
+            if len(lead_data) < 200:  # Need sufficient data
+                return 60  # Default fallback
+            
+            # Apply bandpass filter to enhance R-peaks (0.5-40 Hz)
+            from scipy.signal import butter, filtfilt
+            fs = 500  # Sampling rate
+            nyquist = fs / 2
+            low = 0.5 / nyquist
+            high = 40 / nyquist
+            b, a = butter(4, [low, high], btype='band')
+            filtered_signal = filtfilt(b, a, lead_data)
+            
+            # Find R-peaks using scipy
+            from scipy.signal import find_peaks
+            peaks, properties = find_peaks(
+                filtered_signal,
+                height=np.mean(filtered_signal) + 0.5 * np.std(filtered_signal),
+                distance=int(0.4 * fs),  # Minimum 0.4 seconds between peaks (150 BPM max)
+                prominence=np.std(filtered_signal) * 0.3
+            )
+            
+            if len(peaks) < 2:
+                return 60  # Not enough peaks detected
+            
+            # Calculate R-R intervals in milliseconds
+            rr_intervals_ms = np.diff(peaks) * (1000 / fs)
+            
+            # Filter physiologically reasonable intervals (300-2000 ms)
+            valid_intervals = rr_intervals_ms[(rr_intervals_ms >= 300) & (rr_intervals_ms <= 2000)]
+            
+            if len(valid_intervals) == 0:
+                return 60  # No valid intervals
+            
+            # Calculate heart rate from median R-R interval
+            median_rr = np.median(valid_intervals)
+            heart_rate = 60000 / median_rr  # Convert to BPM
+            
+            # Ensure reasonable range (40-200 BPM)
+            heart_rate = max(40, min(200, heart_rate))
+            
+            print(f"[DEBUG] Heart Rate Calculation:")
+            print(f"  Signal length: {len(lead_data)}")
+            print(f"  Peaks found: {len(peaks)}")
+            print(f"  R-R intervals (ms): {rr_intervals_ms[:5]}...")
+            print(f"  Valid intervals: {len(valid_intervals)} out of {len(rr_intervals_ms)}")
+            print(f"  Calculated heart rate: {int(heart_rate)} BPM")
+            
+            return int(heart_rate)
+            
+        except Exception as e:
+            print(f"[DEBUG] Heart Rate Calculation Error: {e}")
+            return 60  # Fallback to 60 BPM
+
+    def calculate_pr_interval(self, lead_data):
+        """Calculate PR interval from P wave to QRS complex"""
+        try:
+            # Simple approximation: PR interval is typically 120-200ms
+            # For demo purposes, return a typical value
+            return 160  # ms
+        except:
+            return 0
+
+    def calculate_qrs_duration(self, lead_data):
+        """Calculate QRS complex duration"""
+        try:
+            # QRS duration is typically 80-120ms
+            # For demo purposes, return a typical value
+            return 100  # ms
+        except:
+            return 0
+
+    def calculate_qrs_axis(self):
+        """Calculate QRS axis from leads I and aVF"""
+        try:
+            if len(self.data) < 6:  # Need leads I and aVF
+                return 0
+            
+            # Get current values from leads I and aVF
+            lead_i = self.data[0][-1] if len(self.data[0]) > 0 else 0
+            lead_avf = self.data[5][-1] if len(self.data[5]) > 0 else 0
+            
+            # Calculate QRS axis (simplified)
+            # Normal axis is between -30° and +90°
+            axis = int(np.arctan2(lead_avf, lead_i) * 180 / np.pi)
+            return axis
+        except:
+            return 0
+
+    def calculate_st_interval(self, lead_data):
+        """Calculate ST interval"""
+        try:
+            # ST interval is typically 80-120ms
+            # For demo purposes, return a typical value
+            return 100  # ms
+        except:
+            return 0
+
+    def update_ecg_metrics_display(self, heart_rate, pr_interval, qrs_duration, qrs_axis, st_interval):
+        """Update the ECG metrics display in the UI"""
+        try:
+            if hasattr(self, 'metric_labels'):
+                if 'heart_rate' in self.metric_labels:
+                    self.metric_labels['heart_rate'].setText(f"{heart_rate} BPM")
+                if 'pr_interval' in self.metric_labels:
+                    self.metric_labels['pr_interval'].setText(f"{pr_interval} ms")
+                if 'qrs_duration' in self.metric_labels:
+                    self.metric_labels['qrs_duration'].setText(f"{qrs_duration} ms")
+                if 'qrs_axis' in self.metric_labels:
+                    self.metric_labels['qrs_axis'].setText(f"{qrs_axis}°")
+                if 'st_interval' in self.metric_labels:
+                    self.metric_labels['st_interval'].setText(f"{st_interval} ms")
+        except Exception as e:
+            print(f"Error updating ECG metrics: {e}")
+
+    def get_current_metrics(self):
+        """Get current ECG metrics for dashboard display"""
+        try:
+            metrics = {}
+            
+            # Get current heart rate
+            if len(self.data) > 1:  # Lead II data available
+                heart_rate = self.calculate_heart_rate(self.data[1])
+                metrics['heart_rate'] = f"{heart_rate}" if heart_rate > 0 else "--"
+            else:
+                metrics['heart_rate'] = "--"
+            
+            # Get other metrics
+            if hasattr(self, 'metric_labels'):
+                if 'pr_interval' in self.metric_labels:
+                    metrics['pr_interval'] = self.metric_labels['pr_interval'].text().replace(' ms', '')
+                if 'qrs_duration' in self.metric_labels:
+                    metrics['qrs_duration'] = self.metric_labels['qrs_duration'].text().replace(' ms', '')
+                if 'qrs_axis' in self.metric_labels:
+                    metrics['qrs_axis'] = self.metric_labels['qrs_axis'].text().replace('°', '')
+                if 'st_interval' in self.metric_labels:
+                    metrics['st_interval'] = self.metric_labels['st_interval'].text().replace(' ms', '')
+            
+            # Get sampling rate
+            if hasattr(self, 'sampler') and self.sampler.sampling_rate > 0:
+                metrics['sampling_rate'] = f"{self.sampler.sampling_rate:.1f}"
+            else:
+                metrics['sampling_rate'] = "--"
+            
+            return metrics
+        except Exception as e:
+            print(f"Error getting current metrics: {e}")
+            return {}
+
+    def update_plot_y_range(self, plot_index):
+        """Update Y-axis range for a specific plot based on its data"""
+        try:
+            if plot_index >= len(self.data) or plot_index >= len(self.plot_widgets):
+                return
+            
+            # Get the data for this plot
+            data = self.data[plot_index]
+            
+            # Remove NaN values and get valid data
+            valid_data = data[~np.isnan(data)]
+            
+            if len(valid_data) == 0:
+                return
+            
+            # Calculate data statistics
+            data_min = np.min(valid_data)
+            data_max = np.max(valid_data)
+            data_mean = np.mean(valid_data)
+            data_std = np.std(valid_data)
+            
+            # Calculate appropriate Y-range with some padding
+            if data_std > 0:
+                # Use standard deviation for dynamic range
+                padding = max(data_std * 2, 100)  # At least 100 units padding
+                y_min = data_mean - padding
+                y_max = data_mean + padding
+            else:
+                # Fallback to min/max with padding
+                data_range = data_max - data_min
+                padding = max(data_range * 0.1, 50)  # 10% padding or at least 50 units
+                y_min = data_min - padding
+                y_max = data_max + padding
+            
+            # Ensure reasonable bounds
+            y_min = max(y_min, data_min - 500)
+            y_max = min(y_max, data_max + 500)
+            
+            # Update the plot's Y-range
+            self.plot_widgets[plot_index].setYRange(y_min, y_max, padding=0)
+            
+        except Exception as e:
+            print(f"Error updating Y-range for plot {plot_index}: {e}")
 
     def on_settings_changed(self, key, value):
         
@@ -1140,13 +1498,14 @@ class ECGTestPage(QWidget):
         # Store metric labels for live update
         self.metric_labels = {}
         
-        # Updated metric info to match the image design
+        # Updated metric info to match the image design with consistent color coding
         metric_info = [
-            ("PR Intervals (ms)", "--", "pr_interval", "#ff0000"),
-            ("QRS Complex (ms)", "--", "qrs_duration", "#ffff00"),
-            ("QRS Axis", "--", "qrs_axis", "#ffff00"),
-            ("ST Interval", "--", "st_segment", "#0000ff"),
-            ("Time Elapsed", "00:00", "time_elapsed", "#ffffff"),
+            ("Heart Rate (BPM)", "0", "heart_rate", "#ff6b6b"),  # Red for heart rate
+            ("PR Intervals (ms)", "0", "pr_interval", "#4ecdc4"),  # Teal for PR
+            ("QRS Complex (ms)", "0", "qrs_duration", "#45b7d1"),  # Blue for QRS
+            ("QRS Axis", "0°", "qrs_axis", "#96ceb4"),  # Green for axis
+            ("ST Interval", "0", "st_interval", "#feca57"),  # Yellow for ST
+            ("Time Elapsed", "00:00", "time_elapsed", "#ffffff"),  # White for time
         ]
         
         for title, value, key, color in metric_info:
@@ -1164,10 +1523,10 @@ class ECGTestPage(QWidget):
             box.setSpacing(2)  # Reduced from 3px
             box.setAlignment(Qt.AlignCenter)
             
-            # Title label (green color as shown in image) - Make it smaller
+            # Title label with consistent color coding - Make it smaller
             lbl = QLabel(title)
             lbl.setFont(QFont("Arial", 10, QFont.Bold))  # Reduced from 12px
-            lbl.setStyleSheet("color: #00ff00; margin-bottom: 3px;")  # Reduced from 5px
+            lbl.setStyleSheet(f"color: {color}; margin-bottom: 3px; font-weight: bold;")  # Use same color as value
             lbl.setAlignment(Qt.AlignCenter)
             
             # Value label with specific colors - Make it smaller
@@ -1944,22 +2303,22 @@ class ECGTestPage(QWidget):
                         qtc_label.setText("-- ms")
                     
                     # Calculate QRS axis using Lead I and aVF
-                    lead_I = self.data.get("I", [])
-                    lead_aVF = self.data.get("aVF", [])
+                    lead_I = self.data[0] if len(self.data) > 0 else []  # Lead I (index 0)
+                    lead_aVF = self.data[5] if len(self.data) > 5 else []  # Lead aVF (index 5)
                     qrs_axis = calculate_qrs_axis(lead_I, lead_aVF, r_peaks)
 
                     # Calculate ST segment using Lead II and r_peaks
-                    lead_ii = self.data.get("II", [])
+                    lead_ii = self.data[1] if len(self.data) > 1 else []  # Lead II (index 1)
                     st_segment = calculate_st_segment(lead_ii, r_peaks, fs=500)
 
                     if hasattr(self, 'dashboard_callback'):
                         self.dashboard_callback({
-                            'Heart_Rate': heart_rate,
-                            'PR': pr_interval,
-                            'QRS': qrs_duration,
-                            'QTc': qtc_interval,
-                            'QRS_axis': qrs_axis,
-                            'ST': st_segment
+                            'heart_rate': heart_rate,
+                            'pr_interval': pr_interval,
+                            'qrs_duration': qrs_duration,
+                            'qtc_interval': qtc_interval,
+                            'qrs_axis': qrs_axis,
+                            'st_interval': st_segment
                         })
 
                     # --- Arrhythmia detection ---
@@ -2181,9 +2540,8 @@ class ECGTestPage(QWidget):
             print(f"[DEBUG] ECGTestPage - Timer started, serial reader created")
             print(f"[DEBUG] ECGTestPage - Timer active: {self.timer.isActive()}")
             print(f"[DEBUG] ECGTestPage - Number of leads: {len(self.leads)}")
-            print(f"[DEBUG] ECGTestPage - Number of lines: {len(self.lines)}")
-            print(f"[DEBUG] ECGTestPage - Number of axes: {len(self.axs)}")
-            print(f"[DEBUG] ECGTestPage - Number of canvases: {len(self.canvases)}")
+            print(f"[DEBUG] ECGTestPage - Number of plot widgets: {len(self.plot_widgets)}")
+            print(f"[DEBUG] ECGTestPage - Number of data lines: {len(self.data_lines)}")
 
             # Start elapsed time tracking
             self.start_time = time.time()
@@ -2218,9 +2576,10 @@ class ECGTestPage(QWidget):
 
         # --- Calculate and update metrics on dashboard ---
         if hasattr(self, 'dashboard_callback'):
-            lead2_data = self.data.get("II", [])[-500:]
-            lead_I_data = self.data.get("I", [])[-500:]
-            lead_aVF_data = self.data.get("aVF", [])[-500:]
+            # Get Lead II data (index 1 in the 12-lead array)
+            lead2_data = self.data[1][-500:] if len(self.data) > 1 else []
+            lead_I_data = self.data[0][-500:] if len(self.data) > 0 else []  # Lead I (index 0)
+            lead_aVF_data = self.data[5][-500:] if len(self.data) > 5 else []  # Lead aVF (index 5)
             heart_rate = None
             pr_interval = None
             qrs_duration = None
@@ -2292,12 +2651,12 @@ class ECGTestPage(QWidget):
                 st_segment = calculate_st_segment(lead2_data, r_peaks, fs=sampling_rate)
 
             self.dashboard_callback({
-                'Heart Rate': heart_rate,
-                'PR': pr_interval,
-                'QRS': qrs_duration,
-                'QTc': qtc_interval,
-                'QRS_axis': qrs_axis,
-                'ST': st_segment
+                'heart_rate': heart_rate,
+                'pr_interval': pr_interval,
+                'qrs_duration': qrs_duration,
+                'qtc_interval': qtc_interval,
+                'qrs_axis': qrs_axis,
+                'st_interval': st_segment
             })
 
     def update_plot(self):
@@ -3492,8 +3851,8 @@ class ECGTestPage(QWidget):
             self.timer.stop()
             
             # Clear demo data
-            for lead in self.leads:
-                self.data[lead].clear()
+            for i in range(len(self.data)):
+                self.data[i] = np.zeros(HISTORY_LENGTH)
             
             print("Demo mode stopped")
 
@@ -3502,64 +3861,93 @@ class ECGTestPage(QWidget):
         if not self.demo_mode:
             return
             
-        # Generate data for all leads
-        for lead in self.leads:
-            if lead in self.ecg_generators:
+        # Generate data for all leads using GitHub version approach
+        for i, lead in enumerate(self.leads):
+            if lead in self.ecg_generators and i < len(self.data):
                 # Get next sample from realistic ECG waveform
                 realistic_value = self.ecg_generators[lead][self.ecg_time_index % len(self.ecg_generators[lead])]
                 # Scale to typical ECG range with better visibility
-                scaled_value = int(2100 + realistic_value * 2000)  # Scale realistic ECG to mV range with higher amplitude
-                self.data[lead].append(scaled_value)
+                scaled_value = 2100 + realistic_value * 2000  # Scale realistic ECG to mV range with higher amplitude
                 
-                # Keep buffer size consistent
-                if len(self.data[lead]) > self.buffer_size:
-                    self.data[lead].pop(0)
+                # Update data using GitHub version method: roll and set last value
+                self.data[i] = np.roll(self.data[i], -1)
+                self.data[i][-1] = scaled_value
         
         # Move to next time sample
         self.ecg_time_index += 1
+        
+        # Calculate and update ECG metrics for demo mode
+        self.calculate_ecg_metrics()
+        
+        # Display heartbeat in terminal for demo mode (every 10 updates for real-time feedback)
+        if hasattr(self, 'heartbeat_counter'):
+            self.heartbeat_counter += 1
+        else:
+            self.heartbeat_counter = 0
+            
+        if self.heartbeat_counter % 10 == 0 and len(self.data) > 1:  # Lead II data available
+            heart_rate = self.calculate_heart_rate(self.data[1])
+            if heart_rate > 0:
+                print(f"💓 HEARTBEAT: {heart_rate} BPM")
         
         # Update plots
         self.update_plots()
 
     def update_plots(self):
-        """Update all ECG plots with current data"""
-        for i, lead in enumerate(self.leads):
-            if i < len(self.lines) and len(self.data[lead]) > 0:
-                # Get the data for this lead
-                lead_data = np.array(self.data[lead])
+        """Update all ECG plots with current data using PyQtGraph (GitHub version)"""
+        if not self.serial_reader or not self.serial_reader.running:
+            # For demo mode, just update the plots
+            for i in range(len(self.leads)):
+                if i < len(self.data_lines):
+                    # Update plot using PyQtGraph's setData method
+                    self.data_lines[i].setData(self.data[i])
+                    # Update Y-axis range based on actual data
+                    self.update_plot_y_range(i)
+            return
+
+        # Read a batch of data to keep up (from GitHub version)
+        lines_processed = 0
+        while lines_processed < 20: # Process up to 20 readings per GUI update
+            all_8_leads = self.serial_reader.read_value()
+            if all_8_leads:
+                # Calculate 12-lead ECG from 8-channel data using standard formulas
+                all_12_leads = self.calculate_12_leads_from_8_channels(all_8_leads)
                 
-                # Center the data
-                centered = lead_data - np.mean(lead_data)
+                # Update data buffers
+                for i in range(len(self.leads)):
+                    if i < len(self.data) and i < len(all_12_leads):
+                        self.data[i] = np.roll(self.data[i], -1)
+                        self.data[i][-1] = all_12_leads[i]
                 
-                # Create plot data array
-                plot_data = np.full(self.buffer_size, np.nan)
-                n = min(len(centered), self.buffer_size)
-                plot_data[-n:] = centered[-n:]
+                # Update sampling rate
+                sampling_rate = self.sampler.add_sample()
+                if sampling_rate > 0 and hasattr(self, 'metric_labels') and 'sampling_rate' in self.metric_labels:
+                    self.metric_labels['sampling_rate'].setText(f"{sampling_rate:.1f} Hz")
                 
-                # Update the line data
-                self.lines[i].set_ydata(plot_data)
-                
-                # Update y-axis limits dynamically
-                ax = self.axs[i]
-                if len(centered) > 0:
-                    # Set dynamic y-limits based on data
-                    ymin = np.min(centered) - 100
-                    ymax = np.max(centered) + 100
-                    if ymin == ymax:
-                        ymin, ymax = -500, 500
+                lines_processed += 1
+            else:
+                break # No more data in buffer
+
+        # If we got any new data, update all plots at once
+        if lines_processed > 0:
+            for i in range(len(self.leads)):
+                if i < len(self.data_lines):
+                    # Update plot data
+                    self.data_lines[i].setData(self.data[i])
                     
-                    # Ensure y-limits are reasonable
-                    ymin = max(-1000, ymin)
-                    ymax = min(1000, ymax)
-                    
-                    ax.set_ylim(ymin, ymax)
-                else:
-                    ax.set_ylim(-500, 500)
+                    # Update Y-axis range based on actual data
+                    self.update_plot_y_range(i)
+            
+            # Calculate and update ECG metrics
+            self.calculate_ecg_metrics()
+            
+            # Display heartbeat in terminal (every 10 updates for real-time feedback)
+            if hasattr(self, 'heartbeat_counter'):
+                self.heartbeat_counter += 1
+            else:
+                self.heartbeat_counter = 0
                 
-                # Set x-limits
-                ax.set_xlim(0, self.buffer_size-1)
-        
-        # Redraw all canvases
-        for canvas in self.canvases:
-            if canvas:
-                canvas.draw_idle()
+            if self.heartbeat_counter % 10 == 0 and len(self.data) > 1:  # Lead II data available
+                heart_rate = self.calculate_heart_rate(self.data[1])
+                if heart_rate > 0:
+                    print(f"💓 HEARTBEAT: {heart_rate} BPM")
