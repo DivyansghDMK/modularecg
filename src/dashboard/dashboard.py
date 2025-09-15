@@ -18,14 +18,18 @@ from dashboard.chatbot_dialog import ChatbotDialog
 # Try to import configuration, fallback to defaults if not available
 try:
     import sys
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    # Add the src directory to the path
+    src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    
     try:
         from dashboard_config import get_background_config
+        print("✓ Dashboard configuration loaded successfully")
     except ImportError as e:
         print(f"⚠️ Dashboard config import warning: {e}")
         def get_background_config():
             return {"background": "none", "gif": False}
-    print("✓ Dashboard configuration loaded successfully")
 except ImportError:
     print("⚠ Dashboard configuration not found, using default settings")
     def get_background_config():
@@ -555,46 +559,14 @@ class Dashboard(QWidget):
         self.page_stack.addWidget(self.dashboard_page)
         # --- ECG Test Page ---
         try:
-            # Try different import paths
-            import sys
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            cwd = os.getcwd()
+            # Add the src directory to the path for ECG imports
+            src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if src_dir not in sys.path:
+                sys.path.insert(0, src_dir)
+                print(f"✅ Added src directory to path: {src_dir}")
             
-            print(f"🔍 Current file directory: {current_dir}")
-            print(f"🔍 Current working directory: {cwd}")
-            
-            # Add current working directory to path first (most likely to work)
-            if cwd not in sys.path:
-                sys.path.insert(0, cwd)
-                print(f"✅ Added current working directory to path: {cwd}")
-            
-            # Try importing from current working directory
-            try:
-                from ecg.twelve_lead_test import ECGTestPage
-                print("✅ ECG Test Page imported successfully (from cwd)")
-            except ImportError as e:
-                print(f"❌ CWD import failed: {e}")
-                # Try from current file directory
-                if current_dir not in sys.path:
-                    sys.path.insert(0, current_dir)
-                    print(f"✅ Added current file directory to path: {current_dir}")
-                try:
-                    from ecg.twelve_lead_test import ECGTestPage
-                    print("✅ ECG Test Page imported successfully (from file dir)")
-                except ImportError as e2:
-                    print(f"❌ File dir import failed: {e2}")
-                    # Try alternative path - go up one level to find src
-                    project_root = os.path.dirname(current_dir)
-                    src_path = os.path.join(project_root, 'src')
-                    if src_path not in sys.path:
-                        sys.path.insert(0, src_path)
-                        print(f"✅ Added alternative path: {src_path}")
-                    try:
-                        from ecg.twelve_lead_test import ECGTestPage
-                        print("✅ ECG Test Page imported successfully (alternative path)")
-                    except ImportError as e3:
-                        print(f"❌ Alternative import failed: {e3}")
-                        raise ImportError(f"Could not import ECGTestPage: {e3}")
+            from ecg.twelve_lead_test import ECGTestPage
+            print("✅ ECG Test Page imported successfully")
                     
         except ImportError as e:
             print(f"❌ ECG Test Page import error: {e}")

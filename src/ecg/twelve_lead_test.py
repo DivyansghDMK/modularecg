@@ -215,11 +215,10 @@ class SerialECGReader:
                             return values[0]
                         elif len(values) > 0:
                             print(f"⚠️ Unexpected number of values: {len(values)} (expected 8)")
-                            return None
                         else:
                             return None
-                    except ValueError:
-                        print(f"⚠️ Non-numeric data received: '{line_data}'")
+                    except Exception as e:
+                        print(f"❌ Error parsing ECG data: {e}")
                         return None
             else:
                 print("⏳ No data received (timeout)")
@@ -683,6 +682,7 @@ class ECGTestPage(QWidget):
         self.stacked_widget = stacked_widget
         self.sampler = SamplingRateCalculator()
         self.demo_fs = 500  # Increased sampling rate for more realistic ECG
+        self.sampling_rate = 500  # Default sampling rate for expanded lead view
 
         # Initialize time tracking for elapsed time
         self.start_time = None
@@ -1162,6 +1162,25 @@ class ECGTestPage(QWidget):
         if plot_index < len(self.leads):
             lead_name = self.leads[plot_index]
             print(f"Clicked on {lead_name} plot")
+            
+            # Get the ECG data for this lead
+            if plot_index < len(self.data) and len(self.data[plot_index]) > 0:
+                ecg_data = self.data[plot_index]
+                
+                # Import and show expanded lead view
+                try:
+                    from ecg.expanded_lead_view import show_expanded_lead_view
+                    show_expanded_lead_view(lead_name, ecg_data, self.sampling_rate, self)
+                except ImportError as e:
+                    print(f"Error importing expanded lead view: {e}")
+                    # Fallback: show a simple message
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.information(self, "Lead Analysis", 
+                                          f"Lead {lead_name} analysis would be shown here.\n"
+                                          f"Data points: {len(ecg_data)}")
+            else:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "No Data", f"No ECG data available for Lead {lead_name}")
 
     def calculate_12_leads_from_8_channels(self, channel_data):
         """
@@ -1408,13 +1427,13 @@ class ECGTestPage(QWidget):
             # Calculate appropriate Y-range with some padding
             if data_std > 0:
                 # Use standard deviation within central band
-                padding = max(data_std * 3, 150)  # At least 150 units padding
+                padding = max(data_std * 4, 200)  # Increased padding for better visibility
                 y_min = data_mean - padding
                 y_max = data_mean + padding
             else:
                 # Fallback: use percentile window
-                data_range = max(p99 - p1, 200)
-                padding = max(data_range * 0.25, 150)
+                data_range = max(p99 - p1, 300)
+                padding = max(data_range * 0.3, 200)
                 y_min = data_mean - padding
                 y_max = data_mean + padding
             
@@ -2454,7 +2473,9 @@ class ECGTestPage(QWidget):
                     if len(data) > 0:
                         # Apply current settings to the real data
                         gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                        centered = (np.array(data) - np.nanmean(data)) * gain_factor
+                        # Convert device data to ECG range and center around zero
+                        device_data = np.array(data)
+                        centered = (device_data - 2100) * gain_factor
                         
                         # Update line data with new buffer size
                         if len(centered) < self.buffer_size:
@@ -2488,7 +2509,10 @@ class ECGTestPage(QWidget):
             if 0 <= lead_index < len(self.lines) and len(data_array) > 0:
                 # Apply current settings to the incoming data
                 gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                centered = (np.array(data_array) - np.nanmean(data_array)) * gain_factor
+                # Convert device data (typically 0-4095 range) to ECG range and center around zero
+                device_data = np.array(data_array)
+                # Scale to typical ECG range (subtract baseline ~2100 and scale)
+                centered = (device_data - 2100) * gain_factor
                 
                 # Update line data with new buffer size
                 if len(centered) < self.buffer_size:
@@ -2842,12 +2866,11 @@ class ECGTestPage(QWidget):
                     else:
                         data = np.array(self.data[lead])
                     
-                    # Center the data
-                    centered = data - np.nanmean(data)
-
-                    # Apply current gain setting to the real data
+                    # Convert device data to ECG range and center around zero
+                    device_data = np.array(data)
+                    # Scale to typical ECG range (subtract baseline ~2100 and scale)
                     gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                    centered = centered * gain_factor
+                    centered = (device_data - 2100) * gain_factor
                     
                     # Update the plot line
                     if i < len(self.lines):
@@ -3874,8 +3897,8 @@ class ECGTestPage(QWidget):
             if lead in self.ecg_generators and i < len(self.data):
                 # Get next sample from realistic ECG waveform
                 realistic_value = self.ecg_generators[lead][self.ecg_time_index % len(self.ecg_generators[lead])]
-                # Scale to typical ECG range with better visibility
-                scaled_value = 2100 + realistic_value * 2000  # Scale realistic ECG to mV range with higher amplitude
+                # Scale to typical ECG range with better visibility and center around zero
+                scaled_value = realistic_value * 1000  # Scale realistic ECG to mV range, centered around zero
                 
                 # Update data using GitHub version method: roll and set last value
                 self.data[i] = np.roll(self.data[i], -1)
