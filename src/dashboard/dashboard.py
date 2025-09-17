@@ -400,7 +400,7 @@ class Dashboard(QWidget):
         ecg_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         ecg_layout = QVBoxLayout(ecg_card)
         
-        ecg_label = QLabel("ECG Recording")
+        ecg_label = QLabel("Live Lead 2 ECG Recording")
         ecg_label.setFont(QFont("Arial", 14, QFont.Bold))
         ecg_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         ecg_layout.addWidget(ecg_label)
@@ -409,7 +409,7 @@ class Dashboard(QWidget):
         self.ecg_canvas.axes.set_facecolor("#eee")
         self.ecg_canvas.axes.set_xticks([])
         self.ecg_canvas.axes.set_yticks([])
-        self.ecg_canvas.axes.set_title("Lead II", fontsize=10)
+        self.ecg_canvas.axes.set_title("Lead II - Live Data", fontsize=10)
         self.ecg_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         ecg_layout.addWidget(self.ecg_canvas)
         
@@ -637,6 +637,28 @@ class Dashboard(QWidget):
         dlg.exec_()
 
     def update_ecg(self, frame):
+        """Update the animated ECG plot with live Lead II data from the ECGTestPage."""
+        try:
+            if hasattr(self, 'ecg_test_page') and self.ecg_test_page:
+                # Get live Lead II data from the ECG test page
+                if hasattr(self.ecg_test_page, 'get_current_lead_data'):
+                    live_lead_ii_data = self.ecg_test_page.get_current_lead_data(1)  # Lead II is at index 1
+                    
+                    if live_lead_ii_data and len(live_lead_ii_data) > 10:
+                        arr = np.array(live_lead_ii_data)
+                        arr = arr - np.mean(arr)
+                        arr = arr + 1000  # Center vertically
+                        
+                        # Ensure the data length matches the plot buffer size
+                        if len(arr) < len(self.ecg_x):
+                            arr = np.pad(arr, (len(self.ecg_x) - len(arr), 0), 'constant', constant_values=(1000,))
+                        
+                        self.ecg_line.set_ydata(arr[-len(self.ecg_x):])
+                        return [self.ecg_line]
+        except Exception as e:
+            print(f"Error updating live ECG plot: {e}")
+        
+        # Fallback: try to read from JSON file
         import json
         lead_ii_file = 'lead_ii_live.json'
         if os.path.exists(lead_ii_file):
@@ -653,7 +675,8 @@ class Dashboard(QWidget):
                     return [self.ecg_line]
             except Exception as e:
                 print("Error reading lead_ii_live.json:", e)
-        # Fallback: mock wave
+        
+        # Fallback: mock wave if no live data or error
         self.ecg_y = np.roll(self.ecg_y, -1)
         self.ecg_y[-1] = 1000 + 200 * np.sin(2 * np.pi * 2 * self.ecg_x[-1] + frame/10) + 50 * np.random.randn()
         self.ecg_line.set_ydata(self.ecg_y)
@@ -677,12 +700,24 @@ class Dashboard(QWidget):
                 self.metric_labels['qtc_interval'].setText(f"{int(round(intervals['QTc']))} ms")
             else:
                 self.metric_labels['qtc_interval'].setText("-- ms")
+        if 'qtc_interval' in intervals and intervals['qtc_interval'] is not None:
+            if isinstance(intervals['qtc_interval'], (int, float)) and intervals['qtc_interval'] >= 0:
+                self.metric_labels['qtc_interval'].setText(f"{int(round(intervals['qtc_interval']))} ms")
+            else:
+                self.metric_labels['qtc_interval'].setText("-- ms")
         if 'QRS_axis' in intervals and intervals['QRS_axis'] is not None:
             self.metric_labels['qrs_axis'].setText(str(intervals['QRS_axis']))
+        if 'qrs_axis' in intervals and intervals['qrs_axis'] is not None:
+            self.metric_labels['qrs_axis'].setText(str(intervals['qrs_axis']))
         if 'ST' in intervals and intervals['ST'] is not None:
             self.metric_labels['st_segment'].setText(
                 f"{int(round(intervals['ST']))} ms" if isinstance(intervals['ST'], (int, float)) else str(intervals['ST'])
             )
+        if 'st_segment' in intervals and intervals['st_segment'] is not None:
+            if isinstance(intervals['st_segment'], (int, float)):
+                self.metric_labels['st_segment'].setText(f"{intervals['st_segment']:.2f} mV")
+            else:
+                self.metric_labels['st_segment'].setText("-- mV")
         # Also update the ECG test page theme if it exists
         if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
             self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)

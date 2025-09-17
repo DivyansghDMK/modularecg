@@ -1591,8 +1591,9 @@ class ECGTestPage(QWidget):
             ("Heart Rate (BPM)", "0", "heart_rate", "#ff6b6b"),  # Red for heart rate
             ("PR Intervals (ms)", "0", "pr_interval", "#4ecdc4"),  # Teal for PR
             ("QRS Complex (ms)", "0", "qrs_duration", "#45b7d1"),  # Blue for QRS
+            ("QTc Interval (ms)", "0", "qtc_interval", "#ff9ff3"),  # Pink for QTc
             ("QRS Axis", "0°", "qrs_axis", "#96ceb4"),  # Green for axis
-            ("ST Interval", "0", "st_interval", "#feca57"),  # Yellow for ST
+            ("ST Segment (mV)", "0", "st_segment", "#feca57"),  # Yellow for ST segment
             ("Time Elapsed", "00:00", "time_elapsed", "#ffffff"),  # White for time
         ]
         
@@ -2389,17 +2390,29 @@ class ECGTestPage(QWidget):
 
                     if isinstance(qtc_interval, (int, float)) and qtc_interval >= 0:
                         qtc_label.setText(f"{int(round(qtc_interval))} ms")
+                        # Update metric labels for dashboard
+                        if 'qtc_interval' in self.metric_labels:
+                            self.metric_labels['qtc_interval'].setText(f"{int(round(qtc_interval))} ms")
                     else:
                         qtc_label.setText("-- ms")
+                        if 'qtc_interval' in self.metric_labels:
+                            self.metric_labels['qtc_interval'].setText("-- ms")
                     
                     # Calculate QRS axis using Lead I and aVF
                     lead_I = self.data[0] if len(self.data) > 0 else []  # Lead I (index 0)
                     lead_aVF = self.data[5] if len(self.data) > 5 else []  # Lead aVF (index 5)
                     qrs_axis = calculate_qrs_axis(lead_I, lead_aVF, r_peaks)
+                    if 'qrs_axis' in self.metric_labels:
+                        self.metric_labels['qrs_axis'].setText(f"{qrs_axis}")
 
                     # Calculate ST segment using Lead II and r_peaks
                     lead_ii = self.data[1] if len(self.data) > 1 else []  # Lead II (index 1)
                     st_segment = calculate_st_segment(lead_ii, r_peaks, fs=500)
+                    if 'st_segment' in self.metric_labels:
+                        if isinstance(st_segment, (int, float)):
+                            self.metric_labels['st_segment'].setText(f"{st_segment:.2f} mV")
+                        else:
+                            self.metric_labels['st_segment'].setText("-- mV")
 
                     if hasattr(self, 'dashboard_callback'):
                         self.dashboard_callback({
@@ -2408,7 +2421,7 @@ class ECGTestPage(QWidget):
                             'qrs_duration': qrs_duration,
                             'qtc_interval': qtc_interval,
                             'qrs_axis': qrs_axis,
-                            'st_interval': st_segment
+                            'st_segment': st_segment
                         })
 
                     # --- Arrhythmia detection ---
