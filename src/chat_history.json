@@ -1,0 +1,16 @@
+{
+  "default": [
+    {
+      "question": "hiuii",
+      "answer": "That looks like a typo or a random string of letters.  Is there anything I can help you with?\n"
+    },
+    {
+      "question": "qwerty",
+      "answer": "\"qwerty\" is the top row of letters on a standard English QWERTY keyboard.  Is there anything specific you'd like to know about it?\n"
+    },
+    {
+      "question": "html",
+      "answer": "HTML (HyperText Markup Language) is the foundation of all web pages.  It's a markup language, meaning it uses tags to structure content.  These tags tell the browser how to display the content.  Here's a breakdown of its key components:\n\n**Basic Structure:**\n\nEvery HTML document follows a basic structure:\n\n```html\n<!DOCTYPE html>\n<html>\n<head>\n  <title>Page Title</title>\n</head>\n<body>\n  <h1>This is a heading</h1>\n  <p>This is a paragraph.</p>\n</body>\n</html>\n```\n\n* **`<!DOCTYPE html>`:**  This declaration tells the browser that the document is an HTML5 document.  It's crucial for proper rendering.\n\n* **`<html>`:** The root element of the page. Everything else goes inside it.\n\n* **`<head>`:** Contains meta-information about the HTML document, such as the title, character set, and links to external resources (like stylesheets).  The content of the `<head>` is not displayed directly on the page.\n\n* **`<title>`:** Specifies a title for the HTML page (which is shown in the browser's title bar or tab).\n\n* **`<body>`:** Contains the visible page content, including headings, paragraphs, images, links, etc.\n\n\n**Key Elements:**\n\n* **Headings:**  `<h1>` to `<h6>` (h1 being the largest, h6 the smallest).  Used to structure content hierarchically.\n\n* **Paragraphs:** `<p>`  Creates a paragraph of text.\n\n* **Links:** `<a href=\"URL\">Link text</a>`  Creates a hyperlink to another webpage or resource.  `href` attribute specifies the URL.\n\n* **Images:** `<img src=\"image.jpg\" alt=\"Description of image\">`  Inserts an image.  `src` specifies the image's location, and `alt` provides alternative text for screen readers and if the image fails to load.\n\n* **Lists:**\n    * **Unordered lists:** `<ul><li>Item 1</li><li>Item 2</li></ul>`  Uses bullet points.\n    * **Ordered lists:** `<ol><li>Item 1</li><li>Item 2</li></ol>`  Uses numbers.\n\n* **Divisions and Spans:**\n    * **`<div>`:**  A block-level element, used to group content and apply styles.\n    * **`<span>`:** An inline element, used to style specific parts of text within a line.\n\n* **Tables:** `<table>`, `<tr>` (table row), `<td>` (table data), `<th>` (table header). Used to structure data in rows and columns.\n\n\n**Example with more elements:**\n\n```html\n<!DOCTYPE html>\n<html>\n<head>\n  <title>My Webpage</title>\n</head>\n<body>\n  <h1>Welcome to my website!</h1>\n  <p>This is a paragraph of text.</p>\n  <img src=\"myimage.jpg\" alt=\"A picture\">\n  <ul>\n    <li>Item 1</li>\n    <li>Item 2</li>\n  </ul>\n  <a href=\"https://www.example.com\">Link to Example</a>\n</body>\n</html>\n```\n\nThis is a simplified overview.  HTML has many more elements and attributes for creating complex web pages.  To learn more, explore resources like the MDN Web Docs (Mozilla Developer Network): [https://developer.mozilla.org/en-US/docs/Web/HTML](https://developer.mozilla.org/en-US/docs/Web/HTML)\n"
+    }
+  ]
+}

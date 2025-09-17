@@ -20,7 +20,6 @@ import pyqtgraph as pg
 from ecg.recording import ECGMenu
 from scipy.signal import find_peaks
 from utils.settings_manager import SettingsManager
-from .demo_manager import DemoManager
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
 from functools import partial # For plot clicking
 
@@ -189,7 +188,7 @@ class SerialECGReader:
         try:
             line_raw = self.ser.readline()
             line_data = line_raw.decode('utf-8', errors='replace').strip()
-
+            
             if line_data:
                 self.data_count += 1
                 # Print detailed data information
@@ -652,7 +651,7 @@ class ECGTestPage(QWidget):
         "V5": "#00b894",
         "V6": "#ff0066"
     }
-
+    
     def __init__(self, test_name, stacked_widget):
         super().__init__()
         
@@ -664,9 +663,6 @@ class ECGTestPage(QWidget):
         self.stacked_widget = stacked_widget  # Save reference for navigation
 
         self.settings_manager = SettingsManager()
-    
-        # Initialize demo manager
-        self.demo_manager = DemoManager(self)
 
         self.grid_widget = QWidget()
         self.detailed_widget = QWidget()
@@ -685,7 +681,7 @@ class ECGTestPage(QWidget):
         self.serial_reader = None
         self.stacked_widget = stacked_widget
         self.sampler = SamplingRateCalculator()
-        # self.demo_fs = 500  # Increased sampling rate for more realistic ECG
+        self.demo_fs = 500  # Increased sampling rate for more realistic ECG
         self.sampling_rate = 500  # Default sampling rate for expanded lead view
 
         # Initialize time tracking for elapsed time
@@ -751,7 +747,7 @@ class ECGTestPage(QWidget):
         header_label.setAlignment(Qt.AlignCenter)
         header_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         menu_layout.addWidget(header_label)
-        
+
         # Create ECGMenu instance to use its methods
         self.ecg_menu = ECGMenu(parent=self, dashboard=self.stacked_widget.parent())
         # Connect ECGMenu to this ECG test page for data communication
@@ -875,53 +871,6 @@ class ECGTestPage(QWidget):
         recording_layout = QVBoxLayout(recording_frame)
         recording_layout.setSpacing(4)  # Reduced spacing
 
-        # Demo toggle button - Add above capture screen button
-        self.demo_toggle = QPushButton("Demo: OFF")
-        self.demo_toggle.setCheckable(True)
-        self.demo_toggle.setChecked(False)
-        self.demo_toggle.setMinimumHeight(35)  # Same as other buttons
-        self.demo_toggle.setMaximumHeight(40)  # Same as other buttons
-        self.demo_toggle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        
-        # Set demo button style (toggle-style like recording button)
-        self.demo_toggle.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #ffffff, stop:1 #f8f9fa);
-                color: #1a1a1a;
-                border: 2px solid #e9ecef;
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-size: 12px;
-                font-weight: bold;
-                text-align: center;
-                margin: 2px 0;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #fff5f0, stop:1 #ffe0cc);
-                border: 2px solid #ff6600;
-                color: #ff6600;
-            }
-            QPushButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #ffe0cc, stop:1 #ffcc99);
-                border: 2px solid #ff6600;
-                color: #ff6600;
-            }
-            QPushButton:checked {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #4CAF50, stop:1 #45a049);
-                border: 2px solid #4CAF50;
-                color: white;
-            }
-        """)
-        
-        # Connect demo toggle to demo manager
-        self.demo_toggle.toggled.connect(self.demo_manager.toggle_demo_mode)
-        
-        recording_layout.addWidget(self.demo_toggle)
-
         # Capture Screen button - Make it compact
         self.capture_screen_btn = QPushButton("Capture Screen")
         self.capture_screen_btn.setMinimumHeight(35)  # Reduced from 60px
@@ -1014,8 +963,6 @@ class ECGTestPage(QWidget):
         self.metrics_frame = self.create_metrics_frame()
         self.metrics_frame.setMaximumHeight(80)  # Reduced from default
         self.metrics_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.metrics_frame.setMaximumHeight(120)
-        self.metrics_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         main_vbox.addWidget(self.metrics_frame)
         
         # --- REPLACED: Matplotlib plot area is replaced with a simple QWidget container ---
@@ -1082,7 +1029,7 @@ class ECGTestPage(QWidget):
             self.r_peaks_scatter = self.plot_widgets[1].plot([], [], pen=None, symbol='o', symbolBrush='r', symbolSize=8)
         else:
             self.r_peaks_scatter = None
-        
+
         main_vbox.setSpacing(12)  # Reduced from 16px
         main_vbox.setContentsMargins(16, 16, 16, 16)  # Reduced from 24px
 
@@ -1090,6 +1037,7 @@ class ECGTestPage(QWidget):
         self.start_btn = QPushButton("Start")
         self.stop_btn = QPushButton("Stop")
         self.ports_btn = QPushButton("Ports")
+        self.demo_btn = QPushButton("Demo Mode")
         self.export_pdf_btn = QPushButton("Export as PDF")
         self.export_csv_btn = QPushButton("Export as CSV")
         self.sequential_btn = QPushButton("Show All Leads Sequentially")
@@ -1098,7 +1046,7 @@ class ECGTestPage(QWidget):
         self.back_btn = QPushButton("Back")
 
         # Make all buttons responsive and compact
-        for btn in [self.start_btn, self.stop_btn, self.ports_btn, self.export_pdf_btn, self.export_csv_btn, 
+        for btn in [self.start_btn, self.stop_btn, self.ports_btn, self.demo_btn, self.export_pdf_btn, self.export_csv_btn, 
                    self.sequential_btn, self.twelve_leads_btn, self.six_leads_btn, self.back_btn]:
             btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             btn.setMinimumHeight(28)  # Reduced from 32px
@@ -1138,6 +1086,7 @@ class ECGTestPage(QWidget):
         self.start_btn.setStyleSheet(green_color)
         self.stop_btn.setStyleSheet(green_color)
         self.ports_btn.setStyleSheet(green_color)
+        self.demo_btn.setStyleSheet(green_color)
         self.export_pdf_btn.setStyleSheet(green_color)
         self.export_csv_btn.setStyleSheet(green_color)
         self.sequential_btn.setStyleSheet(green_color)
@@ -1148,6 +1097,7 @@ class ECGTestPage(QWidget):
         btn_layout.addWidget(self.start_btn)
         btn_layout.addWidget(self.stop_btn)
         btn_layout.addWidget(self.ports_btn)
+        btn_layout.addWidget(self.demo_btn)
         btn_layout.addWidget(self.export_pdf_btn)
         btn_layout.addWidget(self.export_csv_btn)
         btn_layout.addWidget(self.sequential_btn)
@@ -1158,11 +1108,13 @@ class ECGTestPage(QWidget):
 
         self.start_btn.clicked.connect(self.start_acquisition)
         self.stop_btn.clicked.connect(self.stop_acquisition)
+        self.demo_btn.clicked.connect(self.toggle_demo_mode)
 
 
         self.start_btn.setToolTip("Start ECG recording from the selected port")
         self.stop_btn.setToolTip("Stop current ECG recording")
         self.ports_btn.setToolTip("Configure COM port and baud rate settings")
+        self.demo_btn.setToolTip("Toggle realistic ECG demo mode (no hardware required)")
         self.export_pdf_btn.setToolTip("Export ECG data as PDF report")
         self.export_csv_btn.setToolTip("Export ECG data as CSV file")
 
@@ -1439,6 +1391,25 @@ class ECGTestPage(QWidget):
                     metrics['qrs_axis'] = self.metric_labels['qrs_axis'].text().replace('°', '')
                 if 'st_interval' in self.metric_labels:
                     metrics['st_interval'] = self.metric_labels['st_interval'].text().replace(' ms', '')
+                if 'qtc_interval' in self.metric_labels:
+                    metrics['qtc_interval'] = self.metric_labels['qtc_interval'].text().replace(' ms', '')
+            
+            # If QTc interval is not available from labels, calculate it
+            if 'qtc_interval' not in metrics or metrics['qtc_interval'] == '--':
+                if 'heart_rate' in metrics and metrics['heart_rate'] != "--":
+                    try:
+                        hr = float(metrics['heart_rate'])
+                        if hr > 0:
+                            # Simple QTc calculation (Bazett's formula)
+                            # QT = 0.4 seconds (typical), QTc = QT / sqrt(RR)
+                            rr_interval = 60.0 / hr  # RR interval in seconds
+                            qt_interval = 0.4  # Typical QT interval
+                            qtc_interval = qt_interval / np.sqrt(rr_interval)
+                            metrics['qtc_interval'] = f"{qtc_interval * 1000:.0f}"
+                    except:
+                        metrics['qtc_interval'] = "--"
+                else:
+                    metrics['qtc_interval'] = "--"
             
             # Get sampling rate
             if hasattr(self, 'sampler') and self.sampler.sampling_rate > 0:
@@ -1552,7 +1523,7 @@ class ECGTestPage(QWidget):
         print(f"Applied settings: speed={wave_speed}mm/s, gain={wave_gain}mm/mV, buffer={self.buffer_size}, ylim={self.ylim}")
 
     # ------------------------ Update Dashboard Metrics on the top of the lead graphs ------------------------
-    
+
     def create_metrics_frame(self):
         metrics_frame = QFrame()
         metrics_frame.setObjectName("metrics_frame")
@@ -1592,8 +1563,6 @@ class ECGTestPage(QWidget):
                     border-right: none;
                 }
             """)
-
-            metric_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
             
             # Create vertical layout for the metric widget
             box = QVBoxLayout(metric_widget)
@@ -1842,7 +1811,7 @@ class ECGTestPage(QWidget):
                 'QRS_axis': qrs_axis,
                 'ST': st_segment * 1000
             }
-                
+            
         except Exception as e:
             print(f"Error calculating ECG intervals: {e}")
             return {}
@@ -2174,7 +2143,7 @@ class ECGTestPage(QWidget):
     def expand_lead(self, idx):
         lead = self.leads[idx]
         def get_lead_data():
-            return self.data[lead]
+            return self.data[idx] if idx < len(self.data) else []
         color = self.LEAD_COLORS.get(lead, "#00ff99")
         if hasattr(self, '_detailed_timer') and self._detailed_timer is not None:
             self._detailed_timer.stop()
@@ -2518,7 +2487,7 @@ class ECGTestPage(QWidget):
             for i, line in enumerate(self.lines):
                 if i < len(self.leads):
                     lead = self.leads[i]
-                    data = self.data.get(lead, [])
+                    data = self.data[i] if i < len(self.data) else []
                     
                     if len(data) > 0:
                         # Apply current settings to the real data
@@ -2708,16 +2677,6 @@ class ECGTestPage(QWidget):
     # ---------------------- Start Button Functionality ----------------------
 
     def start_acquisition(self):
-
-        try:
-            if hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked():
-                print("🔁 Switching from Demo to Real: turning off demo...")
-                self.demo_toggle.setChecked(False)
-                if hasattr(self, 'demo_manager'):
-                    self.demo_manager.stop_demo_data()
-        except Exception as e:
-            print(f"[Start Acquisition] Failed to stop demo before real start: {e}")
-
         port = self.settings_manager.get_serial_port()
         baud = self.settings_manager.get_baud_rate()
 
@@ -2870,6 +2829,12 @@ class ECGTestPage(QWidget):
     def update_plot(self):
         print(f"[DEBUG] ECGTestPage - update_plot called, serial_reader exists: {self.serial_reader is not None}")
         
+        # Handle demo mode
+        if hasattr(self, 'demo_mode') and self.demo_mode:
+            print("[DEBUG] ECGTestPage - Demo mode active, updating plots")
+            self.update_plots()
+            return
+        
         if not self.serial_reader:
             print("[DEBUG] ECGTestPage - No serial reader, returning")
             return
@@ -3002,39 +2967,39 @@ class ECGTestPage(QWidget):
                     return
             
             # Update data buffers for all leads
-            for lead in self.leads:
-                if lead in lead_data:
-                    self.data[lead].append(lead_data[lead])
-                    if len(self.data[lead]) > self.buffer_size:
-                        self.data[lead].pop(0)
+            for idx, lead in enumerate(self.leads):
+                if idx < len(self.data) and lead in lead_data:
+                    self.data[idx].append(lead_data[lead])
+                    if len(self.data[idx]) > self.buffer_size:
+                        self.data[idx].pop(0)
             
-            print(f"[DEBUG] ECGTestPage - Updated data buffers, Lead II has {len(self.data['II'])} points")
+            print(f"[DEBUG] ECGTestPage - Updated data buffers, Lead II has {len(self.data[1]) if len(self.data) > 1 else 0} points")
             
             # Write latest Lead II data to file for dashboard
             try:
                 import json
                 with open('lead_ii_live.json', 'w') as f:
-                    json.dump(self.data["II"][-500:], f)
+                    json.dump(self.data[1][-500:] if len(self.data) > 1 else [], f)
             except Exception as e:
                 print("Error writing lead_ii_live.json:", e)
             
             # Calculate and update ECG metrics in real-time
-            lead_ii_data = self.data.get("II", [])
+            lead_ii_data = self.data[1] if len(self.data) > 1 else []
             if lead_ii_data:
                 intervals = self.calculate_ecg_intervals(lead_ii_data)
                 self.update_ecg_metrics_on_top_of_lead_graphs(intervals)
             
             # Update all plots
             for i, lead in enumerate(self.leads):
-                if len(self.data[lead]) > 0:
-                    print(f"[DEBUG] ECGTestPage - Updating plot for {lead}: {len(self.data[lead])} data points")
+                if i < len(self.data) and len(self.data[i]) > 0:
+                    print(f"[DEBUG] ECGTestPage - Updating plot for {lead}: {len(self.data[i])} data points")
                     
                     # Prepare plot data
-                    if len(self.data[lead]) < self.buffer_size:
+                    if len(self.data[i]) < self.buffer_size:
                         data = np.full(self.buffer_size, np.nan)
-                        data[-len(self.data[lead]):] = self.data[lead]
+                        data[-len(self.data[i]):] = self.data[i]
                     else:
-                        data = np.array(self.data[lead])
+                        data = np.array(self.data[i])
                     
                     # Convert device data to ECG range and center around zero
                     device_data = np.array(data)
@@ -3091,86 +3056,19 @@ class ECGTestPage(QWidget):
                     pdf.savefig(fig)
 
     def export_csv(self):
-        """Export ECG data to CSV file in the same format as dummydata.csv"""
         path, _ = QFileDialog.getSaveFileName(self, "Export ECG Data as CSV", "", "CSV Files (*.csv)")
         if path:
-            try:
-                with open(path, 'w', newline='') as f:
-                    writer = csv.writer(f, delimiter='\t')  # Use tab delimiter like dummydata.csv
-                    
-                    # Write header exactly like dummydata.csv
-                    header = ["Sample", "I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
-                    writer.writerow(header)
-                    
-                    # Export from CSV storage (most accurate method)
-                    if hasattr(self, 'csv_data_storage') and self.csv_data_storage:
-                        print(f"📊 Exporting {len(self.csv_data_storage)} samples from CSV storage")
-                        
-                        for row_data in self.csv_data_storage:
-                            row = [
-                                row_data.get('Sample', ''),
-                                row_data.get('I', ''),
-                                row_data.get('II', ''),
-                                row_data.get('III', ''),
-                                row_data.get('aVR', ''),
-                                row_data.get('aVL', ''),
-                                row_data.get('aVF', ''),
-                                row_data.get('V1', ''),
-                                row_data.get('V2', ''),
-                                row_data.get('V3', ''),
-                                row_data.get('V4', ''),
-                                row_data.get('V5', ''),
-                                row_data.get('V6', '')
-                            ]
-                            writer.writerow(row)
-                    
-                    # Fallback: Export from numpy arrays if CSV storage is empty
-                    else:
-                        print("📊 Exporting from numpy arrays (fallback method)")
-                        
-                        # Get the actual data length
-                        max_length = 0
-                        for i in range(len(self.leads)):
-                            if i < len(self.data):
-                                # Count non-zero values in the numpy array
-                                non_zero_count = np.count_nonzero(self.data[i])
-                                max_length = max(max_length, non_zero_count)
-                        
-                        # Export data sample by sample
-                        for i in range(max_length):
-                            row = [i]  # Sample number
-                            
-                            # Add data for each lead in the same order as dummydata.csv
-                            for lead_idx, lead_name in enumerate(self.leads):
-                                if lead_idx < len(self.data):
-                                    if i < len(self.data[lead_idx]):
-                                        value = self.data[lead_idx][i]
-                                        # Only include non-zero values (actual data)
-                                        if value != 0:
-                                            row.append(int(value))
-                                        else:
-                                            row.append("")
-                                    else:
-                                        row.append("")
-                                else:
-                                    row.append("")
-                            
-                            writer.writerow(row)
-                
-                print(f"✅ CSV export completed: {path}")
-                QMessageBox.information(
-                    self, 
-                    "Export Successful", 
-                    f"ECG data exported successfully!\n\nFile: {path}\nSamples: {len(self.csv_data_storage) if hasattr(self, 'csv_data_storage') else 'N/A'}"
-                )
-                
-            except Exception as e:
-                print(f"❌ Error exporting CSV: {e}")
-                QMessageBox.critical(
-                    self, 
-                    "Export Error", 
-                    f"Failed to export CSV:\n{str(e)}"
-                )
+            with open(path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Sample"] + self.leads)
+                for i in range(self.buffer_size):
+                    row = [i]
+                    for idx, lead in enumerate(self.leads):
+                        if i < len(self.data[idx]):
+                            row.append(self.data[idx][i])
+                        else:
+                            row.append("")
+                    writer.writerow(row)
 
     def go_back(self):
         """Go back to the dashboard"""
@@ -3224,10 +3122,6 @@ class ECGTestPage(QWidget):
         self._overlay_active = True
 
         self._apply_current_overlay_mode()
-
-        # Ensure demo data continues to work in overlay mode
-        if hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked():
-            print("Demo mode active - overlay will show demo data")
 
     def _store_original_layout(self):
         
@@ -3416,16 +3310,13 @@ class ECGTestPage(QWidget):
         
         for idx, lead in enumerate(self.leads):
             if idx < len(self._overlay_lines):
-                if idx < len(self.data):
-                    data = self.data[idx]
-                else:
-                    data = np.array([])
+                data = self.data[idx] if idx < len(self.data) else []
                 line = self._overlay_lines[idx]
                 ax = self._overlay_axes[idx]
                 
                 plot_data = np.full(self.buffer_size, np.nan)
                 
-                if data is not None and len(data) > 0:
+                if data and len(data) > 0:
                     n = min(len(data), self.buffer_size)
                     centered = np.array(data[-n:]) - np.mean(data[-n:])
                     
@@ -3443,35 +3334,15 @@ class ECGTestPage(QWidget):
                     else:
                         plot_data[-n:] = centered
                     
-                    # Set dynamic y-limits based on data using robust statistics
-                    # Remove NaN values and large outliers (robust)
-                    valid_data = centered[~np.isnan(centered)]
-                    
-                    if len(valid_data) > 0:
-                        # Use percentiles to avoid spikes from clipping the view
-                        p1 = np.percentile(valid_data, 1)
-                        p99 = np.percentile(valid_data, 99)
-                        data_mean = (p1 + p99) / 2.0
-                        data_std = np.std(valid_data[(valid_data >= p1) & (valid_data <= p99)])
-                        
-                        # Calculate appropriate Y-range with some padding
-                        if data_std > 0:
-                            # Use standard deviation within central band
-                            padding = max(data_std * 4, 200)  # Increased padding for better visibility
-                            ymin = data_mean - padding
-                            ymax = data_mean + padding
-                        else:
-                            # Fallback: use percentile window
-                            data_range = max(p99 - p1, 300)
-                            padding = max(data_range * 0.3, 200)
-                            ymin = data_mean - padding
-                            ymax = data_mean + padding
-                        
-                        # Ensure reasonable bounds (same as main plots)
-                        ymin = max(ymin, -8000)
-                        ymax = min(ymax, 8000)
-                    else:
+                    # Set dynamic y-limits based on data
+                    ymin = np.min(centered) - 100
+                    ymax = np.max(centered) + 100
+                    if ymin == ymax:
                         ymin, ymax = -500, 500
+                    
+                    # Ensure y-limits are reasonable
+                    ymin = max(-1000, ymin)
+                    ymax = min(1000, ymax)
                     
                     ax.set_ylim(ymin, ymax)
                 else:
@@ -3819,10 +3690,6 @@ class ECGTestPage(QWidget):
 
         self._apply_current_overlay_mode()
 
-        # Ensure demo data continues to work in overlay mode
-        if hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked():
-            print("Demo mode active - overlay will show demo data")
-
     def _create_two_column_overlay_widget(self):
         from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QFrame
         
@@ -4022,20 +3889,13 @@ class ECGTestPage(QWidget):
         
         for idx, lead in enumerate(all_leads):
             if idx < len(self._overlay_lines):
-                if lead in self.leads:
-                    lead_index = self.leads.index(lead)
-                    if lead_index < len(self.data):
-                        data = self.data[lead_index]
-                    else:
-                        data = np.array([])
-                else:
-                    data = np.array([])
+                data = self.data[idx] if idx < len(self.data) else []
                 line = self._overlay_lines[idx]
                 ax = self._overlay_axes[idx]
                 
                 plot_data = np.full(self.buffer_size, np.nan)
                 
-                if data is not None and len(data) > 0:
+                if data and len(data) > 0:
                     n = min(len(data), self.buffer_size)
                     centered = np.array(data[-n:]) - np.mean(data[-n:])
                     
@@ -4053,35 +3913,15 @@ class ECGTestPage(QWidget):
                     else:
                         plot_data[-n:] = centered
                     
-                    # Set dynamic y-limits based on data using robust statistics
-                    # Remove NaN values and large outliers (robust)
-                    valid_data = centered[~np.isnan(centered)]
-                    
-                    if len(valid_data) > 0:
-                        # Use percentiles to avoid spikes from clipping the view
-                        p1 = np.percentile(valid_data, 1)
-                        p99 = np.percentile(valid_data, 99)
-                        data_mean = (p1 + p99) / 2.0
-                        data_std = np.std(valid_data[(valid_data >= p1) & (valid_data <= p99)])
-                        
-                        # Calculate appropriate Y-range with some padding
-                        if data_std > 0:
-                            # Use standard deviation within central band
-                            padding = max(data_std * 4, 200)  # Increased padding for better visibility
-                            ymin = data_mean - padding
-                            ymax = data_mean + padding
-                        else:
-                            # Fallback: use percentile window
-                            data_range = max(p99 - p1, 300)
-                            padding = max(data_range * 0.3, 200)
-                            ymin = data_mean - padding
-                            ymax = data_mean + padding
-                        
-                        # Ensure reasonable bounds (same as main plots)
-                        ymin = max(ymin, -8000)
-                        ymax = min(ymax, 8000)
-                    else:
+                    # Set dynamic y-limits based on data
+                    ymin = np.min(centered) - 100
+                    ymax = np.max(centered) + 100
+                    if ymin == ymax:
                         ymin, ymax = -500, 500
+                    
+                    # Ensure y-limits are reasonable
+                    ymin = max(-1000, ymin)
+                    ymax = min(1000, ymax)
                     
                     ax.set_ylim(ymin, ymax)
                 else:
@@ -4093,34 +3933,145 @@ class ECGTestPage(QWidget):
         
         if hasattr(self, '_overlay_canvas'):
             self._overlay_canvas.draw_idle()
+    def toggle_demo_mode(self):
+        """Toggle realistic ECG demo mode on/off"""
+        if not hasattr(self, 'demo_mode'):
+            self.demo_mode = False
+        
+        if not self.demo_mode:
+            # Start demo mode
+            self.demo_mode = True
+            self.demo_btn.setText("Stop Demo")
+            self.demo_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                        stop:0 #ff6600, stop:1 #ff8c42);
+                    color: white;
+                    border: 2px solid #ff6600;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    text-align: center;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                        stop:0 #ff8c42, stop:1 #ff6600);
+                    border-color: #ff8c42;
+                    color: white;
+                }
+            """)
+            
+            # Initialize realistic ECG generation
+            self.ecg_generators = {}
+            self.ecg_time_index = 0
+            self.ecg_sampling_rate = self.demo_fs
+            
+            # Generate realistic ECG waveforms for each lead
+            for lead in self.leads:
+                ecg_wave, _ = generate_realistic_ecg_waveform(
+                    duration_seconds=60,  # 1 minute of data
+                    sampling_rate=self.ecg_sampling_rate,
+                    heart_rate=72,
+                    lead_name=lead
+                )
+                self.ecg_generators[lead] = ecg_wave
+            
+            # Start demo timer
+            self.demo_timer = QTimer()
+            self.demo_timer.timeout.connect(self.update_demo_data)
+            self.demo_timer.start(2)  # 500 Hz = 2ms delay
+            
+            # Start main timer for plot updates
+            self.timer.start(50)  # 20 FPS for smooth display
+            
+            print("Demo mode started with realistic ECG waveforms")
+            
+        else:
+            # Stop demo mode
+            self.demo_mode = False
+            self.demo_btn.setText("Demo Mode")
+            self.demo_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                        stop:0 #4CAF50, stop:1 #45a049);
+                    color: white;
+                    border: 2px solid #4CAF50;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    text-align: center;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                        stop:0 #45a049, stop:1 #4CAF50);
+                    border-color: #45a049;
+                    color: white;
+                }
+            """)
+            
+            # Stop demo timer
+            if hasattr(self, 'demo_timer'):
+                self.demo_timer.stop()
+                self.demo_timer.deleteLater()
+            
+            # Stop main timer
+            self.timer.stop()
+            
+            # Clear demo data
+            for i in range(len(self.data)):
+                self.data[i] = np.zeros(HISTORY_LENGTH)
+            
+            print("Demo mode stopped")
+
+    def update_demo_data(self):
+        """Update plots with realistic demo data"""
+        if not self.demo_mode:
+            return
+            
+        # Generate data for all leads using GitHub version approach
+        for i, lead in enumerate(self.leads):
+            if lead in self.ecg_generators and i < len(self.data):
+                # Get next sample from realistic ECG waveform
+                realistic_value = self.ecg_generators[lead][self.ecg_time_index % len(self.ecg_generators[lead])]
+                # Scale to typical ECG range with better visibility and center around zero
+                scaled_value = realistic_value * 1000  # Scale realistic ECG to mV range, centered around zero
+                
+                # Update data using GitHub version method: roll and set last value
+                self.data[i] = np.roll(self.data[i], -1)
+                self.data[i][-1] = scaled_value
+        
+        # Move to next time sample
+        self.ecg_time_index += 1
+        
+        # Calculate and update ECG metrics for demo mode
+        self.calculate_ecg_metrics()
+        
+        # Display heartbeat in terminal for demo mode (every 10 updates for real-time feedback)
+        if hasattr(self, 'heartbeat_counter'):
+            self.heartbeat_counter += 1
+        else:
+            self.heartbeat_counter = 0
+            
+        if self.heartbeat_counter % 10 == 0 and len(self.data) > 1:  # Lead II data available
+            heart_rate = self.calculate_heart_rate(self.data[1])
+            if heart_rate > 0:
+                print(f"💓 HEARTBEAT: {heart_rate} BPM")
+        
+        # Update plots
+        self.update_plots()
 
     def update_plots(self):
         """Update all ECG plots with current data using PyQtGraph (GitHub version)"""
         if not self.serial_reader or not self.serial_reader.running:
             # For demo mode, just update the plots
-            if i < len(self.data_lines):
-                raw = np.asarray(self.data[i])
-
-                # Center and gain (keep your existing logic if already applied elsewhere)
-                centered = raw - np.nanmean(raw)
-                gain = self.settings_manager.get_wave_gain() / 10.0
-                centered = centered * gain
-
-                # Wave speed → horizontal time scaling
-                wave_speed = float(self.settings_manager.get_wave_speed())
-                display_len = 1000
-                scale = max(0.4, min(2.5, 25.0 / max(1e-6, wave_speed)))
-                window_len = max(10, int(display_len * scale))
-                src = centered[-window_len:]
-                if src.size < 2:
-                    resampled = np.zeros(display_len)
-                else:
-                    x_src = np.linspace(0, 1, src.size)
-                    x_dst = np.linspace(0, 1, display_len)
-                    resampled = np.interp(x_dst, x_src, src)
-
-                self.data_lines[i].setData(resampled)
-                self.update_plot_y_range(i)
+            for i in range(len(self.leads)):
+                if i < len(self.data_lines):
+                    # Update plot using PyQtGraph's setData method
+                    self.data_lines[i].setData(self.data[i])
+                    # Update Y-axis range based on actual data
+                    self.update_plot_y_range(i)
             return
 
         # Read a batch of data to keep up (from GitHub version)

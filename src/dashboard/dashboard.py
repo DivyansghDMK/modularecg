@@ -394,13 +394,13 @@ class Dashboard(QWidget):
             print(f"⚠️ Could not load heartbeat sound: {e}")
             self.heartbeat_sound = None
         
-        # --- ECG Recording (Animated Chart) ---
+        # --- Live Lead 2 ECG Recording (Animated Chart) ---
         ecg_card = QFrame()
         ecg_card.setStyleSheet("background: white; border-radius: 16px;")
         ecg_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         ecg_layout = QVBoxLayout(ecg_card)
         
-        ecg_label = QLabel("ECG Recording")
+        ecg_label = QLabel("Live Lead 2 ECG Recording")
         ecg_label.setFont(QFont("Arial", 14, QFont.Bold))
         ecg_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         ecg_layout.addWidget(ecg_label)
@@ -409,7 +409,7 @@ class Dashboard(QWidget):
         self.ecg_canvas.axes.set_facecolor("#eee")
         self.ecg_canvas.axes.set_xticks([])
         self.ecg_canvas.axes.set_yticks([])
-        self.ecg_canvas.axes.set_title("Lead II", fontsize=10)
+        self.ecg_canvas.axes.set_title("Lead II - Live Data", fontsize=10)
         self.ecg_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         ecg_layout.addWidget(self.ecg_canvas)
         
@@ -639,6 +639,29 @@ class Dashboard(QWidget):
     def update_ecg(self, frame):
         import json
         lead_ii_file = 'lead_ii_live.json'
+        
+        # Try to get live data from ECG test page first
+        if hasattr(self, 'ecg_test_page') and self.ecg_test_page:
+            if hasattr(self.ecg_test_page, 'data') and len(self.ecg_test_page.data) > 1:
+                try:
+                    # Get Lead II data (index 1 in the 12-lead array)
+                    lead_ii_data = self.ecg_test_page.data[1]
+                    if len(lead_ii_data) > 10:
+                        # Convert to numpy array and normalize
+                        arr = np.array(lead_ii_data[-len(self.ecg_x):])  # Take last 500 samples
+                        if len(arr) < len(self.ecg_x):
+                            arr = np.pad(arr, (len(self.ecg_x)-len(arr), 0), 'constant', constant_values=(0,))
+                        
+                        # Normalize the data
+                        arr = arr - np.mean(arr)
+                        arr = arr + 1000  # Center vertically
+                        
+                        self.ecg_line.set_ydata(arr)
+                        return [self.ecg_line]
+                except Exception as e:
+                    print(f"Error getting live ECG data: {e}")
+        
+        # Fallback: try to read from JSON file
         if os.path.exists(lead_ii_file):
             try:
                 with open(lead_ii_file, 'r') as f:
@@ -653,7 +676,8 @@ class Dashboard(QWidget):
                     return [self.ecg_line]
             except Exception as e:
                 print("Error reading lead_ii_live.json:", e)
-        # Fallback: mock wave
+        
+        # Final fallback: mock wave
         self.ecg_y = np.roll(self.ecg_y, -1)
         self.ecg_y[-1] = 1000 + 200 * np.sin(2 * np.pi * 2 * self.ecg_x[-1] + frame/10) + 50 * np.random.randn()
         self.ecg_line.set_ydata(self.ecg_y)
@@ -710,6 +734,24 @@ class Dashboard(QWidget):
                         qrs_text = ecg_metrics['qrs_duration']
                         if qrs_text and qrs_text != '--':
                             self.metric_labels['qrs_duration'].setText(f"{qrs_text} ms")
+                    
+                    # Update QTc interval
+                    if 'qtc_interval' in ecg_metrics:
+                        qtc_text = ecg_metrics['qtc_interval']
+                        if qtc_text and qtc_text != '--':
+                            self.metric_labels['qtc_interval'].setText(f"{qtc_text} ms")
+                    
+                    # Update QRS axis
+                    if 'qrs_axis' in ecg_metrics:
+                        qrs_axis_text = ecg_metrics['qrs_axis']
+                        if qrs_axis_text and qrs_axis_text != '--':
+                            self.metric_labels['qrs_axis'].setText(f"{qrs_axis_text}°")
+                    
+                    # Update ST segment
+                    if 'st_interval' in ecg_metrics:
+                        st_text = ecg_metrics['st_interval']
+                        if st_text and st_text != '--':
+                            self.metric_labels['st_segment'].setText(f"{st_text} ms")
                     
                     if 'sampling_rate' in ecg_metrics:
                         sr_text = ecg_metrics['sampling_rate']
