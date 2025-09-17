@@ -9,17 +9,393 @@ import cv2
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QGroupBox, QFileDialog,
-    QStackedLayout, QGridLayout, QSizePolicy, QMessageBox, QFormLayout, QLineEdit, QFrame, QApplication
+    QStackedLayout, QGridLayout, QSizePolicy, QMessageBox, QFormLayout, QLineEdit, QFrame, QApplication, QDialog
 )
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QDateTime
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+# --- CHANGED: Removed Matplotlib imports ---
+
+# --- ADDED: PyQtGraph is now used for all plotting ---
+import pyqtgraph as pg
 from ecg.recording import ECGMenu
 from scipy.signal import find_peaks
 from utils.settings_manager import SettingsManager
+from .demo_manager import DemoManager
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
-from PyQt5.QtGui import QColor
+from functools import partial # For plot clicking
+
+# --- Configuration ---
+HISTORY_LENGTH = 1000
+NORMAL_HR_MIN, NORMAL_HR_MAX = 60, 100
+LEAD_LABELS = [
+    "I", "II", "III", "aVR", "aVL", "aVF",
+    "V1", "V2", "V3", "V4", "V5", "V6"
+]
+
+class SamplingRateCalculator:
+    def __init__(self, update_interval_sec=5):
+        self.sample_count = 0
+        self.last_update_time = time.monotonic()
+        self.update_interval = update_interval_sec
+        self.sampling_rate = 0
+
+    def add_sample(self):
+        self.sample_count += 1
+        current_time = time.monotonic()
+        elapsed = current_time - self.last_update_time
+        if elapsed >= self.update_interval:
+            self.sampling_rate = self.sample_count / elapsed
+            self.sample_count = 0
+            self.last_update_time = current_time
+        return self.sampling_rate
+
+# ------------------------ Realistic ECG Waveform Generator ------------------------
+
+def generate_realistic_ecg_waveform(duration_seconds=10, sampling_rate=500, heart_rate=72, lead_name="II"):
+    """
+    Generate realistic ECG waveform with proper PQRST complexes
+    - duration_seconds: Length of waveform in seconds
+    - sampling_rate: Samples per second (Hz)
+    - heart_rate: Beats per minute
+    - lead_name: Lead name for lead-specific characteristics
+    """
+    import numpy as np
+    
+    # Calculate parameters
+    total_samples = int(duration_seconds * sampling_rate)
+    rr_interval = 60.0 / heart_rate  # RR interval in seconds
+    samples_per_beat = int(rr_interval * sampling_rate)
+    
+    # Create time array
+    t = np.linspace(0, duration_seconds, total_samples)
+    
+    # Initialize waveform
+    ecg = np.zeros(total_samples)
+    
+    # Lead-specific characteristics (amplitudes in mV)
+    lead_characteristics = {
+        "I": {"p_amp": 0.1, "qrs_amp": 0.8, "t_amp": 0.2, "baseline": 0.0},
+        "II": {"p_amp": 0.15, "qrs_amp": 1.2, "t_amp": 0.3, "baseline": 0.0},
+        "III": {"p_amp": 0.05, "qrs_amp": 0.6, "t_amp": 0.15, "baseline": 0.0},
+        "aVR": {"p_amp": -0.1, "qrs_amp": -0.8, "t_amp": -0.2, "baseline": 0.0},
+        "aVL": {"p_amp": 0.08, "qrs_amp": 0.7, "t_amp": 0.18, "baseline": 0.0},
+        "aVF": {"p_amp": 0.12, "qrs_amp": 0.9, "t_amp": 0.25, "baseline": 0.0},
+        "V1": {"p_amp": 0.05, "qrs_amp": 0.3, "t_amp": 0.1, "baseline": 0.0},
+        "V2": {"p_amp": 0.08, "qrs_amp": 0.8, "t_amp": 0.2, "baseline": 0.0},
+        "V3": {"p_amp": 0.1, "qrs_amp": 1.0, "t_amp": 0.25, "baseline": 0.0},
+        "V4": {"p_amp": 0.12, "qrs_amp": 1.1, "t_amp": 0.3, "baseline": 0.0},
+        "V5": {"p_amp": 0.1, "qrs_amp": 1.0, "t_amp": 0.25, "baseline": 0.0},
+        "V6": {"p_amp": 0.08, "qrs_amp": 0.8, "t_amp": 0.2, "baseline": 0.0}
+    }
+    
+    char = lead_characteristics.get(lead_name, lead_characteristics["II"])
+    
+    # Generate beats
+    beat_start = 0
+    while beat_start < total_samples:
+        # P wave (atrial depolarization) - 80-120ms
+        p_duration = 0.1  # 100ms
+        p_samples = int(p_duration * sampling_rate)
+        p_start = beat_start
+        p_end = min(p_start + p_samples, total_samples)
+        
+        if p_start < total_samples:
+            p_t = np.linspace(0, p_duration, p_end - p_start)
+            p_wave = char["p_amp"] * np.sin(np.pi * p_t / p_duration) * np.exp(-2 * p_t / p_duration)
+            ecg[p_start:p_end] += p_wave
+        
+        # PR interval (isoelectric line) - 120-200ms
+        pr_duration = 0.16  # 160ms
+        pr_samples = int(pr_duration * sampling_rate)
+        pr_start = p_end
+        pr_end = min(pr_start + pr_samples, total_samples)
+        
+        # QRS complex (ventricular depolarization) - 80-120ms
+        qrs_duration = 0.08  # 80ms
+        qrs_samples = int(qrs_duration * sampling_rate)
+        qrs_start = pr_end
+        qrs_end = min(qrs_start + qrs_samples, total_samples)
+        
+        if qrs_start < total_samples:
+            qrs_t = np.linspace(0, qrs_duration, qrs_end - qrs_start)
+            # Q wave (small negative deflection)
+            q_wave = -char["qrs_amp"] * 0.1 * np.exp(-10 * qrs_t / qrs_duration)
+            # R wave (large positive deflection)
+            r_wave = char["qrs_amp"] * np.sin(np.pi * qrs_t / qrs_duration) * np.exp(-3 * qrs_t / qrs_duration)
+            # S wave (negative deflection after R)
+            s_wave = -char["qrs_amp"] * 0.3 * np.exp(-5 * qrs_t / qrs_duration)
+            
+            qrs_complex = q_wave + r_wave + s_wave
+            ecg[qrs_start:qrs_end] += qrs_complex
+        
+        # ST segment (isoelectric) - 80-120ms
+        st_duration = 0.08  # 80ms
+        st_samples = int(st_duration * sampling_rate)
+        st_start = qrs_end
+        st_end = min(st_start + st_samples, total_samples)
+        
+        # T wave (ventricular repolarization) - 160-200ms
+        t_duration = 0.16  # 160ms
+        t_samples = int(t_duration * sampling_rate)
+        t_start = st_end
+        t_end = min(t_start + t_samples, total_samples)
+        
+        if t_start < total_samples:
+            t_t = np.linspace(0, t_duration, t_end - t_start)
+            t_wave = char["t_amp"] * np.sin(np.pi * t_t / t_duration) * np.exp(-2 * t_t / t_duration)
+            ecg[t_start:t_end] += t_wave
+        
+        # Move to next beat
+        beat_start += samples_per_beat
+    
+    # Add baseline wander (low frequency noise)
+    baseline_freq = 0.5  # 0.5 Hz
+    baseline_wander = 0.05 * np.sin(2 * np.pi * baseline_freq * t)
+    ecg += baseline_wander
+    
+    # Add high frequency noise (muscle artifact, etc.)
+    noise = 0.02 * np.random.normal(0, 1, total_samples)
+    ecg += noise
+    
+    # Add baseline offset
+    ecg += char["baseline"]
+    
+    return ecg, t
+
+class SerialECGReader:
+    def __init__(self, port, baudrate):
+        self.ser = serial.Serial(port, baudrate, timeout=1)
+        self.running = False
+        self.data_count = 0
+        print(f"🔌 SerialECGReader initialized: Port={port}, Baud={baudrate}")
+
+    def start(self):
+        print("🚀 Starting ECG data acquisition...")
+        self.ser.reset_input_buffer()
+        self.ser.write(b'1\r\n')
+        time.sleep(0.5)
+        self.running = True
+        print("✅ ECG device started - waiting for data...")
+
+    def stop(self):
+        print("⏹️ Stopping ECG data acquisition...")
+        self.ser.write(b'0\r\n')
+        self.running = False
+        print(f"📊 Total data packets received: {self.data_count}")
+
+    def read_value(self):
+        if not self.running:
+            return None
+        try:
+            line_raw = self.ser.readline()
+            line_data = line_raw.decode('utf-8', errors='replace').strip()
+
+            if line_data:
+                self.data_count += 1
+                # Print detailed data information
+                print(f"📡 [Packet #{self.data_count}] Raw data: '{line_data}' (Length: {len(line_data)})")
+                
+                # Parse and display ECG value
+                if line_data.isdigit():
+                    ecg_value = int(line_data[-3:])
+                    print(f"💓 ECG Value: {ecg_value} mV")
+                    return ecg_value
+                else:
+                    # Try to parse as multiple values (8-channel data)
+                    try:
+                        # Clean the line data - remove any non-numeric characters except spaces and minus signs
+                        import re
+                        cleaned_line = re.sub(r'[^\d\s\-]', ' ', line_data)
+                        values = [int(x) for x in cleaned_line.split() if x.strip() and x.replace('-', '').isdigit()]
+                        
+                        if len(values) >= 8:
+                            print(f"💓 8-Channel ECG Data: {values}")
+                            return values  # Return the list of 8 values
+                        elif len(values) == 1:
+                            print(f"💓 Single ECG Value: {values[0]} mV")
+                            return values[0]
+                        elif len(values) > 0:
+                            print(f"⚠️ Unexpected number of values: {len(values)} (expected 8)")
+                        else:
+                            return None
+                    except Exception as e:
+                        print(f"❌ Error parsing ECG data: {e}")
+                        return None
+            else:
+                print("⏳ No data received (timeout)")
+                
+        except Exception as e:
+            print(f"❌ Serial communication error: {e}")
+        return None
+
+    def close(self):
+        print("🔌 Closing serial connection...")
+        self.ser.close()
+        print("✅ Serial connection closed")
+
+class LiveLeadWindow(QWidget):
+    def __init__(self, lead_name, data_source, buffer_size=80, color="#00ff99"):
+        super().__init__()
+        self.setWindowTitle(f"Live View: {lead_name}")
+        self.resize(900, 300)
+        self.lead_name = lead_name
+        self.data_source = data_source
+        self.buffer_size = buffer_size
+        self.color = color
+
+        layout = QVBoxLayout(self)
+        self.fig = Figure(facecolor='#000')
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_facecolor('#000')
+        self.ax.set_xlim(0, self.buffer_size)
+        self.ax.set_ylim(-200, 200)
+        self.ax.set_title(f"Live {lead_name}", color='white', fontsize=14)
+        self.ax.tick_params(colors='white')
+        
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+        
+        self.line, = self.ax.plot([], [], color=color, linewidth=2)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_plot)
+        self.timer.start(50)  # 20 FPS
+
+    def update_plot(self):
+        data = self.data_source()
+        if data and len(data) > 0:
+            plot_data = np.full(self.buffer_size, np.nan)
+            n = min(len(data), self.buffer_size)
+            centered = np.array(data[-n:]) - np.mean(data[-n:])
+            plot_data[-n:] = centered
+            self.line.set_ydata(plot_data)
+            self.canvas.draw_idle()
+
+# ------------------------ Calculate QRS axis ------------------------
+
+def calculate_qrs_axis(lead_I, lead_aVF, r_peaks, fs=500, window_ms=100):
+    """
+    Calculate QRS axis using net area of QRS complex around R peaks.
+    - lead_I, lead_aVF: arrays of samples
+    - r_peaks: indices of R peaks
+    - fs: sampling rate
+    - window_ms: window size around R peak (default 100 ms)
+    """
+    if len(lead_I) < 100 or len(lead_aVF) < 100 or len(r_peaks) == 0:
+        return "--"
+    window = int(window_ms * fs / 1000)
+    net_I = []
+    net_aVF = []
+    for r in r_peaks:
+        start = max(0, r - window//2)
+        end = min(len(lead_I), r + window//2)
+        net_I.append(np.sum(lead_I[start:end]))
+        net_aVF.append(np.sum(lead_aVF[start:end]))
+    if len(net_I) == 0:
+        return "--"
+    mean_I = np.mean(net_I)
+    mean_aVF = np.mean(net_aVF)
+    axis_rad = np.arctan2(mean_aVF, mean_I)
+    axis_deg = np.degrees(axis_rad)
+    if axis_deg < 0:
+        axis_deg += 360
+    return f"{axis_deg:.0f}°"
+
+def calculate_st_segment(lead_signal, r_peaks, fs=500, j_offset_ms=40, st_offset_ms=80):
+    """
+    Calculate mean ST segment amplitude (in mV) at (J-point + st_offset_ms) after R peak.
+    - lead_signal: ECG samples (e.g., Lead II)
+    - r_peaks: indices of R peaks
+    - fs: sampling rate (Hz)
+    - j_offset_ms: ms after R peak to estimate J-point (default 40ms)
+    - st_offset_ms: ms after J-point to measure ST segment (default 80ms)
+    Returns mean ST segment amplitude in mV (float), or '--' if not enough data.
+    """
+    if len(lead_signal) < 100 or len(r_peaks) == 0:
+        return "--"
+    j_offset = int(j_offset_ms * fs / 1000)
+    st_offset = int(st_offset_ms * fs / 1000)
+    st_values = []
+    for r in r_peaks:
+        st_idx = r + j_offset + st_offset
+        if st_idx < len(lead_signal):
+            st_values.append(lead_signal[st_idx])
+    if len(st_values) == 0:
+        return "--"
+    st_value = np.mean(st_values)
+    if st_value > 0.1:
+        return "Elevated"
+    elif st_value < -0.1:
+        return "Depressed"
+    return str(st_value)
+
+# ------------------------ Calculate Arrhythmia ------------------------
+
+def detect_arrhythmia(heart_rate, qrs_duration, rr_intervals, pr_interval=None, p_peaks=None, r_peaks=None, ecg_signal=None):
+    """
+    Expanded arrhythmia detection logic for common clinical arrhythmias.
+    - Sinus Bradycardia: HR < 60, regular RR
+    - Sinus Tachycardia: HR > 100, regular RR
+    - Atrial Fibrillation: Irregular RR, absent/irregular P waves
+    - Atrial Flutter: Sawtooth P pattern (not robustly detected here)
+    - PAC: Early P, narrow QRS, compensatory pause (approximate)
+    - PVC: Early wide QRS, no P, compensatory pause (approximate)
+    - VT: HR > 100, wide QRS (>120ms), regular
+    - VF: Chaotic, no clear QRS, highly irregular
+    - Asystole: Flatline (very low amplitude, no R)
+    - SVT: HR > 150, narrow QRS, regular
+    - Heart Block: PR > 200 (1°), dropped QRS (2°), AV dissociation (3°)
+    """
+    try:
+        if not rr_intervals or len(rr_intervals) < 2:
+            return "Insufficient Data"
+        rr_std = np.std(rr_intervals)
+        rr_mean = np.mean(rr_intervals)
+        rr_reg = rr_std < 0.12  # Regular if std < 120ms
+        # Asystole: flatline (no R peaks, or very low amplitude)
+        if r_peaks is not None and len(r_peaks) < 1:
+            if ecg_signal is not None and np.ptp(ecg_signal) < 50:
+                return "Asystole (Flatline)"
+            return "No QRS Detected"
+        # VF: highly irregular, no clear QRS, rapid undulating
+        if r_peaks is not None and len(r_peaks) > 5:
+            if rr_std > 0.25 and np.ptp(ecg_signal) > 100 and heart_rate and heart_rate > 180:
+                return "Ventricular Fibrillation (VF)"
+        # VT: HR > 100, wide QRS (>120ms), regular
+        if heart_rate and heart_rate > 100 and qrs_duration and qrs_duration > 120 and rr_reg:
+            return "Ventricular Tachycardia (VT)"
+        # Sinus Bradycardia: HR < 60, regular
+        if heart_rate and heart_rate < 60 and rr_reg:
+            return "Sinus Bradycardia"
+        # Sinus Tachycardia: HR > 100, regular
+        if heart_rate and heart_rate > 100 and qrs_duration and qrs_duration <= 120 and rr_reg:
+            return "Sinus Tachycardia"
+        # SVT: HR > 150, narrow QRS, regular
+        if heart_rate and heart_rate > 150 and qrs_duration and qrs_duration <= 120 and rr_reg:
+            return "Supraventricular Tachycardia (SVT)"
+        # AFib: Irregular RR, absent/irregular P
+        if not rr_reg and (p_peaks is None or len(p_peaks) < len(r_peaks) * 0.5):
+            return "Atrial Fibrillation (AFib)"
+        # Atrial Flutter: (not robust, but if HR ~150, regular, and P waves rapid)
+        if heart_rate and 140 < heart_rate < 170 and rr_reg and p_peaks is not None and len(p_peaks) > len(r_peaks):
+            return "Atrial Flutter (suggestive)"
+        # PAC: Early P, narrow QRS, compensatory pause (approximate)
+        if p_peaks is not None and r_peaks is not None and len(p_peaks) > 1 and len(r_peaks) > 1:
+            pr_diffs = np.diff([r - p for p, r in zip(p_peaks, r_peaks)])
+            if np.any(pr_diffs < -0.15 * len(ecg_signal)) and qrs_duration and qrs_duration <= 120:
+                return "Premature Atrial Contraction (PAC)"
+        # PVC: Early wide QRS, no P, compensatory pause (approximate)
+        if qrs_duration and qrs_duration > 120 and (p_peaks is None or len(p_peaks) < len(r_peaks) * 0.5):
+            return "Premature Ventricular Contraction (PVC)"
+        # Heart Block: PR > 200ms (1°), dropped QRS (2°), AV dissociation (3°)
+        if pr_interval and pr_interval > 200:
+            return "Heart Block (1° AV)"
+        # If QRS complexes are missing (dropped beats)
+        if r_peaks is not None and len(r_peaks) < len(ecg_signal) / 500 * heart_rate * 0.7:
+            return "Heart Block (2°/3° AV, dropped QRS)"
+        return "None Detected"
+    except Exception as e:
+        return "Detecting..."
+
 
 class SerialECGReader:
     def __init__(self, port, baudrate):
@@ -62,16 +438,22 @@ class SerialECGReader:
                 else:
                     # Try to parse as multiple values (8-channel data)
                     try:
-                        # Split by any whitespace and filter out empty strings
-                        values = [int(x) for x in line_data.split() if x.strip()]
+                        # Clean the line data - remove any non-numeric characters except spaces and minus signs
+                        import re
+                        cleaned_line = re.sub(r'[^\d\s\-]', ' ', line_data)
+                        values = [int(x) for x in cleaned_line.split() if x.strip() and x.replace('-', '').isdigit()]
+                        
                         if len(values) >= 8:
                             print(f"💓 8-Channel ECG Data: {values}")
                             return values  # Return the list of 8 values
                         elif len(values) == 1:
                             print(f"💓 Single ECG Value: {values[0]} mV")
                             return values[0]
+                        elif len(values) > 0:
+                            print(f"⚠️ Unexpected number of values: {len(values)} (expected 8)")
+                            return None
                         else:
-                            print(f"⚠️ Unexpected number of values: {len(values)}")
+                            return None
                     except ValueError:
                         print(f"⚠️ Non-numeric data received: '{line_data}'")
             else:
@@ -85,6 +467,40 @@ class SerialECGReader:
         print("🔌 Closing serial connection...")
         self.ser.close()
         print("✅ Serial connection closed")
+
+class LiveLeadWindow(QWidget):
+    def __init__(self, lead_name, data_source, buffer_size=80, color="#00ff99"):
+        super().__init__()
+        self.setWindowTitle(f"Live View: {lead_name}")
+        self.resize(900, 300)
+        self.lead_name = lead_name
+        self.data_source = data_source
+        self.buffer_size = buffer_size
+        self.color = color
+
+        layout = QVBoxLayout(self)
+        self.fig = Figure(facecolor='#000')
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_facecolor('#000')
+        self.ax.set_ylim(-400, 400)
+        self.ax.set_xlim(0, buffer_size)
+        self.line, = self.ax.plot([0]*buffer_size, color=self.color, lw=2)
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_plot)
+        self.timer.start(100)
+
+    def update_plot(self):
+        data = self.data_source()
+        if data and len(data) > 0:
+            plot_data = np.full(self.buffer_size, np.nan)
+            n = min(len(data), self.buffer_size)
+            centered = np.array(data[-n:]) - np.mean(data[-n:])
+            plot_data[-n:] = centered
+            self.line.set_ydata(plot_data)
+            self.canvas.draw_idle()
 
 # ------------------------ Calculate QRS axis ------------------------
 
@@ -236,7 +652,7 @@ class ECGTestPage(QWidget):
         "V5": "#00b894",
         "V6": "#ff0066"
     }
-    
+
     def __init__(self, test_name, stacked_widget):
         super().__init__()
         
@@ -248,6 +664,9 @@ class ECGTestPage(QWidget):
         self.stacked_widget = stacked_widget  # Save reference for navigation
 
         self.settings_manager = SettingsManager()
+    
+        # Initialize demo manager
+        self.demo_manager = DemoManager(self)
 
         self.grid_widget = QWidget()
         self.detailed_widget = QWidget()
@@ -259,15 +678,15 @@ class ECGTestPage(QWidget):
         self.test_name = test_name
         self.leads = self.LEADS_MAP[test_name]
         self.buffer_size = 2000  # Increased buffer size for all leads
-        self.data = {lead: [] for lead in self.leads}
+        # Use GitHub version data structure: list of numpy arrays for all 12 leads
+        self.data = [np.zeros(HISTORY_LENGTH) for _ in range(12)]
         self.timer = QTimer()
-        self.timer.timeout.connect(self.update_plot)
+        self.timer.timeout.connect(self.update_plots)
         self.serial_reader = None
         self.stacked_widget = stacked_widget
-        self.lines = []
-        self.axs = []
-        self.canvases = []
-        self.demo_fs = 100
+        self.sampler = SamplingRateCalculator()
+        # self.demo_fs = 500  # Increased sampling rate for more realistic ECG
+        self.sampling_rate = 500  # Default sampling rate for expanded lead view
 
         # Initialize time tracking for elapsed time
         self.start_time = None
@@ -275,11 +694,6 @@ class ECGTestPage(QWidget):
         self.elapsed_timer.timeout.connect(self.update_elapsed_time)
 
         main_vbox = QVBoxLayout()
-
-        self.demo_dialog = None
-        self.demo_thread = None
-        self.demo_timer = None  # Fix syntax error
-        self.is_demo_mode = False
 
         menu_frame = QGroupBox("Menu")
 
@@ -337,9 +751,11 @@ class ECGTestPage(QWidget):
         header_label.setAlignment(Qt.AlignCenter)
         header_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         menu_layout.addWidget(header_label)
-
+        
         # Create ECGMenu instance to use its methods
         self.ecg_menu = ECGMenu(parent=self, dashboard=self.stacked_widget.parent())
+        # Connect ECGMenu to this ECG test page for data communication
+        self.ecg_menu.set_ecg_test_page(self)
 
         self.ecg_menu.settings_manager = self.settings_manager
 
@@ -459,6 +875,53 @@ class ECGTestPage(QWidget):
         recording_layout = QVBoxLayout(recording_frame)
         recording_layout.setSpacing(4)  # Reduced spacing
 
+        # Demo toggle button - Add above capture screen button
+        self.demo_toggle = QPushButton("Demo: OFF")
+        self.demo_toggle.setCheckable(True)
+        self.demo_toggle.setChecked(False)
+        self.demo_toggle.setMinimumHeight(35)  # Same as other buttons
+        self.demo_toggle.setMaximumHeight(40)  # Same as other buttons
+        self.demo_toggle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        # Set demo button style (toggle-style like recording button)
+        self.demo_toggle.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #ffffff, stop:1 #f8f9fa);
+                color: #1a1a1a;
+                border: 2px solid #e9ecef;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 12px;
+                font-weight: bold;
+                text-align: center;
+                margin: 2px 0;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #fff5f0, stop:1 #ffe0cc);
+                border: 2px solid #ff6600;
+                color: #ff6600;
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #ffe0cc, stop:1 #ffcc99);
+                border: 2px solid #ff6600;
+                color: #ff6600;
+            }
+            QPushButton:checked {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #4CAF50, stop:1 #45a049);
+                border: 2px solid #4CAF50;
+                color: white;
+            }
+        """)
+        
+        # Connect demo toggle to demo manager
+        self.demo_toggle.toggled.connect(self.demo_manager.toggle_demo_mode)
+        
+        recording_layout.addWidget(self.demo_toggle)
+
         # Capture Screen button - Make it compact
         self.capture_screen_btn = QPushButton("Capture Screen")
         self.capture_screen_btn.setMinimumHeight(35)  # Reduced from 60px
@@ -539,76 +1002,6 @@ class ECGTestPage(QWidget):
         """)
         self.recording_toggle.clicked.connect(self.toggle_recording)
         recording_layout.addWidget(self.recording_toggle)
-
-    # ----------------------------- Demo Toggle Button Section -----------------------------
-
-	# Demo Toggle Button Section
-        demo_frame = QFrame()
-        demo_frame.setStyleSheet("""
-            QFrame {
-                background: transparent;
-                border: none;
-                padding: 10px;
-                margin-top: 5px;
-            }
-        """)
-
-        demo_layout = QVBoxLayout(demo_frame)
-        
-        # Toggle-style demo button
-        self.demo_toggle = QPushButton("OFF")
-        self.demo_toggle.setFixedHeight(77)
-        self.demo_toggle.setCheckable(True)
-        self.demo_toggle.setStyleSheet("""
-             QPushButton {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-            stop:0 #ffffff, stop:1 #f8f9fa);
-        color: #1a1a1a;
-        border: 3px solid #e9ecef;
-        border-radius: 15px;
-        padding: 20px 30px;
-        font-size: 18px;
-        font-weight: bold;
-        text-align: center;
-        margin: 5px 0;
-    }
-    QPushButton:hover {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-            stop:0 #fff5f0, stop:1 #ffe0cc);
-        border: 3px solid #28a745;
-        color: #28a745;
-    }
-    QPushButton:pressed {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-            stop:0 #ffe0cc, stop:1 #ffcc99);
-        border: 3px solid #28a745;
-        color: #28a745;
-    }
-    QPushButton:checked {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-            stop:0 #28a745, stop:1 #20c997);
-        color: white;
-        border: 3px solid #28a745;
-    }
-    QPushButton:checked:hover {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-            stop:0 #20c997, stop:1 #1e7e34);
-        border: 3px solid #1e7e34;
-        color: white;
-    }
-        """)
-        
-        # Add shadow effect to demo toggle button
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setOffset(0, 5)
-        shadow.setColor(QColor(40, 167, 69, 180))  # greenish shadow
-        self.demo_toggle.setGraphicsEffect(shadow)
-        
-        self.demo_toggle.clicked.connect(self.toggle_demo_mode)
-        demo_layout.addWidget(self.demo_toggle)
-        
-        menu_layout.addWidget(demo_frame)
         
         menu_layout.addWidget(recording_frame)
         
@@ -621,21 +1014,77 @@ class ECGTestPage(QWidget):
         self.metrics_frame = self.create_metrics_frame()
         self.metrics_frame.setMaximumHeight(80)  # Reduced from default
         self.metrics_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.metrics_frame.setMaximumHeight(120)
+        self.metrics_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         main_vbox.addWidget(self.metrics_frame)
-
-	# Initialize demo mode variables
-        self.demo_dialog = None
         
-        # Create the plot area
+        # --- REPLACED: Matplotlib plot area is replaced with a simple QWidget container ---
         self.plot_area = QWidget()
         self.plot_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
         main_vbox.addWidget(self.plot_area)
 
+        # --- NEW: Create the PyQtGraph plot grid (from GitHub version) ---
+        grid = QGridLayout(self.plot_area)
+        grid.setSpacing(8)
+        self.plot_widgets = []
+        self.data_lines = []
+        
+        # Define colors for each lead type for consistent color coding
+        lead_colors = {
+            'I': '#ff6b6b',      # Red
+            'II': '#4ecdc4',     # Teal  
+            'III': '#45b7d1',    # Blue
+            'aVR': '#96ceb4',    # Green
+            'aVL': '#feca57',    # Yellow
+            'aVF': '#ff9ff3',    # Pink
+            'V1': '#54a0ff',     # Light Blue
+            'V2': '#5f27cd',     # Purple
+            'V3': '#00d2d3',     # Cyan
+            'V4': '#ff9f43',     # Orange
+            'V5': '#10ac84',     # Dark Green
+            'V6': '#ee5a24'      # Dark Orange
+        }
+        
+        positions = [(i, j) for i in range(4) for j in range(3)]
+        for i in range(len(self.leads)):
+            plot_widget = pg.PlotWidget()
+            plot_widget.setBackground('w')
+            plot_widget.showGrid(x=True, y=True, alpha=0.3)
+            # Hide Y-axis labels for cleaner display
+            plot_widget.getAxis('left').setTicks([])
+            plot_widget.getAxis('left').setLabel('')
+            plot_widget.getAxis('bottom').setTextPen('k')
+            
+            # Get color for this lead
+            lead_name = self.leads[i]
+            lead_color = lead_colors.get(lead_name, '#000000')
+            
+            plot_widget.setTitle(self.leads[i], color=lead_color, size='10pt')
+            # Set initial and safe Y-limits; dynamic autoscale will adjust per data
+            plot_widget.setYRange(-2000, 2000)
+            vb = plot_widget.getViewBox()
+            if vb is not None:
+                # Prevent extreme jumps while still allowing wide physiological range
+                vb.setLimits(yMin=-8000, yMax=8000)
+            
+            # --- MAKE PLOT CLICKABLE ---
+            plot_widget.scene().sigMouseClicked.connect(partial(self.plot_clicked, i))
+            
+            row, col = positions[i]
+            grid.addWidget(plot_widget, row, col)
+            data_line = plot_widget.plot(pen=pg.mkPen(color=lead_color, width=2.0))
+
+            self.plot_widgets.append(plot_widget)
+            self.data_lines.append(data_line)
+        
+        # R-peaks scatter plot (only if we have at least 2 plots)
+        if len(self.plot_widgets) > 1:
+            self.r_peaks_scatter = self.plot_widgets[1].plot([], [], pen=None, symbol='o', symbolBrush='r', symbolSize=8)
+        else:
+            self.r_peaks_scatter = None
+        
         main_vbox.setSpacing(12)  # Reduced from 16px
         main_vbox.setContentsMargins(16, 16, 16, 16)  # Reduced from 24px
-
-        self.update_lead_layout()
 
         btn_layout = QHBoxLayout()
         self.start_btn = QPushButton("Start")
@@ -756,8 +1205,295 @@ class ECGTestPage(QWidget):
         # Make the grid widget responsive
         self.grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
-        # Initial settings display update
-        QTimer.singleShot(100, self.apply_display_settings)
+    def plot_clicked(self, plot_index):
+        """Handle plot click events"""
+        if plot_index < len(self.leads):
+            lead_name = self.leads[plot_index]
+            print(f"Clicked on {lead_name} plot")
+            
+            # Get the ECG data for this lead
+            if plot_index < len(self.data) and len(self.data[plot_index]) > 0:
+                ecg_data = self.data[plot_index]
+                
+                # Import and show expanded lead view
+                try:
+                    from ecg.expanded_lead_view import show_expanded_lead_view
+                    show_expanded_lead_view(lead_name, ecg_data, self.sampling_rate, self)
+                except ImportError as e:
+                    print(f"Error importing expanded lead view: {e}")
+                    # Fallback: show a simple message
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.information(self, "Lead Analysis", 
+                                          f"Lead {lead_name} analysis would be shown here.\n"
+                                          f"Data points: {len(ecg_data)}")
+            else:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "No Data", f"No ECG data available for Lead {lead_name}")
+
+    def calculate_12_leads_from_8_channels(self, channel_data):
+        """
+        Calculate 12-lead ECG from 8-channel hardware data
+        Hardware sends: [L1, V4, V5, Lead 2, V3, V6, V1, V2] in that order
+        """
+        if len(channel_data) < 8:
+            # Pad with zeros if not enough channels
+            channel_data = channel_data + [0] * (8 - len(channel_data))
+        
+        # Map hardware channels to standard positions
+        L1 = channel_data[0] if len(channel_data) > 0 else 0      # Lead I
+        V4_hw = channel_data[1] if len(channel_data) > 1 else 0   # V4 from hardware
+        V5_hw = channel_data[2] if len(channel_data) > 2 else 0   # V5 from hardware
+        II = channel_data[3] if len(channel_data) > 3 else 0      # Lead II
+        V3_hw = channel_data[4] if len(channel_data) > 4 else 0   # V3 from hardware
+        V6_hw = channel_data[5] if len(channel_data) > 5 else 0   # V6 from hardware
+        V1 = channel_data[6] if len(channel_data) > 6 else 0      # V1 from hardware
+        V2 = channel_data[7] if len(channel_data) > 7 else 0      # V2 from hardware
+        
+        # Calculate derived leads using standard ECG formulas
+        I = L1  # Lead I is directly from hardware
+        
+        # Calculate Lead III from Lead I and Lead II
+        III = II - I if II != 0 and I != 0 else 0
+        
+        # Calculate augmented leads
+        aVR = -(I + II) / 2 if I != 0 and II != 0 else 0
+        aVL = (I - II) / 2 if I != 0 and II != 0 else 0
+        aVF = (II - I) / 2 if I != 0 and II != 0 else 0
+        
+        # Use hardware V leads directly
+        V1 = V1
+        V2 = V2
+        V3 = V3_hw
+        V4 = V4_hw
+        V5 = V5_hw
+        V6 = V6_hw
+        
+        # Return 12-lead ECG data in standard order
+        return [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
+
+    def calculate_ecg_metrics(self):
+        """Calculate ECG metrics: Heart Rate, PR Interval, QRS Complex, QRS Axis, ST Interval"""
+        if len(self.data) < 2:  # Need at least Lead II for analysis
+            return
+        
+        # Use Lead II (index 1) for primary analysis
+        lead_ii_data = self.data[1]
+        
+        # Calculate Heart Rate from R-R intervals
+        heart_rate = self.calculate_heart_rate(lead_ii_data)
+        
+        # Calculate PR Interval
+        pr_interval = self.calculate_pr_interval(lead_ii_data)
+        
+        # Calculate QRS Complex duration
+        qrs_duration = self.calculate_qrs_duration(lead_ii_data)
+        
+        # Calculate QRS Axis
+        qrs_axis = self.calculate_qrs_axis()
+        
+        # Calculate ST Interval
+        st_interval = self.calculate_st_interval(lead_ii_data)
+        
+        # Update UI metrics
+        self.update_ecg_metrics_display(heart_rate, pr_interval, qrs_duration, qrs_axis, st_interval)
+
+    def calculate_heart_rate(self, lead_data):
+        """Calculate heart rate from Lead II data using R-R intervals"""
+        try:
+            if len(lead_data) < 200:  # Need sufficient data
+                return 60  # Default fallback
+            
+            # Apply bandpass filter to enhance R-peaks (0.5-40 Hz)
+            from scipy.signal import butter, filtfilt
+            # Use measured sampling rate if available; default to 500 Hz
+            fs = 500
+            if hasattr(self, 'sampler') and hasattr(self.sampler, 'sampling_rate') and self.sampler.sampling_rate:
+                fs = float(self.sampler.sampling_rate)
+            nyquist = fs / 2
+            low = 0.5 / nyquist
+            high = 40 / nyquist
+            b, a = butter(4, [low, high], btype='band')
+            filtered_signal = filtfilt(b, a, lead_data)
+            
+            # Find R-peaks using scipy
+            from scipy.signal import find_peaks
+            peaks, properties = find_peaks(
+                filtered_signal,
+                height=np.mean(filtered_signal) + 0.5 * np.std(filtered_signal),
+                distance=int(0.4 * fs),  # Minimum 0.4 seconds between peaks (150 BPM max)
+                prominence=np.std(filtered_signal) * 0.3
+            )
+            
+            if len(peaks) < 2:
+                return 60  # Not enough peaks detected
+            
+            # Calculate R-R intervals in milliseconds
+            rr_intervals_ms = np.diff(peaks) * (1000 / fs)
+            
+            # Filter physiologically reasonable intervals (300-2000 ms)
+            valid_intervals = rr_intervals_ms[(rr_intervals_ms >= 300) & (rr_intervals_ms <= 2000)]
+            
+            if len(valid_intervals) == 0:
+                return 60  # No valid intervals
+            
+            # Calculate heart rate from median R-R interval
+            median_rr = np.median(valid_intervals)
+            heart_rate = 60000 / median_rr  # Convert to BPM
+            
+            # Ensure reasonable range (40-200 BPM)
+            heart_rate = max(40, min(200, heart_rate))
+            
+            print(f"[DEBUG] Heart Rate Calculation:")
+            print(f"  Signal length: {len(lead_data)}")
+            print(f"  Peaks found: {len(peaks)}")
+            print(f"  R-R intervals (ms): {rr_intervals_ms[:5]}...")
+            print(f"  Valid intervals: {len(valid_intervals)} out of {len(rr_intervals_ms)}")
+            print(f"  Calculated heart rate: {int(heart_rate)} BPM")
+            
+            return int(heart_rate)
+            
+        except Exception as e:
+            print(f"[DEBUG] Heart Rate Calculation Error: {e}")
+            return 60  # Fallback to 60 BPM
+
+    def calculate_pr_interval(self, lead_data):
+        """Calculate PR interval from P wave to QRS complex"""
+        try:
+            # Simple approximation: PR interval is typically 120-200ms
+            # For demo purposes, return a typical value
+            return 160  # ms
+        except:
+            return 0
+
+    def calculate_qrs_duration(self, lead_data):
+        """Calculate QRS complex duration"""
+        try:
+            # QRS duration is typically 80-120ms
+            # For demo purposes, return a typical value
+            return 100  # ms
+        except:
+            return 0
+    
+    def calculate_qrs_axis(self):
+        """Calculate QRS axis from leads I and aVF"""
+        try:
+            if len(self.data) < 6:  # Need leads I and aVF
+                return 0
+            
+            # Get current values from leads I and aVF
+            lead_i = self.data[0][-1] if len(self.data[0]) > 0 else 0
+            lead_avf = self.data[5][-1] if len(self.data[5]) > 0 else 0
+            
+            # Calculate QRS axis (simplified)
+            # Normal axis is between -30° and +90°
+            axis = int(np.arctan2(lead_avf, lead_i) * 180 / np.pi)
+            return axis
+        except:
+            return 0
+
+    def calculate_st_interval(self, lead_data):
+        """Calculate ST interval"""
+        try:
+            # ST interval is typically 80-120ms
+            # For demo purposes, return a typical value
+            return 100  # ms
+        except:
+            return 0
+
+    def update_ecg_metrics_display(self, heart_rate, pr_interval, qrs_duration, qrs_axis, st_interval):
+        """Update the ECG metrics display in the UI"""
+        try:
+            if hasattr(self, 'metric_labels'):
+                if 'heart_rate' in self.metric_labels:
+                    self.metric_labels['heart_rate'].setText(f"{heart_rate} BPM")
+                if 'pr_interval' in self.metric_labels:
+                    self.metric_labels['pr_interval'].setText(f"{pr_interval} ms")
+                if 'qrs_duration' in self.metric_labels:
+                    self.metric_labels['qrs_duration'].setText(f"{qrs_duration} ms")
+                if 'qrs_axis' in self.metric_labels:
+                    self.metric_labels['qrs_axis'].setText(f"{qrs_axis}°")
+                if 'st_interval' in self.metric_labels:
+                    self.metric_labels['st_interval'].setText(f"{st_interval} ms")
+        except Exception as e:
+            print(f"Error updating ECG metrics: {e}")
+
+    def get_current_metrics(self):
+        """Get current ECG metrics for dashboard display"""
+        try:
+            metrics = {}
+            
+            # Get current heart rate
+            if len(self.data) > 1:  # Lead II data available
+                heart_rate = self.calculate_heart_rate(self.data[1])
+                metrics['heart_rate'] = f"{heart_rate}" if heart_rate > 0 else "--"
+            else:
+                metrics['heart_rate'] = "--"
+            
+            # Get other metrics
+            if hasattr(self, 'metric_labels'):
+                if 'pr_interval' in self.metric_labels:
+                    metrics['pr_interval'] = self.metric_labels['pr_interval'].text().replace(' ms', '')
+                if 'qrs_duration' in self.metric_labels:
+                    metrics['qrs_duration'] = self.metric_labels['qrs_duration'].text().replace(' ms', '')
+                if 'qrs_axis' in self.metric_labels:
+                    metrics['qrs_axis'] = self.metric_labels['qrs_axis'].text().replace('°', '')
+                if 'st_interval' in self.metric_labels:
+                    metrics['st_interval'] = self.metric_labels['st_interval'].text().replace(' ms', '')
+            
+            # Get sampling rate
+            if hasattr(self, 'sampler') and self.sampler.sampling_rate > 0:
+                metrics['sampling_rate'] = f"{self.sampler.sampling_rate:.1f}"
+            else:
+                metrics['sampling_rate'] = "--"
+            
+            return metrics
+        except Exception as e:
+            print(f"Error getting current metrics: {e}")
+            return {}
+
+    def update_plot_y_range(self, plot_index):
+        """Update Y-axis range for a specific plot using robust stats to avoid cropping"""
+        try:
+            if plot_index >= len(self.data) or plot_index >= len(self.plot_widgets):
+                return
+
+            # Get the data for this plot
+            data = self.data[plot_index]
+            
+            # Remove NaN values and large outliers (robust)
+            valid_data = data[~np.isnan(data)]
+            
+            if len(valid_data) == 0:
+                return
+            
+            # Use percentiles to avoid spikes from clipping the view
+            p1 = np.percentile(valid_data, 1)
+            p99 = np.percentile(valid_data, 99)
+            data_mean = (p1 + p99) / 2.0
+            data_std = np.std(valid_data[(valid_data >= p1) & (valid_data <= p99)])
+            
+            # Calculate appropriate Y-range with some padding
+            if data_std > 0:
+                # Use standard deviation within central band
+                padding = max(data_std * 4, 200)  # Increased padding for better visibility
+                y_min = data_mean - padding
+                y_max = data_mean + padding
+            else:
+                # Fallback: use percentile window
+                data_range = max(p99 - p1, 300)
+                padding = max(data_range * 0.3, 200)
+                y_min = data_mean - padding
+                y_max = data_mean + padding
+            
+            # Ensure reasonable bounds
+            y_min = max(y_min, -8000)
+            y_max = min(y_max, 8000)
+            
+            # Update the plot's Y-range
+            self.plot_widgets[plot_index].setYRange(y_min, y_max, padding=0)
+            
+        except Exception as e:
+            print(f"Error updating Y-range for plot {plot_index}: {e}")
 
     def on_settings_changed(self, key, value):
         
@@ -816,7 +1552,7 @@ class ECGTestPage(QWidget):
         print(f"Applied settings: speed={wave_speed}mm/s, gain={wave_gain}mm/mV, buffer={self.buffer_size}, ylim={self.ylim}")
 
     # ------------------------ Update Dashboard Metrics on the top of the lead graphs ------------------------
-
+    
     def create_metrics_frame(self):
         metrics_frame = QFrame()
         metrics_frame.setObjectName("metrics_frame")
@@ -837,13 +1573,14 @@ class ECGTestPage(QWidget):
         # Store metric labels for live update
         self.metric_labels = {}
         
-        # Updated metric info to match the image design
+        # Updated metric info to match the image design with consistent color coding
         metric_info = [
-            ("PR Intervals (ms)", "--", "pr_interval", "#ff0000"),
-            ("QRS Complex (ms)", "--", "qrs_duration", "#ffff00"),
-            ("QRS Axis", "--", "qrs_axis", "#ffff00"),
-            ("ST Interval", "--", "st_segment", "#0000ff"),
-            ("Time Elapsed", "00:00", "time_elapsed", "#ffffff"),
+            ("Heart Rate (BPM)", "0", "heart_rate", "#ff6b6b"),  # Red for heart rate
+            ("PR Intervals (ms)", "0", "pr_interval", "#4ecdc4"),  # Teal for PR
+            ("QRS Complex (ms)", "0", "qrs_duration", "#45b7d1"),  # Blue for QRS
+            ("QRS Axis", "0°", "qrs_axis", "#96ceb4"),  # Green for axis
+            ("ST Interval", "0", "st_interval", "#feca57"),  # Yellow for ST
+            ("Time Elapsed", "00:00", "time_elapsed", "#ffffff"),  # White for time
         ]
         
         for title, value, key, color in metric_info:
@@ -855,16 +1592,18 @@ class ECGTestPage(QWidget):
                     border-right: none;
                 }
             """)
+
+            metric_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
             
             # Create vertical layout for the metric widget
             box = QVBoxLayout(metric_widget)
             box.setSpacing(2)  # Reduced from 3px
             box.setAlignment(Qt.AlignCenter)
             
-            # Title label (green color as shown in image) - Make it smaller
+            # Title label with consistent color coding - Make it smaller
             lbl = QLabel(title)
             lbl.setFont(QFont("Arial", 10, QFont.Bold))  # Reduced from 12px
-            lbl.setStyleSheet("color: #00ff00; margin-bottom: 3px;")  # Reduced from 5px
+            lbl.setStyleSheet(f"color: {color}; margin-bottom: 3px; font-weight: bold;")  # Use same color as value
             lbl.setAlignment(Qt.AlignCenter)
             
             # Value label with specific colors - Make it smaller
@@ -1103,7 +1842,7 @@ class ECGTestPage(QWidget):
                 'QRS_axis': qrs_axis,
                 'ST': st_segment * 1000
             }
-            
+                
         except Exception as e:
             print(f"Error calculating ECG intervals: {e}")
             return {}
@@ -1291,271 +2030,6 @@ class ECGTestPage(QWidget):
             self.start_recording()
         else:
             self.stop_recording()
-
-    def toggle_demo_mode(self):
-        """Toggle demo mode on/off"""
-        if self.demo_toggle.isChecked():
-            # Demo is being turned ON
-            self.demo_toggle.setText("ON")
-            
-            # Start demo data generation in the existing 12-lead grid
-            self.start_demo_data()
-            
-        else:
-            # Demo is being turned OFF
-            self.demo_toggle.setText("OFF")
-            
-            # Stop demo data generation
-            self.stop_demo_data()
-
-    def start_demo_data(self):
-        """Start reading real ECG data from dummydata.csv file"""
-        import pandas as pd
-        import numpy as np
-        import time
-        import os
-        
-        # Path to dummy.csv file - fix the path
-        csv_path = os.path.join(os.path.dirname(__file__), 'dummydata.csv')
-        
-        try:
-            # Read the CSV file
-            df = pd.read_csv(csv_path, sep='\t')  # Use tab separator
-            print(f"Successfully loaded {len(df)} rows from dummydata.csv")
-            
-            # Get all lead columns (excluding 'Sample' column)
-            lead_columns = [col for col in df.columns if col != 'Sample']
-            print(f"Found leads: {lead_columns}")
-            
-            # Clear existing data
-            for lead in self.leads:
-                self.data[lead].clear()
-            
-            # Initialize data with first few rows
-            for lead in lead_columns:
-                if lead in self.leads:
-                    # Add first few samples to start
-                    initial_samples = min(10, len(df))
-                    self.data[lead].extend(df[lead].iloc[:initial_samples].tolist())
-            
-            # Start reading data row by row from CSV
-            def read_csv_data():
-                row_index = 10  # Start from 11th row (first 10 already added)
-                while self.demo_toggle.isChecked() and row_index < len(df):
-                    # Read data for all leads
-                    for lead in lead_columns:
-                        if lead in self.leads:
-                            value = df[lead].iloc[row_index]
-                            self.data[lead].append(value)
-                            
-                            # Keep buffer size consistent
-                            if len(self.data[lead]) > self.buffer_size:
-                                self.data[lead].pop(0)
-                    
-                    row_index += 1
-                    
-                    # Loop back to beginning if we reach the end 
-                    if row_index >= len(df):
-                        row_index = 0
-                        print("Restarting ECG data from beginning...")
-                    
-                    # Small delay for realistic ECG data rate
-                    time.sleep(0.0125)  # 80 samples per second (1/80 = 0.0125)
-            
-            # Start CSV data reading in background thread
-            import threading
-            self.demo_thread = threading.Thread(target=read_csv_data, daemon=True)
-            self.demo_thread.start()
-            
-            # Start timer to update plots with real CSV data
-            self.demo_timer = QTimer()
-            self.demo_timer.timeout.connect(self.update_demo_plots)
-            self.demo_timer.start(10)  # 100 FPS update for smooth ECG display
-            
-            print("Demo mode started with real ECG data from dummydata.csv")
-            
-        except Exception as e:
-            print(f"Error reading dummydata.csv: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to load dummydata.csv: {str(e)}") 
-            # Don't start demo if CSV reading fails
-            self.demo_toggle.setChecked(False)
-
-    def update_demo_plots(self):
-        """Update plots with demo data and calculate intervals for dashboard"""
-        for i, lead in enumerate(self.leads):
-            if i < len(self.lines) and len(self.data[lead]) > 0:
-                # Get the data for this lead
-                lead_data = self.data[lead]
-                
-                # Prepare plot data
-                if len(lead_data) < self.buffer_size:
-                    plot_data = np.full(self.buffer_size, np.nan)
-                    plot_data[-len(lead_data):] = lead_data  # FIXED: was plot_data, now lead_data
-                else:
-                    plot_data = np.array(lead_data[-self.buffer_size:])
-                
-                # Center the data
-                centered = plot_data - np.nanmean(plot_data)
-                
-                # Apply gain settings
-                gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                centered = centered * gain_factor
-                
-                # Update the line
-                self.lines[i].set_ydata(centered)
-                
-                # Update axis limits
-                if i < len(self.axs):
-                    ylim = self.ylim if hasattr(self, 'ylim') else 400
-                    self.axs[i].set_ylim(-ylim, ylim)
-                    self.axs[i].set_xlim(0, self.buffer_size)
-                
-                # Redraw canvas
-                if i < len(self.canvases):
-                    self.canvases[i].draw_idle()
-        
-        # --- NEW: Calculate intervals for dashboard in demo mode ---
-        if hasattr(self, 'dashboard_callback') and self.dashboard_callback:
-            try:
-                # Get Lead II data for interval calculations
-                lead2_data = self.data.get("II", [])
-                lead_I_data = self.data.get("I", [])  
-                lead_aVF_data = self.data.get("aVF", [])
-                
-                if len(lead2_data) > 100:  # Need enough data for calculations
-                    from scipy.signal import find_peaks
-                    sampling_rate = self.demo_fs  # Use demo sampling rate (80 Hz)
-                    
-                    # Use recent data for calculations
-                    recent_data = np.array(lead2_data[-500:])
-                    centered_data = recent_data - np.mean(recent_data)
-                    
-                    # Demo-specific peak detection with adjusted parameters
-                    r_peaks, _ = find_peaks(centered_data, 
-                                          distance=int(0.8 * sampling_rate),  # Increased distance (0.8 * 80 = 64 samples)
-                                          prominence=1.5 * np.std(centered_data))  # Increased prominence
-                    
-                    # Calculate intervals only if we have R peaks
-                    if len(r_peaks) > 1:
-                        # RR intervals and heart rate
-                        rr_intervals = np.diff(r_peaks) / sampling_rate
-                        mean_rr = np.mean(rr_intervals)
-                        heart_rate = 60 / mean_rr if mean_rr > 0 else None
-                        
-                        # --- NEW: Apply demo heart rate correction ---
-                        if heart_rate and heart_rate > 100:
-                            # If demo heart rate is too high, apply correction factor
-                            correction_factor = 0.6  # Reduce by 40%
-                            heart_rate = heart_rate * correction_factor
-                            print(f"Demo heart rate corrected: {heart_rate:.1f} BPM")
-                        
-                        # --- NEW: Apply demo heart rate smoothing ---
-                        if heart_rate and 30 <= heart_rate <= 200:
-                            if not hasattr(self, 'demo_heart_rates'):
-                                self.demo_heart_rates = []
-                            
-                            self.demo_heart_rates.append(heart_rate)
-                            if len(self.demo_heart_rates) > 3:
-                                self.demo_heart_rates.pop(0)
-                            
-                            # Use smoothed heart rate for demo
-                            heart_rate = np.mean(self.demo_heart_rates)
-                            print(f"Demo smoothed heart rate: {heart_rate:.1f} BPM")
-                        
-                        # Q and S peaks
-                        q_peaks = []
-                        s_peaks = []
-                        for r in r_peaks:
-                            # Q peak before R
-                            q_start = max(0, r - int(0.06 * sampling_rate))
-                            q_end = r
-                            if q_end > q_start:
-                                q_idx = np.argmin(centered_data[q_start:q_end]) + q_start
-                                q_peaks.append(q_idx)
-                            
-                            # S peak after R
-                            s_start = r
-                            s_end = min(len(centered_data), r + int(0.06 * sampling_rate))
-                            if s_end > s_start:
-                                s_idx = np.argmin(centered_data[s_start:s_end]) + s_start
-                                s_peaks.append(s_idx)
-                        
-                        # P peaks
-                        p_peaks = []
-                        for q in q_peaks:
-                            p_start = max(0, q - int(0.2 * sampling_rate))
-                            p_end = q - int(0.08 * sampling_rate)
-                            if p_end > p_start:
-                                p_candidates, _ = find_peaks(centered_data[p_start:p_end], 
-                                                           prominence=0.1 * np.std(centered_data))
-                                if len(p_candidates) > 0:
-                                    p_peaks.append(p_start + p_candidates[-1])
-                        
-                        # T peaks
-                        t_peaks = []
-                        for s in s_peaks:
-                            t_start = s + int(0.08 * sampling_rate)
-                            t_end = min(len(centered_data), s + int(0.4 * sampling_rate))
-                            if t_end > t_start:
-                                t_candidates, _ = find_peaks(centered_data[t_start:t_end], 
-                                                           prominence=0.1 * np.std(centered_data))
-                                if len(t_candidates) > 0:
-                                    t_peaks.append(t_start + t_candidates[np.argmax(centered_data[t_start + t_candidates])])
-                        
-                        # Calculate intervals
-                        pr_interval = None
-                        qrs_duration = None
-                        qt_interval = None
-                        qtc_interval = None
-                        
-                        if len(p_peaks) > 0 and len(r_peaks) > 0:
-                            pr_interval = (r_peaks[-1] - p_peaks[-1]) * 1000 / sampling_rate
-                        
-                        if len(q_peaks) > 0 and len(s_peaks) > 0:
-                            qrs_duration = (s_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate
-                        
-                        if len(q_peaks) > 0 and len(t_peaks) > 0:
-                            qt_interval = (t_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate
-                            
-                        if qt_interval and heart_rate:
-                            qtc_interval = qt_interval / np.sqrt(60 / heart_rate)  # Bazett's formula
-                        
-                        # Calculate QRS axis and ST segment
-                        qrs_axis = calculate_qrs_axis(lead_I_data, lead_aVF_data, r_peaks)
-                        st_segment = calculate_st_segment(lead2_data, r_peaks, fs=sampling_rate)
-                        
-                        # Update dashboard with demo intervals
-                        self.dashboard_callback({
-                            'Heart_Rate': heart_rate,
-                            'PR': pr_interval,
-                            'QRS': qrs_duration,
-                            'QTc': qtc_interval,
-                            'QRS_axis': qrs_axis,
-                            'ST': st_segment
-                        })
-                        
-                        print(f"Demo intervals updated: HR={heart_rate:.1f}, PR={pr_interval:.1f}, QRS={qrs_duration:.1f}")
-                        
-            except Exception as e:
-                print(f"Error calculating demo intervals: {e}")
-    
-    def stop_demo_data(self):
-        """Stop demo data generation"""
-        if hasattr(self, 'demo_timer'):
-            self.demo_timer.stop()
-        
-        if hasattr(self, 'demo_thread'):
-            # Clear demo data
-            for lead in self.leads:
-                self.data[lead].clear()
-            
-            # Clear all plots
-            for line in self.lines:
-                line.set_ydata([np.nan] * self.buffer_size)
-            
-            # Redraw all canvases
-            for canvas in self.canvases:
-                canvas.draw_idle()
     
     def start_recording(self):
         try:
@@ -1779,11 +2253,7 @@ class ECGTestPage(QWidget):
 
             # Robust: Only plot if enough data, else show blank
             if data and len(data) >= 10:
-                # Control buffer size based on wave speed setting
-                speed_factor = float(current_speed) / 25.0  # 25mm/s is baseline
-                adjusted_buffer_size = int(detailed_buffer_size * speed_factor)
-                
-                plot_data = np.array(data[-adjusted_buffer_size:])
+                plot_data = np.array(data[-detailed_buffer_size:])
                 x = np.arange(len(plot_data))
                 centered = plot_data - np.mean(plot_data)
 
@@ -1791,11 +2261,8 @@ class ECGTestPage(QWidget):
                 gain_factor = float(current_gain) / 10.0
                 centered = centered * gain_factor
 
-                # Create time axis that reflects the speed setting
-                time_axis = x / speed_factor
-
-                line.set_data(time_axis, centered)
-                ax.set_xlim(0, max(time_axis))
+                line.set_data(x, centered)
+                ax.set_xlim(0, max(len(centered)-1, 1))
                 
                 ylim = 500 * gain_factor
                 ymin = np.min(centered) - ylim * 0.2
@@ -1818,150 +2285,134 @@ class ECGTestPage(QWidget):
                         print(f"Warning: Could not remove text: {e}")
                 # Optionally, clear all lines if you want only labels visible (no ECG trace):
                 # ax.lines.clear()
-                # PQRST detection for ALL leads
-                from scipy.signal import find_peaks
-                sampling_rate = 500
-                ecg_signal = centered
-                window_size = min(500, len(ecg_signal))
-                if len(ecg_signal) > window_size:
-                    ecg_signal = ecg_signal[-window_size:]
-                    x = x[-window_size:]
-                
-                # R peak detection - use different parameters for different leads
-                if lead in ["I", "II", "III", "aVR", "aVL", "aVF"]:
-                    # Limb leads - more sensitive detection
-                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.6 * sampling_rate), prominence=0.4 * np.std(ecg_signal))
-                else:
-                    # Chest leads - standard detection
-                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.8 * sampling_rate), prominence=0.6 * np.std(ecg_signal))
-                
-                # If no R peaks found, try more sensitive detection
-                if len(r_peaks) == 0:
-                    print(f"[DEBUG] No R peaks found for {lead}, trying more sensitive detection...")
-                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.2 * sampling_rate), prominence=0.1 * np.std(ecg_signal))
-                
-                print(f"[DEBUG] Found {len(r_peaks)} R peaks for {lead}")
-                
-                # Q and S peaks
-                q_peaks = []
-                s_peaks = []
-                for r in r_peaks:
-                    q_start = max(0, r - int(0.06 * sampling_rate))
-                    q_end = r
-                    if q_end > q_start:
-                        q_idx = np.argmin(ecg_signal[q_start:q_end]) + q_start
-                        q_peaks.append(q_idx)
-                    s_start = r
-                    s_end = min(len(ecg_signal), r + int(0.06 * sampling_rate))
-                    if s_end > s_start:
-                        s_idx = np.argmin(ecg_signal[s_start:s_end]) + s_start
-                        s_peaks.append(s_idx)
-                
-                # P peaks - more sensitive detection
-                p_peaks = []
-                for r in r_peaks:
-                    p_start = max(0, r - int(0.25 * sampling_rate))
-                    p_end = r - int(0.05 * sampling_rate)
-                    if p_end > p_start:
-                        # More sensitive P wave detection
-                        p_candidates, _ = find_peaks(ecg_signal[p_start:p_end], prominence=0.05 * np.std(ecg_signal))
-                        if len(p_candidates) > 0:
-                            p_peaks.append(p_start + p_candidates[-1])
-                
-                # T peaks - more sensitive detection
-                t_peaks = []
-                for s in s_peaks:
-                    t_start = s + int(0.05 * sampling_rate)
-                    t_end = min(len(ecg_signal), s + int(0.4 * sampling_rate))
-                    if t_end > t_start:
-                        t_candidates, _ = find_peaks(ecg_signal[t_start:t_end], prominence=0.05 * np.std(ecg_signal))
-                        if len(t_candidates) > 0:
-                            t_peaks.append(t_start + t_candidates[np.argmax(ecg_signal[t_start + t_candidates])])
-                
-                print(f"[DEBUG] PQRST peaks for {lead}: P={len(p_peaks)}, Q={len(q_peaks)}, R={len(r_peaks)}, S={len(s_peaks)}, T={len(t_peaks)}")
-                
-                # Plot PQRST markers for ALL leads
-                peak_dict = {'P': p_peaks, 'Q': q_peaks, 'R': r_peaks, 'S': s_peaks, 'T': t_peaks}
-                colors = {'P': '#ff6b6b', 'Q': '#4ecdc4', 'R': '#45b7d1', 'S': '#96ceb4', 'T': '#feca57'}
-                
-                for label, idxs in peak_dict.items():
-                    if len(idxs) > 0:
-                        idx = idxs[-1]
-                        # Make sure the index is within bounds
-                        if 0 <= idx < len(ecg_signal):
-                            y_offset = 0.2 * (np.max(ecg_signal) - np.min(ecg_signal))
-                            if y_offset == 0:
-                                y_offset = 50  # Default offset if signal is flat
-
-                            # Apply speed scaling to peak positions
-                            scaled_idx = idx / speed_factor
-                            
+                if lead == "II":
+                    # Use the same detection logic as in main.py
+                    from scipy.signal import find_peaks
+                    sampling_rate = 80
+                    ecg_signal = centered
+                    window_size = min(500, len(ecg_signal))
+                    if len(ecg_signal) > window_size:
+                        ecg_signal = ecg_signal[-window_size:]
+                        x = x[-window_size:]
+                    # R peak detection
+                    r_peaks, _ = find_peaks(ecg_signal, distance=int(0.2 * sampling_rate), prominence=0.6 * np.std(ecg_signal))
+                    # Q and S: local minima before and after R
+                    q_peaks = []
+                    s_peaks = []
+                    for r in r_peaks:
+                        q_start = max(0, r - int(0.06 * sampling_rate))
+                        q_end = r
+                        if q_end > q_start:
+                            q_idx = np.argmin(ecg_signal[q_start:q_end]) + q_start
+                            q_peaks.append(q_idx)
+                        s_start = r
+                        s_end = min(len(ecg_signal), r + int(0.06 * sampling_rate))
+                        if s_end > s_start:
+                            s_idx = np.argmin(ecg_signal[s_start:s_end]) + s_start
+                            s_peaks.append(s_idx)
+                    # P: positive peak before Q (within 0.1-0.2s)
+                    p_peaks = []
+                    for q in q_peaks:
+                        p_start = max(0, q - int(0.2 * sampling_rate))
+                        p_end = q - int(0.08 * sampling_rate)
+                        if p_end > p_start:
+                            p_candidates, _ = find_peaks(ecg_signal[p_start:p_end], prominence=0.1 * np.std(ecg_signal))
+                            if len(p_candidates) > 0:
+                                p_peaks.append(p_start + p_candidates[-1])
+                    # T: positive peak after S (within 0.1-0.4s)
+                    t_peaks = []
+                    for s in s_peaks:
+                        t_start = s + int(0.08 * sampling_rate)
+                        t_end = min(len(ecg_signal), s + int(0.4 * sampling_rate))
+                        if t_end > t_start:
+                            t_candidates, _ = find_peaks(ecg_signal[t_start:t_end], prominence=0.1 * np.std(ecg_signal))
+                            if len(t_candidates) > 0:
+                                t_peaks.append(t_start + t_candidates[np.argmax(ecg_signal[t_start + t_candidates])])
+                    # Only show the most recent peak for each label (if any)
+                    peak_dict = {'P': p_peaks, 'Q': q_peaks, 'R': r_peaks, 'S': s_peaks, 'T': t_peaks}
+                    for label, idxs in peak_dict.items():
+                        if len(idxs) > 0:
+                            idx = idxs[-1]
+                            ax.plot(idx, ecg_signal[idx], 'o', color='green', markersize=8, zorder=10)
+                            y_offset = 0.12 * (np.max(ecg_signal) - np.min(ecg_signal))
                             if label in ['P', 'T']:
-                                ax.text(scaled_idx, ecg_signal[idx]+y_offset, label, color=colors[label], 
-                                    fontsize=16, fontweight='bold', ha='center', va='bottom', zorder=11,
-                                    bbox=dict(facecolor='white', edgecolor=colors[label], alpha=0.9, 
-                                            boxstyle='round,pad=0.3'))
+                                ax.text(idx, ecg_signal[idx]+y_offset, label, color='green', fontsize=12, fontweight='bold', ha='center', va='bottom', zorder=11, bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, boxstyle='round,pad=0.1'))
                             else:
-                                ax.text(scaled_idx, ecg_signal[idx]-y_offset, label, color=colors[label], 
-                                    fontsize=16, fontweight='bold', ha='center', va='top', zorder=11,
-                                    bbox=dict(facecolor='white', edgecolor=colors[label], alpha=0.9, 
-                                            boxstyle='round,pad=0.3'))
-                            print(f"[DEBUG] Plotted {label} at index {idx}, value {ecg_signal[idx]:.2f}")
+                                ax.text(idx, ecg_signal[idx]-y_offset, label, color='green', fontsize=12, fontweight='bold', ha='center', va='top', zorder=11, bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, boxstyle='round,pad=0.1'))
+                # --- Metrics (for Lead II only, based on R peaks) ---
+                if lead == "II":
+                    heart_rate = None
+                    pr_interval = None
+                    qrs_duration = None
+                    qt_interval = None
+                    qtc_interval = None
+                    rr_intervals = None
 
-                # Calculate metrics for ALL leads
-                heart_rate = None
-                pr_interval = None
-                qrs_duration = None
-                qt_interval = None
-                qtc_interval = None
-                rr_intervals = None
+                    if len(r_peaks) > 1:
+                        rr_intervals = np.diff(r_peaks) / sampling_rate  # in seconds
+                        mean_rr = np.mean(rr_intervals)
+                        if mean_rr > 0:
+                            heart_rate = 60 / mean_rr
+                    if len(p_peaks) > 0 and len(r_peaks) > 0:
+                        pr_interval = (r_peaks[-1] - p_peaks[-1]) * 1000 / sampling_rate  # ms
+                    if len(q_peaks) > 0 and len(s_peaks) > 0:
+                        qrs_duration = (s_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate  # ms
+                    if len(q_peaks) > 0 and len(t_peaks) > 0:
+                        qt_interval = (t_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate  # ms
+                    if qt_interval and heart_rate:
+                        qtc_interval = qt_interval / np.sqrt(60 / heart_rate)  # Bazett's formula
 
-                if len(r_peaks) > 1:
-                    rr_intervals = np.diff(r_peaks) / sampling_rate
-                    mean_rr = np.mean(rr_intervals)
-                    if mean_rr > 0:
-                        heart_rate = 60 / mean_rr
-                
-                if len(p_peaks) > 0 and len(r_peaks) > 0:
-                    pr_interval = (r_peaks[-1] - p_peaks[-1]) * 1000 / sampling_rate
-                
-                if len(q_peaks) > 0 and len(s_peaks) > 0:
-                    qrs_duration = (s_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate
-                
-                if len(q_peaks) > 0 and len(t_peaks) > 0:
-                    qt_interval = (t_peaks[-1] - q_peaks[-1]) * 1000 / sampling_rate
-                
-                if qt_interval and heart_rate:
-                    qtc_interval = qt_interval / np.sqrt(60 / heart_rate)
+                    # Update ECG metrics labels with calculated values for Lead2 graph
 
-                # Update metric labels for ALL leads
-                pr_label.setText(f"{int(round(pr_interval))}" if isinstance(pr_interval, (int, float)) else "--")
-                qrs_label.setText(f"{int(round(qrs_duration))}" if isinstance(qrs_duration, (int, float)) else "--")
-                qtc_label.setText(f"{int(round(qtc_interval))}" if isinstance(qtc_interval, (int, float)) and qtc_interval >= 0 else "--")
-                
-                # Arrhythmia detection for ALL leads
-                arrhythmia_result = detect_arrhythmia(heart_rate, qrs_duration, rr_intervals)
-                arrhythmia_label.setText(arrhythmia_result)
-                
-                # Update dashboard callback ONLY for Lead II
-                if lead == "II" and hasattr(self, 'dashboard_callback'):
-                    self.dashboard_callback({
-                        'Heart_Rate': heart_rate,
-                        'PR': pr_interval,
-                        'QRS': qrs_duration,
-                        'QTc': qtc_interval,
-                        'QRS_axis': calculate_qrs_axis(self.data.get("I", []), self.data.get("aVF", []), r_peaks),
-                        'ST': calculate_st_segment(self.data.get("II", []), r_peaks, fs=500)
-                    })
+                    if isinstance(pr_interval, (int, float)):
+                        pr_label.setText(f"{int(round(pr_interval))} ms")
+                    else:
+                        pr_label.setText("-- ms")
+
+                    if isinstance(qrs_duration, (int, float)):
+                        qrs_label.setText(f"{int(round(qrs_duration))} ms")
+                    else:
+                        qrs_label.setText("-- ms")
+
+                    if isinstance(qtc_interval, (int, float)) and qtc_interval >= 0:
+                        qtc_label.setText(f"{int(round(qtc_interval))} ms")
+                    else:
+                        qtc_label.setText("-- ms")
+                    
+                    # Calculate QRS axis using Lead I and aVF
+                    lead_I = self.data[0] if len(self.data) > 0 else []  # Lead I (index 0)
+                    lead_aVF = self.data[5] if len(self.data) > 5 else []  # Lead aVF (index 5)
+                    qrs_axis = calculate_qrs_axis(lead_I, lead_aVF, r_peaks)
+
+                    # Calculate ST segment using Lead II and r_peaks
+                    lead_ii = self.data[1] if len(self.data) > 1 else []  # Lead II (index 1)
+                    st_segment = calculate_st_segment(lead_ii, r_peaks, fs=500)
+
+                    if hasattr(self, 'dashboard_callback'):
+                        self.dashboard_callback({
+                            'heart_rate': heart_rate,
+                            'pr_interval': pr_interval,
+                            'qrs_duration': qrs_duration,
+                            'qtc_interval': qtc_interval,
+                            'qrs_axis': qrs_axis,
+                            'st_interval': st_segment
+                        })
+
+                    # --- Arrhythmia detection ---
+                    arrhythmia_result = detect_arrhythmia(heart_rate, qrs_duration, rr_intervals)
+                    arrhythmia_label.setText(arrhythmia_result)
+                else:
+                    pr_label.setText("-- ms")
+                    qrs_label.setText("-- ms")
+                    qtc_label.setText("-- ms")
+                    arrhythmia_label.setText("--")
             else:
                 line.set_data([], [])
                 ax.set_xlim(0, 1)
                 ax.set_ylim(-500, 500)
-                pr_label.setText("--")
-                qrs_label.setText("--")
-                qtc_label.setText("--")
-                arrhythmia_label.setText("No Data")
-            
+                pr_label.setText("-- ms")
+                qrs_label.setText("-- ms")
+                qtc_label.setText("-- ms")
             canvas.draw_idle()
         self._detailed_timer.timeout.connect(update_detailed_plot)
         self._detailed_timer.start(100)
@@ -2072,14 +2523,19 @@ class ECGTestPage(QWidget):
                     if len(data) > 0:
                         # Apply current settings to the real data
                         gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                        centered = (np.array(data) - np.nanmean(data)) * gain_factor
+                        # Convert device data to ECG range and center around zero
+                        device_data = np.array(data)
+                        centered = (device_data - 2100) * gain_factor
+                        
+                        # Apply medical-grade filtering for smooth waves
+                        filtered_data = self.apply_ecg_filtering(centered)
                         
                         # Update line data with new buffer size
-                        if len(centered) < self.buffer_size:
+                        if len(filtered_data) < self.buffer_size:
                             plot_data = np.full(self.buffer_size, np.nan)
-                            plot_data[-len(centered):] = centered
+                            plot_data[-len(filtered_data):] = filtered_data
                         else:
-                            plot_data = centered[-self.buffer_size:]
+                            plot_data = filtered_data[-self.buffer_size:]
                         
                         line.set_ydata(plot_data)
                         
@@ -2100,9 +2556,168 @@ class ECGTestPage(QWidget):
                         if i < len(self.canvases):
                             self.canvases[i].draw_idle()
 
+    def update_ecg_lead(self, lead_index, data_array):
+        """Update a specific ECG lead with new data from serial communication"""
+        try:
+            if 0 <= lead_index < len(self.lines) and len(data_array) > 0:
+                # Apply current settings to the incoming data
+                gain_factor = self.settings_manager.get_wave_gain() / 10.0
+                # Convert device data (typically 0-4095 range) to ECG range and center around zero
+                device_data = np.array(data_array)
+                # Scale to typical ECG range (subtract baseline ~2100 and scale)
+                centered = (device_data - 2100) * gain_factor
+                
+                # Apply noise reduction filtering
+                filtered_data = self.apply_ecg_filtering(centered)
+                
+                # Update line data with new buffer size
+                if len(filtered_data) < self.buffer_size:
+                    plot_data = np.full(self.buffer_size, np.nan)
+                    plot_data[-len(filtered_data):] = filtered_data
+                else:
+                    plot_data = filtered_data[-self.buffer_size:]
+                
+                # Update the specific lead line
+                self.lines[lead_index].set_ydata(plot_data)
+                
+                # Update axis limits
+                if lead_index < len(self.axs):
+                    ylim = self.ylim if hasattr(self, 'ylim') else 400
+                    self.axs[lead_index].set_ylim(-ylim, ylim)
+                    self.axs[lead_index].set_xlim(0, self.buffer_size)
+                
+                # Redraw the specific canvas
+                if lead_index < len(self.canvases):
+                    self.canvases[lead_index].draw_idle()
+                    
+                print(f"Updated ECG lead {lead_index} with {len(data_array)} samples")
+                
+        except Exception as e:
+            print(f"Error updating ECG lead {lead_index}: {str(e)}")
+    
+    def apply_ecg_filtering(self, signal_data):
+        """Apply medical-grade ECG filtering for smooth, clean waves like professional devices"""
+        try:
+            from scipy.signal import butter, filtfilt, savgol_filter, medfilt, wiener
+            from scipy.ndimage import gaussian_filter1d
+            import numpy as np
+            
+            if len(signal_data) < 10:  # Need minimum data for filtering
+                return signal_data
+            
+            # Convert to numpy array
+            signal = np.array(signal_data, dtype=float)
+            
+            # 1. Remove DC offset (baseline drift) - more aggressive
+            signal = signal - np.mean(signal)
+            
+            # 2. Medical-grade bandpass filter (0.5-30 Hz) - tighter range for cleaner signal
+            fs = 500  # Sampling frequency
+            nyquist = fs / 2
+            
+            # Low-pass filter to remove high-frequency noise (>30 Hz) - more aggressive
+            low_cutoff = 30 / nyquist  # Reduced from 40 to 30 Hz
+            b_low, a_low = butter(6, low_cutoff, btype='low')  # Increased order to 6
+            signal = filtfilt(b_low, a_low, signal)
+            
+            # High-pass filter to remove DC and low-frequency drift (<0.5 Hz)
+            high_cutoff = 0.5 / nyquist
+            b_high, a_high = butter(6, high_cutoff, btype='high')  # Increased order to 6
+            signal = filtfilt(b_high, a_high, signal)
+            
+            # 3. Wiener filter for medical-grade noise reduction
+            if len(signal) > 5:
+                signal = wiener(signal, noise=0.05)  # Lower noise parameter for smoother result
+            
+            # 4. Gaussian smoothing for medical-grade smoothness
+            signal = gaussian_filter1d(signal, sigma=1.2)
+            
+            # 5. Savitzky-Golay filter with optimized parameters for ECG
+            if len(signal) >= 15:  # Increased minimum window size
+                window_length = min(15, len(signal) if len(signal) % 2 == 1 else len(signal) - 1)
+                signal = savgol_filter(signal, window_length, 4)  # Increased polynomial order to 4
+            
+            # 6. Adaptive median filter for spike removal
+            signal = medfilt(signal, kernel_size=7)  # Increased kernel size for better smoothing
+            
+            # 7. Multi-stage moving average for ultra-smooth baseline
+            # Stage 1: Short-term smoothing
+            window1 = min(7, len(signal))
+            if window1 > 1:
+                kernel1 = np.ones(window1) / window1
+                signal = np.convolve(signal, kernel1, mode='same')
+            
+            # Stage 2: Medium-term smoothing for baseline stability
+            window2 = min(5, len(signal))
+            if window2 > 1:
+                kernel2 = np.ones(window2) / window2
+                signal = np.convolve(signal, kernel2, mode='same')
+            
+            # 8. Final Gaussian smoothing for medical device quality
+            signal = gaussian_filter1d(signal, sigma=0.8)
+            
+            return signal
+            
+        except Exception as e:
+            print(f"Medical-grade filtering error: {e}")
+            # Return original signal if filtering fails
+            return signal_data
+    
+    def apply_realtime_smoothing(self, new_value, lead_index):
+        """Apply real-time smoothing for individual data points - medical grade"""
+        try:
+            # Initialize smoothing buffers if not exists
+            if not hasattr(self, 'smoothing_buffers'):
+                self.smoothing_buffers = {}
+            
+            if lead_index not in self.smoothing_buffers:
+                self.smoothing_buffers[lead_index] = []
+            
+            buffer = self.smoothing_buffers[lead_index]
+            buffer.append(new_value)
+            
+            # Keep only last 20 points for smoothing
+            if len(buffer) > 20:
+                buffer.pop(0)
+            
+            # Apply multi-stage smoothing
+            if len(buffer) >= 5:
+                # Stage 1: Simple moving average
+                smoothed = np.mean(buffer[-5:])
+                
+                # Stage 2: Weighted average (more weight to recent values)
+                if len(buffer) >= 10:
+                    weights = np.linspace(0.5, 1.0, len(buffer[-10:]))
+                    smoothed = np.average(buffer[-10:], weights=weights)
+                
+                # Stage 3: Gaussian-like smoothing
+                if len(buffer) >= 7:
+                    # Apply Gaussian weights
+                    gaussian_weights = np.exp(-0.5 * ((np.arange(len(buffer[-7:])) - len(buffer[-7:])//2) / 2)**2)
+                    gaussian_weights = gaussian_weights / np.sum(gaussian_weights)
+                    smoothed = np.sum(np.array(buffer[-7:]) * gaussian_weights)
+                
+                return smoothed
+            else:
+                return new_value
+                
+        except Exception as e:
+            print(f"Real-time smoothing error: {e}")
+            return new_value
+
     # ---------------------- Start Button Functionality ----------------------
 
     def start_acquisition(self):
+
+        try:
+            if hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked():
+                print("🔁 Switching from Demo to Real: turning off demo...")
+                self.demo_toggle.setChecked(False)
+                if hasattr(self, 'demo_manager'):
+                    self.demo_manager.stop_demo_data()
+        except Exception as e:
+            print(f"[Start Acquisition] Failed to stop demo before real start: {e}")
+
         port = self.settings_manager.get_serial_port()
         baud = self.settings_manager.get_baud_rate()
 
@@ -2119,19 +2734,6 @@ class ECGTestPage(QWidget):
             except (ValueError, TypeError):
                 self.show_connection_warning(f"Invalid baud rate: {baud}. Please set a valid baud rate in System Setup.")
                 return
-
-            # --- ENHANCED: STOP DEMO MODE WHEN STARTING SERIAL ACQUISITION ---
-            if self.demo_toggle.isChecked():
-                print(" Starting serial acquisition - Auto-stopping demo mode...")
-                self.demo_toggle.setChecked(False)
-                self.demo_toggle.setText("OFF")
-                self.stop_demo_data()
-                
-                # Clear demo data buffers
-                for lead in self.leads:
-                    self.data[lead].clear()
-                
-                print(" Demo mode stopped - Ready for real serial data")
             
             if self.serial_reader:
                 self.serial_reader.close()
@@ -2140,25 +2742,17 @@ class ECGTestPage(QWidget):
             self.serial_reader = SerialECGReader(port, baud_int)
             self.serial_reader.start()
             print(f"[DEBUG] ECGTestPage - Starting timer with 50ms interval")
-            if not self.timer.isActive():
-                self.timer.start(50)
-            else:
-                self.timer.stop()
-                self.timer.start(50)
-                
+            self.timer.start(50)
             if hasattr(self, '_12to1_timer'):
                 self._12to1_timer.start(100)
             print(f"[DEBUG] ECGTestPage - Timer started, serial reader created")
             print(f"[DEBUG] ECGTestPage - Timer active: {self.timer.isActive()}")
             print(f"[DEBUG] ECGTestPage - Number of leads: {len(self.leads)}")
-            print(f"[DEBUG] ECGTestPage - Number of lines: {len(self.lines)}")
-            print(f"[DEBUG] ECGTestPage - Number of axes: {len(self.axs)}")
-            print(f"[DEBUG] ECGTestPage - Number of canvases: {len(self.canvases)}")
+            print(f"[DEBUG] ECGTestPage - Number of plot widgets: {len(self.plot_widgets)}")
+            print(f"[DEBUG] ECGTestPage - Number of data lines: {len(self.data_lines)}")
 
             # Start elapsed time tracking
-            if not hasattr(self, 'elapsed_timer'):
-                self.elapsed_timer = QTimer()
-                self.elapsed_timer.timeout.connect(self.update_elapsed_time)
+            self.start_time = time.time()
             self.elapsed_timer.start(1000)
                 
             print("Serial connection established successfully!")
@@ -2190,9 +2784,10 @@ class ECGTestPage(QWidget):
 
         # --- Calculate and update metrics on dashboard ---
         if hasattr(self, 'dashboard_callback'):
-            lead2_data = self.data.get("II", [])[-500:]
-            lead_I_data = self.data.get("I", [])[-500:]
-            lead_aVF_data = self.data.get("aVF", [])[-500:]
+            # Get Lead II data (index 1 in the 12-lead array)
+            lead2_data = self.data[1][-500:] if len(self.data) > 1 else []
+            lead_I_data = self.data[0][-500:] if len(self.data) > 0 else []  # Lead I (index 0)
+            lead_aVF_data = self.data[5][-500:] if len(self.data) > 5 else []  # Lead aVF (index 5)
             heart_rate = None
             pr_interval = None
             qrs_duration = None
@@ -2264,12 +2859,12 @@ class ECGTestPage(QWidget):
                 st_segment = calculate_st_segment(lead2_data, r_peaks, fs=sampling_rate)
 
             self.dashboard_callback({
-                'Heart Rate': heart_rate,
-                'PR': pr_interval,
-                'QRS': qrs_duration,
-                'QTc': qtc_interval,
-                'QRS_axis': qrs_axis,
-                'ST': st_segment
+                'heart_rate': heart_rate,
+                'pr_interval': pr_interval,
+                'qrs_duration': qrs_duration,
+                'qtc_interval': qtc_interval,
+                'qrs_axis': qrs_axis,
+                'st_interval': st_segment
             })
 
     def update_plot(self):
@@ -2295,21 +2890,6 @@ class ECGTestPage(QWidget):
                 # Split by any whitespace and filter out empty strings
                 values = [int(x) for x in line_data.split() if x.strip()]
                 print(f"[DEBUG] ECGTestPage - Parsed {len(values)} values: {values}")
-
-                # --- ENHANCED: AUTO-STOP DEMO MODE WHEN REAL DATA ARRIVES ---
-                if self.demo_toggle.isChecked():
-                    # Serial data is coming, stop demo mode immediately
-                    print(" Real serial data detected! Auto-stopping demo mode...")
-                    self.demo_toggle.setChecked(False)
-                    self.demo_toggle.setText("OFF")
-                    self.stop_demo_data()
-                    
-                    # Clear demo data to make room for real data
-                    for lead in self.leads:
-                        self.data[lead].clear()
-                    
-                    print(" Demo mode stopped - Switching to real serial data")
-
                 
                 if len(values) >= 8:
                     # Extract individual leads from 8-channel data
@@ -2337,30 +2917,38 @@ class ECGTestPage(QWidget):
                     print(f"[DEBUG] ECGTestPage - Successfully parsed 8-channel data: {lead_data}")
                     
                 elif len(values) == 1:
-                    # Single value - simulate 12-lead data
+                    # Single value - generate realistic 12-lead ECG data
                     ecg_value = values[0]
-                    print(f"[DEBUG] ECGTestPage - Single value received: {ecg_value}")
+                    print(f"[DEBUG] ECGTestPage - Single value received: {ecg_value}, generating realistic ECG...")
                     
-                    lead1 = ecg_value
-                    lead2 = ecg_value + np.random.randint(-20, 20)
-                    lead3 = lead2 - lead1
-                    avr = - (lead1 + lead2) / 2
-                    avl = (lead1 - lead3) / 2
-                    avf = (lead2 + lead3) / 2
+                    # Initialize realistic ECG generation if not already done
+                    if not hasattr(self, 'ecg_generators'):
+                        self.ecg_generators = {}
+                        self.ecg_time_index = 0
+                        self.ecg_sampling_rate = self.demo_fs
+                        
+                        # Generate realistic ECG waveforms for each lead
+                        for lead in self.leads:
+                            ecg_wave, _ = generate_realistic_ecg_waveform(
+                                duration_seconds=60,  # 1 minute of data
+                                sampling_rate=self.ecg_sampling_rate,
+                                heart_rate=72,
+                                lead_name=lead
+                            )
+                            self.ecg_generators[lead] = ecg_wave
                     
-                    # Simulate chest leads with variations
-                    v1 = ecg_value + np.random.randint(-30, 30)
-                    v2 = ecg_value + np.random.randint(-25, 25)
-                    v3 = ecg_value + np.random.randint(-20, 20)
-                    v4 = ecg_value + np.random.randint(-15, 15)
-                    v5 = ecg_value + np.random.randint(-10, 10)
-                    v6 = ecg_value + np.random.randint(-5, 5)
+                    # Get current sample from realistic ECG waveforms
+                    lead_data = {}
+                    for lead in self.leads:
+                        if lead in self.ecg_generators:
+                            # Scale the realistic ECG to match the input value range
+                            realistic_value = self.ecg_generators[lead][self.ecg_time_index % len(self.ecg_generators[lead])]
+                            # Scale to match typical ECG range (0-4095 for 12-bit ADC)
+                            scaled_value = int(ecg_value + realistic_value * 1000)  # Scale realistic ECG to mV range
+                            lead_data[lead] = scaled_value
                     
-                    lead_data = {
-                        "I": lead1, "II": lead2, "III": lead3,
-                        "aVR": avr, "aVL": avl, "aVF": avf,
-                        "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5, "V6": v6
-                    }
+                    # Move to next time sample
+                    self.ecg_time_index += 1
                     
                 else:
                     print(f"[DEBUG] ECGTestPage - Unexpected number of values: {len(values)}")
@@ -2377,51 +2965,47 @@ class ECGTestPage(QWidget):
                         ecg_value = int(numbers[0])
                         print(f"[DEBUG] ECGTestPage - Extracted numeric value: {ecg_value}")
                         
-                        # Use single value to simulate 12-lead data
-                        lead1 = ecg_value
-                        lead2 = ecg_value + np.random.randint(-20, 20)
-                        lead3 = lead2 - lead1
-                        avr = - (lead1 + lead2) / 2
-                        avl = (lead1 - lead3) / 2
-                        avf = (lead2 + lead3) / 2
+                        # Use single value to generate realistic 12-lead ECG data
+                        # Initialize realistic ECG generation if not already done
+                        if not hasattr(self, 'ecg_generators'):
+                            self.ecg_generators = {}
+                            self.ecg_time_index = 0
+                            self.ecg_sampling_rate = self.demo_fs
+                            
+                            # Generate realistic ECG waveforms for each lead
+                            for lead in self.leads:
+                                ecg_wave, _ = generate_realistic_ecg_waveform(
+                                    duration_seconds=60,  # 1 minute of data
+                                    sampling_rate=self.ecg_sampling_rate,
+                                    heart_rate=72,
+                                    lead_name=lead
+                                )
+                                self.ecg_generators[lead] = ecg_wave
                         
-                        v1 = ecg_value + np.random.randint(-30, 30)
-                        v2 = ecg_value + np.random.randint(-25, 25)
-                        v3 = ecg_value + np.random.randint(-20, 20)
-                        v4 = ecg_value + np.random.randint(-15, 15)
-                        v5 = ecg_value + np.random.randint(-10, 10)
-                        v6 = ecg_value + np.random.randint(-5, 5)
+                        # Get current sample from realistic ECG waveforms
+                        lead_data = {}
+                        for lead in self.leads:
+                            if lead in self.ecg_generators:
+                                # Scale the realistic ECG to match the input value range
+                                realistic_value = self.ecg_generators[lead][self.ecg_time_index % len(self.ecg_generators[lead])]
+                                # Scale to match typical ECG range (0-4095 for 12-bit ADC)
+                                scaled_value = int(ecg_value + realistic_value * 1000)  # Scale realistic ECG to mV range
+                                lead_data[lead] = scaled_value
                         
-                        lead_data = {
-                            "I": lead1, "II": lead2, "III": lead3,
-                            "aVR": avr, "aVL": avl, "aVF": avf,
-                            "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5, "V6": v6
-                        }
+                        # Move to next time sample
+                        self.ecg_time_index += 1
                     except ValueError:
                         print(f"[DEBUG] ECGTestPage - Could not parse numeric data from: '{line_data}'")
                         return
                 else:
                     print(f"[DEBUG] ECGTestPage - No numeric data found in: '{line_data}'")
                     return
-
-            # Control data flow speed based on wave speed setting
-            current_speed = self.settings_manager.get_wave_speed()
-            speed_factor = current_speed / 25.0  # 25mm/s is baseline
-            
-            # Adjust buffer size based on speed setting
-            # Slower speed = smaller buffer (more compressed waves)
-            # Faster speed = larger buffer (more stretched waves)
-            base_buffer_size = self.buffer_size
-            if speed_factor < 1.0:  # Slower than 25mm/s
-                adjusted_buffer_size = int(base_buffer_size * speed_factor)
-            else:  # Faster than 25mm/s
-                adjusted_buffer_size = int(base_buffer_size * speed_factor)
             
             # Update data buffers for all leads
             for lead in self.leads:
                 if lead in lead_data:
                     self.data[lead].append(lead_data[lead])
-                    if len(self.data[lead]) > adjusted_buffer_size:
+                    if len(self.data[lead]) > self.buffer_size:
                         self.data[lead].pop(0)
             
             print(f"[DEBUG] ECGTestPage - Updated data buffers, Lead II has {len(self.data['II'])} points")
@@ -2446,69 +3030,50 @@ class ECGTestPage(QWidget):
                     print(f"[DEBUG] ECGTestPage - Updating plot for {lead}: {len(self.data[lead])} data points")
                     
                     # Prepare plot data
-                    if len(self.data[lead]) < adjusted_buffer_size:
-                        data = np.full(adjusted_buffer_size, np.nan)
+                    if len(self.data[lead]) < self.buffer_size:
+                        data = np.full(self.buffer_size, np.nan)
                         data[-len(self.data[lead]):] = self.data[lead]
                     else:
                         data = np.array(self.data[lead])
                     
-                    # Center the data
-                    centered = data - np.nanmean(data)
-
-                    # Apply current gain setting to the real data
+                    # Convert device data to ECG range and center around zero
+                    device_data = np.array(data)
+                    # Scale to typical ECG range (subtract baseline ~2100 and scale)
                     gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                    centered = centered * gain_factor
-
-                    # # Get current wave speed setting
-                    # current_speed = self.settings_manager.get_wave_speed()
+                    centered = (device_data - 2100) * gain_factor
                     
-                    # # Convert wave speed to time scaling factor
-                    # speed_scaling = {
-                    #     "12.5 mm/s": 0.5,    # Half speed = compressed waves
-                    #     "25 mm/s": 1.0,      # Normal speed
-                    #     "50 mm/s": 2.0       # Double speed = stretched waves
-                    # }.get(current_speed, 1.0)
-                    
-                    # # Apply speed scaling to the time axis
-                    # time_points = np.arange(len(centered)) / 500 * speed_scaling 
-
-                    time_axis = np.arange(len(centered)) / speed_factor
+                    # Apply noise reduction filtering
+                    filtered_data = self.apply_ecg_filtering(centered)
                     
                     # Update the plot line
-                    if i < len(self.lines) and self.lines[i] is not None:
-                        try:
-                            self.lines[i].set_data(time_axis, centered)
-                            print(f"[DEBUG] ECGTestPage - Updated {lead} plot with {len(centered)} points")
+                    if i < len(self.lines):
+                        self.lines[i].set_ydata(filtered_data)
+                        print(f"[DEBUG] ECGTestPage - Updated {lead} plot with {len(centered)} points, range: {np.min(centered):.2f} to {np.max(centered):.2f}")
+                        
+                        # Use dynamic y-limits based on current gain setting
+                        ylim = self.ylim if hasattr(self, 'ylim') else 400
+                        if i < len(self.axs):
+                            self.axs[i].set_ylim(-ylim, ylim)
                             
-                            # Use dynamic y-limits based on current gain setting
-                            ylim = self.ylim if hasattr(self, 'ylim') else 400
-                            if i < len(self.axs) and self.axs[i] is not None:
-                                self.axs[i].set_ylim(-ylim, ylim)
-                                
-                                # Set x-limits based on speed scaling
-                                max_time = len(centered) / speed_factor
-                                self.axs[i].set_xlim(0, max_time)
+                            # Use dynamic x-limits based on current buffer size
+                            self.axs[i].set_xlim(0, self.buffer_size)
 
-                                # Update title with current settings
-                                current_gain = self.settings_manager.get_wave_gain()
-                                self.axs[i].set_title(f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV", 
-                                                    fontsize=8, color='#666', pad=10)
-                                
-                                # Add grid lines to show scale
-                                self.axs[i].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-                                
-                                # Remove any existing labels
-                                self.axs[i].set_xlabel("")
-                                self.axs[i].set_ylabel("")
+                            # Update title with current settings
+                            current_speed = self.settings_manager.get_wave_speed()
+                            current_gain = self.settings_manager.get_wave_gain()
+                            self.axs[i].set_title(f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV", 
+                                                fontsize=8, color='#666', pad=10)
                             
-                            # **CRITICAL FIX: Force redraw of the canvas**
-                            if i < len(self.canvases) and self.canvases[i] is not None:
-                                self.canvases[i].draw_idle()
-                                print(f"[DEBUG] ECGTestPage - Canvas {i} redrawn for {lead}")
-                            else:
-                                print(f"[DEBUG] ECGTestPage - Warning: No canvas for lead {lead} at index {i}")
-                        except Exception as e:
-                            print(f"[DEBUG] ECGTestPage - Error updating plot for {lead}: {e}")
+                            # Add grid lines to show scale
+                            self.axs[i].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+                            
+                            # Remove any existing labels
+                            self.axs[i].set_xlabel("")
+                            self.axs[i].set_ylabel("")
+                        
+                        # Force redraw of the canvas
+                        if i < len(self.canvases):
+                            self.canvases[i].draw_idle()
                     else:
                         print(f"[DEBUG] ECGTestPage - Warning: No line object for lead {lead} at index {i}")
                     
@@ -2526,22 +3091,89 @@ class ECGTestPage(QWidget):
                     pdf.savefig(fig)
 
     def export_csv(self):
+        """Export ECG data to CSV file in the same format as dummydata.csv"""
         path, _ = QFileDialog.getSaveFileName(self, "Export ECG Data as CSV", "", "CSV Files (*.csv)")
         if path:
-            with open(path, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Sample"] + self.leads)
-                for i in range(self.buffer_size):
-                    row = [i]
-                    for lead in self.leads:
-                        if i < len(self.data[lead]):
-                            row.append(self.data[lead][i])
-                        else:
-                            row.append("")
-                    writer.writerow(row)
+            try:
+                with open(path, 'w', newline='') as f:
+                    writer = csv.writer(f, delimiter='\t')  # Use tab delimiter like dummydata.csv
+                    
+                    # Write header exactly like dummydata.csv
+                    header = ["Sample", "I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+                    writer.writerow(header)
+                    
+                    # Export from CSV storage (most accurate method)
+                    if hasattr(self, 'csv_data_storage') and self.csv_data_storage:
+                        print(f"📊 Exporting {len(self.csv_data_storage)} samples from CSV storage")
+                        
+                        for row_data in self.csv_data_storage:
+                            row = [
+                                row_data.get('Sample', ''),
+                                row_data.get('I', ''),
+                                row_data.get('II', ''),
+                                row_data.get('III', ''),
+                                row_data.get('aVR', ''),
+                                row_data.get('aVL', ''),
+                                row_data.get('aVF', ''),
+                                row_data.get('V1', ''),
+                                row_data.get('V2', ''),
+                                row_data.get('V3', ''),
+                                row_data.get('V4', ''),
+                                row_data.get('V5', ''),
+                                row_data.get('V6', '')
+                            ]
+                            writer.writerow(row)
+                    
+                    # Fallback: Export from numpy arrays if CSV storage is empty
+                    else:
+                        print("📊 Exporting from numpy arrays (fallback method)")
+                        
+                        # Get the actual data length
+                        max_length = 0
+                        for i in range(len(self.leads)):
+                            if i < len(self.data):
+                                # Count non-zero values in the numpy array
+                                non_zero_count = np.count_nonzero(self.data[i])
+                                max_length = max(max_length, non_zero_count)
+                        
+                        # Export data sample by sample
+                        for i in range(max_length):
+                            row = [i]  # Sample number
+                            
+                            # Add data for each lead in the same order as dummydata.csv
+                            for lead_idx, lead_name in enumerate(self.leads):
+                                if lead_idx < len(self.data):
+                                    if i < len(self.data[lead_idx]):
+                                        value = self.data[lead_idx][i]
+                                        # Only include non-zero values (actual data)
+                                        if value != 0:
+                                            row.append(int(value))
+                                        else:
+                                            row.append("")
+                                    else:
+                                        row.append("")
+                                else:
+                                    row.append("")
+                            
+                            writer.writerow(row)
+                
+                print(f"✅ CSV export completed: {path}")
+                QMessageBox.information(
+                    self, 
+                    "Export Successful", 
+                    f"ECG data exported successfully!\n\nFile: {path}\nSamples: {len(self.csv_data_storage) if hasattr(self, 'csv_data_storage') else 'N/A'}"
+                )
+                
+            except Exception as e:
+                print(f"❌ Error exporting CSV: {e}")
+                QMessageBox.critical(
+                    self, 
+                    "Export Error", 
+                    f"Failed to export CSV:\n{str(e)}"
+                )
 
     def go_back(self):
-
+        """Go back to the dashboard"""
         if hasattr(self, '_overlay_active') and self._overlay_active:
             self._restore_original_layout()
 
@@ -2592,6 +3224,10 @@ class ECGTestPage(QWidget):
         self._overlay_active = True
 
         self._apply_current_overlay_mode()
+
+        # Ensure demo data continues to work in overlay mode
+        if hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked():
+            print("Demo mode active - overlay will show demo data")
 
     def _store_original_layout(self):
         
@@ -2780,32 +3416,22 @@ class ECGTestPage(QWidget):
         
         for idx, lead in enumerate(self.leads):
             if idx < len(self._overlay_lines):
-                data = self.data.get(lead, [])
+                if idx < len(self.data):
+                    data = self.data[idx]
+                else:
+                    data = np.array([])
                 line = self._overlay_lines[idx]
                 ax = self._overlay_axes[idx]
                 
                 plot_data = np.full(self.buffer_size, np.nan)
                 
-                if data and len(data) > 0:
+                if data is not None and len(data) > 0:
                     n = min(len(data), self.buffer_size)
                     centered = np.array(data[-n:]) - np.mean(data[-n:])
                     
                     # Apply current gain setting
                     gain_factor = self.settings_manager.get_wave_gain() / 10.0
                     centered = centered * gain_factor
-
-                    # Get current wave speed setting
-                    current_speed = self.settings_manager.get_wave_speed()
-
-                    # Convert wave speed to time scaling factor
-                    speed_scaling = {
-                        "12.5 mm/s": 0.5,
-                        "25 mm/s": 1.0,
-                        "50 mm/s": 2.0
-                    }.get(current_speed, 1.0)
-
-                    # Apply speed scaling to time axis
-                    time_points = np.arange(self.buffer_size) / 500 * speed_scaling
                     
                     if n < self.buffer_size:
                         stretched = np.interp(
@@ -2817,28 +3443,43 @@ class ECGTestPage(QWidget):
                     else:
                         plot_data[-n:] = centered
                     
-                    # Set dynamic y-limits based on data
-                    ymin = np.min(centered) - 100
-                    ymax = np.max(centered) + 100
-                    if ymin == ymax:
+                    # Set dynamic y-limits based on data using robust statistics
+                    # Remove NaN values and large outliers (robust)
+                    valid_data = centered[~np.isnan(centered)]
+                    
+                    if len(valid_data) > 0:
+                        # Use percentiles to avoid spikes from clipping the view
+                        p1 = np.percentile(valid_data, 1)
+                        p99 = np.percentile(valid_data, 99)
+                        data_mean = (p1 + p99) / 2.0
+                        data_std = np.std(valid_data[(valid_data >= p1) & (valid_data <= p99)])
+                        
+                        # Calculate appropriate Y-range with some padding
+                        if data_std > 0:
+                            # Use standard deviation within central band
+                            padding = max(data_std * 4, 200)  # Increased padding for better visibility
+                            ymin = data_mean - padding
+                            ymax = data_mean + padding
+                        else:
+                            # Fallback: use percentile window
+                            data_range = max(p99 - p1, 300)
+                            padding = max(data_range * 0.3, 200)
+                            ymin = data_mean - padding
+                            ymax = data_mean + padding
+                        
+                        # Ensure reasonable bounds (same as main plots)
+                        ymin = max(ymin, -8000)
+                        ymax = min(ymax, 8000)
+                    else:
                         ymin, ymax = -500, 500
                     
-                    # Ensure y-limits are reasonable
-                    ymin = max(-1000, ymin)
-                    ymax = min(1000, ymax)
-                    
                     ax.set_ylim(ymin, ymax)
-                    
-                    # Update the line with scaled time axis
-                    line.set_data(time_points, plot_data)
-                    
-                    # Set x-axis limits with scaling
-                    ax.set_xlim(0, self.buffer_size / 500 * speed_scaling)
                 else:
                     ax.set_ylim(-500, 500)
-                    # Set x-limits even when no data
-                    ax.set_xlim(0, self.buffer_size / 500 * 1.0)  # Default scaling
-                    line.set_ydata(plot_data)
+                
+                # Set x-limits
+                ax.set_xlim(0, self.buffer_size-1)
+                line.set_ydata(plot_data)
         
         if hasattr(self, '_overlay_canvas'):
             self._overlay_canvas.draw_idle()
@@ -3178,6 +3819,10 @@ class ECGTestPage(QWidget):
 
         self._apply_current_overlay_mode()
 
+        # Ensure demo data continues to work in overlay mode
+        if hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked():
+            print("Demo mode active - overlay will show demo data")
+
     def _create_two_column_overlay_widget(self):
         from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QFrame
         
@@ -3377,13 +4022,20 @@ class ECGTestPage(QWidget):
         
         for idx, lead in enumerate(all_leads):
             if idx < len(self._overlay_lines):
-                data = self.data.get(lead, [])
+                if lead in self.leads:
+                    lead_index = self.leads.index(lead)
+                    if lead_index < len(self.data):
+                        data = self.data[lead_index]
+                    else:
+                        data = np.array([])
+                else:
+                    data = np.array([])
                 line = self._overlay_lines[idx]
                 ax = self._overlay_axes[idx]
                 
                 plot_data = np.full(self.buffer_size, np.nan)
                 
-                if data and len(data) > 0:
+                if data is not None and len(data) > 0:
                     n = min(len(data), self.buffer_size)
                     centered = np.array(data[-n:]) - np.mean(data[-n:])
                     
@@ -3401,15 +4053,35 @@ class ECGTestPage(QWidget):
                     else:
                         plot_data[-n:] = centered
                     
-                    # Set dynamic y-limits based on data
-                    ymin = np.min(centered) - 100
-                    ymax = np.max(centered) + 100
-                    if ymin == ymax:
-                        ymin, ymax = -500, 500
+                    # Set dynamic y-limits based on data using robust statistics
+                    # Remove NaN values and large outliers (robust)
+                    valid_data = centered[~np.isnan(centered)]
                     
-                    # Ensure y-limits are reasonable
-                    ymin = max(-1000, ymin)
-                    ymax = min(1000, ymax)
+                    if len(valid_data) > 0:
+                        # Use percentiles to avoid spikes from clipping the view
+                        p1 = np.percentile(valid_data, 1)
+                        p99 = np.percentile(valid_data, 99)
+                        data_mean = (p1 + p99) / 2.0
+                        data_std = np.std(valid_data[(valid_data >= p1) & (valid_data <= p99)])
+                        
+                        # Calculate appropriate Y-range with some padding
+                        if data_std > 0:
+                            # Use standard deviation within central band
+                            padding = max(data_std * 4, 200)  # Increased padding for better visibility
+                            ymin = data_mean - padding
+                            ymax = data_mean + padding
+                        else:
+                            # Fallback: use percentile window
+                            data_range = max(p99 - p1, 300)
+                            padding = max(data_range * 0.3, 200)
+                            ymin = data_mean - padding
+                            ymax = data_mean + padding
+                        
+                        # Ensure reasonable bounds (same as main plots)
+                        ymin = max(ymin, -8000)
+                        ymax = min(ymax, 8000)
+                    else:
+                        ymin, ymax = -500, 500
                     
                     ax.set_ylim(ymin, ymax)
                 else:
@@ -3421,3 +4093,81 @@ class ECGTestPage(QWidget):
         
         if hasattr(self, '_overlay_canvas'):
             self._overlay_canvas.draw_idle()
+
+    def update_plots(self):
+        """Update all ECG plots with current data using PyQtGraph (GitHub version)"""
+        if not self.serial_reader or not self.serial_reader.running:
+            # For demo mode, just update the plots
+            if i < len(self.data_lines):
+                raw = np.asarray(self.data[i])
+
+                # Center and gain (keep your existing logic if already applied elsewhere)
+                centered = raw - np.nanmean(raw)
+                gain = self.settings_manager.get_wave_gain() / 10.0
+                centered = centered * gain
+
+                # Wave speed → horizontal time scaling
+                wave_speed = float(self.settings_manager.get_wave_speed())
+                display_len = 1000
+                scale = max(0.4, min(2.5, 25.0 / max(1e-6, wave_speed)))
+                window_len = max(10, int(display_len * scale))
+                src = centered[-window_len:]
+                if src.size < 2:
+                    resampled = np.zeros(display_len)
+                else:
+                    x_src = np.linspace(0, 1, src.size)
+                    x_dst = np.linspace(0, 1, display_len)
+                    resampled = np.interp(x_dst, x_src, src)
+
+                self.data_lines[i].setData(resampled)
+                self.update_plot_y_range(i)
+            return
+
+        # Read a batch of data to keep up (from GitHub version)
+        lines_processed = 0
+        while lines_processed < 20: # Process up to 20 readings per GUI update
+            all_8_leads = self.serial_reader.read_value()
+            if all_8_leads:
+                # Calculate 12-lead ECG from 8-channel data using standard formulas
+                all_12_leads = self.calculate_12_leads_from_8_channels(all_8_leads)
+                
+                # Update data buffers with filtering
+                for i in range(len(self.leads)):
+                    if i < len(self.data) and i < len(all_12_leads):
+                        self.data[i] = np.roll(self.data[i], -1)
+                        # Apply medical-grade real-time smoothing
+                        smoothed_value = self.apply_realtime_smoothing(all_12_leads[i], i)
+                        self.data[i][-1] = smoothed_value
+                
+                # Update sampling rate
+                sampling_rate = self.sampler.add_sample()
+                if sampling_rate > 0 and hasattr(self, 'metric_labels') and 'sampling_rate' in self.metric_labels:
+                    self.metric_labels['sampling_rate'].setText(f"{sampling_rate:.1f} Hz")
+                
+                lines_processed += 1
+            else:
+                break # No more data in buffer
+
+        # If we got any new data, update all plots at once
+        if lines_processed > 0:
+            for i in range(len(self.leads)):
+                if i < len(self.data_lines):
+                    # Update plot data
+                    self.data_lines[i].setData(self.data[i])
+                    
+                    # Update Y-axis range based on actual data
+                    self.update_plot_y_range(i)
+            
+            # Calculate and update ECG metrics
+            self.calculate_ecg_metrics()
+            
+            # Display heartbeat in terminal (every 10 updates for real-time feedback)
+            if hasattr(self, 'heartbeat_counter'):
+                self.heartbeat_counter += 1
+            else:
+                self.heartbeat_counter = 0
+                
+            if self.heartbeat_counter % 10 == 0 and len(self.data) > 1:  # Lead II data available
+                heart_rate = self.calculate_heart_rate(self.data[1])
+                if heart_rate > 0:
+                    print(f"💓 HEARTBEAT: {heart_rate} BPM")

@@ -21,59 +21,128 @@ def capture_real_ecg_graphs_from_dashboard(dashboard_instance=None, ecg_test_pag
     
     print(" Capturing real ECG graphs from dashboard...")
     
+    # Get lead sequence from settings
+    from utils.settings_manager import SettingsManager
+    settings_manager = SettingsManager()
+    lead_sequence = settings_manager.get_setting("lead_sequence", "Standard")
+    
+    # Define lead orders based on sequence
+    LEAD_SEQUENCES = {
+        "Standard": ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"],
+        "Cabrera": ["aVL", "I", "-aVR", "II", "aVF", "III", "V1", "V2", "V3", "V4", "V5", "V6"]
+    }
+    
+    # Use the appropriate sequence for REPORT ONLY
+    ordered_leads = LEAD_SEQUENCES.get(lead_sequence, LEAD_SEQUENCES["Standard"])
+    
     # Method 1: Get from ECGTestPage (twelve_lead_test.py)
     if ecg_test_page and hasattr(ecg_test_page, 'figures'):
         print(" Found ECGTestPage with figures")
-        ordered_leads = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+        print(f" Number of figures: {len(ecg_test_page.figures)}")
         
         for i, lead in enumerate(ordered_leads):
+            print(f" Processing lead {i+1}/12: {lead}")
             try:
-                # Get figure from ECGTestPage
-                if i < len(ecg_test_page.figures):
-                    fig = ecg_test_page.figures[i]
-                    
-                    # Save to project root directory
-                    img_path = os.path.join(project_root, f"lead_{lead}.png")
-                    fig.savefig(img_path, 
-                              bbox_inches='tight',     # Remove extra space
-                              pad_inches=0.05,         # Minimal padding
-                              dpi=200,                 # High resolution for print
-                              facecolor='none',        # TRANSPARENT background
-                              edgecolor='none',        # No border
-                              transparent=True)        # ENABLE transparency
-                    lead_img_paths[lead] = img_path
-                    
-                    print(f" Captured Lead {lead}: {img_path}")
-                    
+                # Map Cabrera sequence to actual display sequence
+                if lead == "-aVR":
+                    actual_lead = "aVR"  # Use aVR for -aVR
+                    print(f"  Mapped -aVR to aVR")
+                else:
+                    actual_lead = lead
+                
+                # Get figure from ECGTestPage using original sequence
+                original_sequence = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+                if actual_lead in original_sequence:
+                    idx = original_sequence.index(actual_lead)
+                    print(f"  Found {actual_lead} at index {idx}")
+                    if idx < len(ecg_test_page.figures):
+                        fig = ecg_test_page.figures[idx]
+                        print(f"  Got figure for {actual_lead}")
+                        
+                        # DYNAMIC: Invert the signal for -aVR (real-time data)
+                        if lead == "-aVR":
+                            print(f"  Inverting signal for -aVR")
+                            for ax in fig.get_axes():
+                                for line in ax.get_lines():
+                                    y_data = line.get_ydata()
+                                    line.set_ydata(-y_data)  # Real-time inversion
+                        
+                        # Create safe filename for -aVR
+                        if lead == "-aVR":
+                            safe_filename = "lead_neg_aVR.png"  # Use safe filename
+                        else:
+                            safe_filename = f"lead_{lead}.png"
+                        
+                        # Save to project root directory
+                        img_path = os.path.join(project_root, safe_filename)
+                        print(f"  Saving to: {img_path}")
+                        
+                        fig.savefig(img_path, 
+                                  bbox_inches='tight',
+                                  pad_inches=0.05,
+                                  dpi=200,
+                                  facecolor='none',
+                                  edgecolor='none',
+                                  transparent=True)
+                        
+                        # Store with original lead name as key, but safe filename as value
+                        lead_img_paths[lead] = img_path
+                        
+                        if lead == "-aVR":
+                            print(f" ✓ Captured Lead {lead} (inverted aVR): {img_path}")
+                        else:
+                            print(f" ✓ Captured Lead {lead}: {img_path}")
+                    else:
+                        print(f"  Index {idx} out of range for figures (len={len(ecg_test_page.figures)})")
+                else:
+                    print(f"  {actual_lead} not found in original sequence")
+                
             except Exception as e:
-                print(f" Error capturing Lead {lead}: {e}")
+                print(f" ✗ Error capturing Lead {lead}: {e}")
+                import traceback
+                traceback.print_exc()
     
     # Method 2: Get from ECGTestPage canvases
     elif ecg_test_page and hasattr(ecg_test_page, 'canvases'):
         print(" Found ECGTestPage with canvases")
-        ordered_leads = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
         
         for i, lead in enumerate(ordered_leads):
             try:
-                if i < len(ecg_test_page.canvases):
-                    canvas = ecg_test_page.canvases[i]
-                    fig = canvas.figure
-                    
-                    # Save to project root directory
-                    img_path = os.path.join(project_root, f"lead_{lead}.png")
-                    fig.savefig(img_path, 
-                              bbox_inches='tight',
-                              pad_inches=0.05,
-                              dpi=200,
-                              facecolor='none',        # TRANSPARENT background
-                              edgecolor='none',
-                              transparent=True)        # ENABLE transparency
-                    lead_img_paths[lead] = img_path
-                    
-                    print(f" Captured Lead {lead}: {img_path}")
-                    
+                # Map Cabrera sequence to actual display sequence
+                if lead == "-aVR":
+                    actual_lead = "aVR"  # Use aVR for -aVR
+                else:
+                    actual_lead = lead
+                
+                # Get figure from ECGTestPage using original sequence
+                original_sequence = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+                if actual_lead in original_sequence:
+                    idx = original_sequence.index(actual_lead)
+                    if idx < len(ecg_test_page.canvases):
+                        canvas = ecg_test_page.canvases[idx]
+                        fig = canvas.figure
+                        
+                        # Invert the signal (multiply by -1)
+                        for ax in fig.get_axes():
+                            for line in ax.get_lines():
+                                y_data = line.get_ydata()
+                                line.set_ydata(-y_data)  # Invert the signal
+                        
+                        # Save to project root directory
+                        img_path = os.path.join(project_root, f"lead_{lead}.png")
+                        fig.savefig(img_path, 
+                                  bbox_inches='tight',
+                                  pad_inches=0.05,
+                                  dpi=200,
+                                  facecolor='none',
+                                  edgecolor='none',
+                                  transparent=True)
+                        lead_img_paths[lead] = img_path
+                        
+                        print(f" Captured Lead {lead} (inverted aVR): {img_path}")
+                        
             except Exception as e:
-                print(f"Error capturing Lead {lead}: {e}")
+                print(f" Error capturing Lead {lead}: {e}")
     
     # Method 3: Get from Lead12BlackPage (recording.py)
     elif dashboard_instance and hasattr(dashboard_instance, 'lead12_page'):
@@ -152,7 +221,7 @@ def capture_real_ecg_graphs_from_dashboard(dashboard_instance=None, ecg_test_pag
     return lead_img_paths
 
 
-def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, dashboard_instance=None, ecg_test_page=None):
+def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, dashboard_instance=None, ecg_test_page=None, patient=None):
     if data is None:
         # Dummy values (replace with Arduino parsed data)
         data = {
@@ -182,6 +251,24 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
             print("   3. Try generating PDF while ECG is active")
             return "Error: No real ECG graphs found"
 
+    # Get lead sequence from settings
+    from utils.settings_manager import SettingsManager
+    settings_manager = SettingsManager()
+    lead_sequence = settings_manager.get_setting("lead_sequence", "Standard")
+    
+    
+    # Define lead orders based on sequence
+    LEAD_SEQUENCES = {
+        "Standard": ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"],
+        "Cabrera": ["aVL", "I", "-aVR", "II", "aVF", "III", "V1", "V2", "V3", "V4", "V5", "V6"]
+    }
+    
+    # Use the appropriate sequence for REPORT ONLY
+    lead_order = LEAD_SEQUENCES.get(lead_sequence, LEAD_SEQUENCES["Standard"])
+    
+    print(f" Using lead sequence for REPORT: {lead_sequence}")
+    print(f" Lead order for REPORT: {lead_order}")
+
     doc = SimpleDocTemplate(filename, pagesize=A4,
                             rightMargin=30, leftMargin=30,
                             topMargin=30, bottomMargin=30)
@@ -201,6 +288,42 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
     # Title
     story.append(Paragraph("<b>ECG Report</b>", heading))
     story.append(Spacer(1, 12))
+
+
+        # Patient Details
+    if patient is None:
+        patient = {}
+    first_name = patient.get("first_name", "")
+    last_name = patient.get("last_name", "")
+    age = patient.get("age", "")
+    gender = patient.get("gender", "")
+    test_name = patient.get("test_name", "12 Lead ECG")
+    date_time = patient.get("date_time", "")
+    abnormal_report = patient.get("abnormal_report", "N")
+    uId = patient.get("uId", "NA")
+    testId = patient.get("testId", "NA")
+    dataId = patient.get("dataId", "NA")
+
+    story.append(Paragraph("<b>Patient Details</b>", styles['Heading3']))
+    patient_table = Table([
+        ["Name:", f"{first_name} {last_name}".strip()],
+        ["Age:", f"{age}"],
+        ["Gender:", f"{gender}"],
+        ["Test Name:", f"{test_name}"],
+        ["Date/Time:", f"{date_time}"],
+        ["Abnormal Report:", f"{abnormal_report}"],
+        ["User ID:", f"{uId}"],
+        ["Test ID:", f"{testId}"],
+        ["Data ID:", f"{dataId}"],
+    ], colWidths=[150, 350])
+    patient_table.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 1, colors.black),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+        ("BACKGROUND", (0,0), (-1,0), colors.whitesmoke),
+        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+    ]))
+    story.append(patient_table)
+    story.append(Spacer(1, 18))
 
     # Report Overview
     story.append(Paragraph("<b>Report Overview</b>", styles['Heading3']))
@@ -424,19 +547,70 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
     # Move content back to top to overlay on background
     story.append(Spacer(1, -740))
 
+
     print(" Added custom ECG grid background pattern to Page 3")
 
 
     title_style = ParagraphStyle(
-        'ECGTitle',
-        fontSize=18,
-        textColor=colors.HexColor("#000000"),
-        spaceAfter=15,
-        alignment=1,  # center
-        bold=True
+            'ECGTitle',
+            fontSize=18,
+            textColor=colors.HexColor("#000000"),
+            spaceAfter=15,
+            alignment=1,  # center
+            bold=True
     )
+
     story.append(Paragraph("<b>12-Lead Electrocardiogram</b>", title_style))
 
+
+
+
+
+    # Patient header on Page 3 (only Name, Age, Gender, Date/Time)
+    if patient is None:
+        patient = {}
+    first_name = patient.get("first_name", "")
+    last_name = patient.get("last_name", "")
+    full_name = f"{first_name} {last_name}".strip()
+    age = patient.get("age", "")
+    gender = patient.get("gender", "")
+    date_time_str = patient.get("date_time", "")
+
+    mini_label_style = ParagraphStyle(
+        'MiniLabel',
+        fontSize=10,
+        fontName='Helvetica-Bold',
+        textColor=colors.black,
+        leading=12,
+    )
+    mini_value_style = ParagraphStyle(
+        'MiniValue',
+        fontSize=10,
+        fontName='Helvetica',
+        textColor=colors.black,
+        leading=12,
+    )
+
+    # 2-column compact table over the grid (transparent)
+    patient_header_table = Table([
+        [Paragraph("<b>Name:</b> ", mini_label_style), Paragraph(full_name, mini_value_style),
+        Paragraph("<b>Age:</b> ", mini_label_style), Paragraph(str(age), mini_value_style)],
+        [Paragraph("<b>Gender:</b> ", mini_label_style), Paragraph(gender, mini_value_style),
+        Paragraph("<b>Date/Time:</b> ", mini_label_style), Paragraph(date_time_str, mini_value_style)],
+    ], colWidths=[55, 185, 60, 160])
+
+    patient_header_table.setStyle(TableStyle([
+        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 2),
+        ("RIGHTPADDING", (0,0), (-1,-1), 2),
+        ("TOPPADDING", (0,0), (-1,-1), 1),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 1),
+    ]))
+    story.append(patient_header_table)
+    story.append(Spacer(1, 8))
+
+   
     # Vital Parameters Header (completely transparent)
     vital_style = ParagraphStyle(
         'VitalStyle',
@@ -472,7 +646,6 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
     story.append(Spacer(1, 15))
 
     # VERTICAL ECG STRIPS LAYOUT (12 strips vertically over grid background)
-    lead_order = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
     successful_graphs = 0
 
     print(" Creating 12 vertical ECG strips over grid background...")
@@ -511,16 +684,16 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
             except Exception as e:
                 print(f" Error with Lead {lead}: {e}")
                 error_row = [
-                    Paragraph(f"<b>{lead}</b>",      # Remove "Lead" word too
-                             ParagraphStyle('ErrorStyle')),  # No backColor
+                    Paragraph(f"<b>{lead}</b>",      
+                             ParagraphStyle('ErrorStyle')),  
                     Paragraph("Error loading", 
-                             ParagraphStyle('ErrorStyle'))   # No backColor
+                             ParagraphStyle('ErrorStyle'))   
                 ]
                 all_strips_data.append(error_row)
         else:
             print(f" Missing Lead {lead}")
             missing_row = [
-                Paragraph(f"<b>{lead}</b>",          # Remove "Lead" word too
+                Paragraph(f"<b>{lead}</b>",          
                          ParagraphStyle('MissingStyle')),  # No backColor
                 Paragraph("Not available", 
                          ParagraphStyle('MissingStyle'))   # No backColor
@@ -532,8 +705,7 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
 
     # Style the vertical strips table (transparent to show ECG grid)
     vertical_strips_table.setStyle(TableStyle([
-        # NO background color - let grid show through
-        # ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#ffe6e6")),  # REMOVED
+        
         
         # Subtle borders only
         ("LINEBELOW", (0, 0), (-1, -1), 0.2, colors.HexColor("#ff999950")),  # Very light lines
@@ -541,12 +713,12 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
         # Cell alignment
         ("ALIGN", (0, 0), (0, -1), "LEFT"),     # Lead labels left aligned
         ("ALIGN", (1, 0), (1, -1), "CENTER"),   # Strips centered
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), # All content middle aligned
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), 
         
         # Minimal padding
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5), 
         ("RIGHTPADDING", (0, 0), (-1, -1), 5),
     ]))
 
@@ -563,7 +735,7 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
         alignment=1  # center
         # backColor removed
     )
-   
+
 
     # Summary (NO background)
     summary_style = ParagraphStyle(
@@ -576,8 +748,40 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
     # summary_para = Paragraph(f"ECG Report: {successful_graphs}/12 leads displayed", summary_style)
     # story.append(summary_para)
 
+    # Helper: draw logo on every page (top-left inside margins)
+    def _draw_logo(canvas, doc):
+        import os
+        # Prefer PNG (ReportLab-friendly); fallback to WebP if PNG missing
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        png_path = os.path.join(base_dir, "assets", "Deckmountimg.png")
+        webp_path = os.path.join(base_dir, "assets", "Deckmount.webp")
+        logo_path = png_path if os.path.exists(png_path) else webp_path
+
+        if os.path.exists(logo_path):
+            canvas.saveState()
+                        # Different positioning for page 2
+                        # Different positioning for page 2
+            if canvas.getPageNumber() == 2:
+                logo_w, logo_h = 100, 35  # bigger size for page 2
+                x = doc.width + doc.leftMargin - logo_w - 50 
+                y = doc.height + doc.bottomMargin - logo_h - 00  # much more right
+            elif canvas.getPageNumber() == 3:
+                logo_w, logo_h = 120, 40  # bigger size for page 3
+                x = doc.width + doc.leftMargin - logo_w - 50  # more right
+                y = doc.height + doc.bottomMargin - logo_h - 00  # higher up
+            else:
+                logo_w, logo_h = 100, 28  # normal size for other pages
+                x = doc.width + doc.leftMargin - logo_w
+                y = doc.height + doc.bottomMargin - logo_h  # top positioning
+            try:
+                canvas.drawImage(logo_path, x, y, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                # If WebP unsupported, silently skip
+                pass
+            canvas.restoreState()
+
     # Build PDF
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_logo, onLaterPages=_draw_logo)
     print(f"✓ ECG Report generated: {filename}")
 
 

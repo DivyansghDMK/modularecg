@@ -1,3 +1,4 @@
+from email.policy import default
 import json
 import os
 
@@ -33,8 +34,8 @@ class SettingsManager:
         with open(self.settings_file, 'w') as f:
             json.dump(self.settings, f, indent=2)
     
-    def get_setting(self, key):
-        return self.settings.get(key, self.default_settings.get(key))
+    def get_setting(self, key, default=None):
+        return self.settings.get(key, self.default_settings.get(key, default))
     
     def set_setting(self, key, value):
         self.settings[key] = value
@@ -52,3 +53,9 @@ class SettingsManager:
     
     def get_baud_rate(self):
         return self.get_setting("baud_rate")
+    
+    def set_serial_port(self, port):
+        self.set_setting("serial_port", port)
+    
+    def set_baud_rate(self, baud_rate):
+        self.set_setting("baud_rate", baud_rate)
