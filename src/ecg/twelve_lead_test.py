@@ -3181,7 +3181,7 @@ class ECGTestPage(QWidget):
                                 else:
                                     row.append("")
                             
-                            writer.writerow(row)
+                    writer.writerow(row)
 
                 print(f"✅ CSV export completed: {path}")
                 QMessageBox.information(

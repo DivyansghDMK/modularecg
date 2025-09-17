@@ -644,7 +644,7 @@ class Dashboard(QWidget):
                 if hasattr(self.ecg_test_page, 'get_current_lead_data'):
                     live_lead_ii_data = self.ecg_test_page.get_current_lead_data(1)  # Lead II is at index 1
                     
-                    if live_lead_ii_data and len(live_lead_ii_data) > 10:
+                    if live_lead_ii_data is not None and len(live_lead_ii_data) > 10:
                         arr = np.array(live_lead_ii_data)
                         arr = arr - np.mean(arr)
                         arr = arr + 1000  # Center vertically
