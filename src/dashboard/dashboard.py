@@ -171,70 +171,6 @@ class Dashboard(QWidget):
         self.bg_label = QLabel(self)
         self.bg_label.setGeometry(0, 0, self.width(), self.height())
         self.bg_label.lower()
-<<<<<<< HEAD
-        movie = QMovie("plasma.gif")
-        self.bg_label.setMovie(movie)
-        movie.start()
-        # --- Central stacked widget for in-place navigation ---
-        self.page_stack = QStackedWidget(self)
-        # --- Dashboard main page widget ---
-        self.dashboard_page = QWidget()
-        dashboard_layout = QVBoxLayout(self.dashboard_page)
-        dashboard_layout.setSpacing(20)
-        dashboard_layout.setContentsMargins(20, 20, 20, 20)
-=======
-        
-        # Try to load background GIFs using portable paths
-        if not self.use_gif_background:
-            # Use solid color background
-            self.bg_label.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #f8f9fa, stop:1 #e9ecef);")
-            print("Using solid color background (GIF background disabled)")
-        else:
-            # Priority order based on user preference
-            movie = None
-            if self.preferred_background == "plasma.gif":
-                plasma_path = get_asset_path("plasma.gif")
-                if os.path.exists(plasma_path):
-                    movie = QMovie(plasma_path)
-                    print("Using plasma.gif as background")
-                else:
-                    print("plasma.gif not found, trying alternatives...")
-                    self.preferred_background = "tenor.gif"  # Fallback
-            
-            if self.preferred_background == "tenor.gif" and not movie:
-                tenor_gif_path = get_asset_path("tenor.gif")
-                if os.path.exists(tenor_gif_path):
-                    movie = QMovie(tenor_gif_path)
-                    print("Using tenor.gif as background")
-                else:
-                    print("tenor.gif not found, trying alternatives...")
-                    self.preferred_background = "v.gif"  # Fallback
-            
-            if self.preferred_background == "v.gif" and not movie:
-                v_gif_path = get_asset_path("v.gif")
-                if os.path.exists(v_gif_path):
-                    movie = QMovie(v_gif_path)
-                    print("Using v.gif as background")
-                else:
-                    print("v.gif not found, using solid color background")
-            
-            if movie:
-                self.bg_label.setMovie(movie)
-                movie.start()
-            else:
-                # If no GIF found, create a solid color background
-                self.bg_label.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #f8f9fa, stop:1 #e9ecef);")
-                print("Using solid color background (no GIFs found)")
-        # --- Central stacked widget for in-place navigation ---
-        self.page_stack = QStackedWidget(self)
-        
-        # --- Dashboard main page widget ---
-        self.dashboard_page = DashboardHomeWidget()
-        dashboard_layout = QVBoxLayout(self.dashboard_page)
-        dashboard_layout.setSpacing(20)
-        dashboard_layout.setContentsMargins(20, 20, 20, 20)
-        
->>>>>>> main
         # --- Header ---
         header = QHBoxLayout()
         logo = QLabel("ECG Monitor")
@@ -242,10 +178,6 @@ class Dashboard(QWidget):
         logo.setStyleSheet("color: #ff6600;")
         logo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         header.addWidget(logo)
-<<<<<<< HEAD
-=======
-        
->>>>>>> main
         self.status_dot = QLabel()
         self.status_dot.setFixedSize(18, 18)
         self.status_dot.setStyleSheet("border-radius: 9px; background: gray; border: 2px solid #fff;")
@@ -255,20 +187,12 @@ class Dashboard(QWidget):
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self.update_internet_status)
         self.status_timer.start(3000)
-<<<<<<< HEAD
-=======
-        
->>>>>>> main
         self.medical_btn = QPushButton("Medical Mode")
         self.medical_btn.setCheckable(True)
         self.medical_btn.setStyleSheet("background: #00b894; color: white; border-radius: 10px; padding: 4px 18px;")
         self.medical_btn.clicked.connect(self.toggle_medical_mode)
         self.medical_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         header.addWidget(self.medical_btn)
-<<<<<<< HEAD
-=======
-        
->>>>>>> main
         self.dark_btn = QPushButton("Dark Mode")
         self.dark_btn.setCheckable(True)
         self.dark_btn.setStyleSheet("background: #222; color: #fff; border-radius: 10px; padding: 4px 18px;")
@@ -297,13 +221,6 @@ class Dashboard(QWidget):
         self.sign_btn.clicked.connect(self.handle_sign_out)
         self.sign_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         header.addWidget(self.sign_btn)
-<<<<<<< HEAD
-        dashboard_layout.addLayout(header)
-=======
-        
-        dashboard_layout.addLayout(header)
-        
->>>>>>> main
         # --- Greeting and Date Row ---
         greet_row = QHBoxLayout()
         from datetime import datetime
@@ -326,20 +243,6 @@ class Dashboard(QWidget):
         date_btn.clicked.connect(self.go_to_lead_test)
         date_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         greet_row.addWidget(date_btn)
-<<<<<<< HEAD
-        dashboard_layout.addLayout(greet_row)
-=======
-
-        # --- Add Chatbot Button ---
-        chatbot_btn = QPushButton("AI Chatbot")
-        chatbot_btn.setStyleSheet("background: #2453ff; color: white; border-radius: 16px; padding: 8px 24px;")
-        chatbot_btn.clicked.connect(self.open_chatbot_dialog)
-        chatbot_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        greet_row.addWidget(chatbot_btn)
-
-        dashboard_layout.addLayout(greet_row)
-
->>>>>>> main
         # --- Main Grid ---
         # Create a scroll area for responsive design
         scroll_area = QScrollArea()
@@ -363,32 +266,6 @@ class Dashboard(QWidget):
         heart_layout.addWidget(heart_label)
         
         heart_img = QLabel()
-<<<<<<< HEAD
-        # Use a portable path for the heart image asset
-        heart_img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "her.png")
-        self.heart_pixmap = QPixmap(heart_img_path)
-=======
-        # Use portable path for the heart image asset
-        heart_img_path = get_asset_path("her.png")
-        print(f"Heart image path: {heart_img_path}")  # Debugging line to check the path
-        # Ensure os module is available
-        import os
-        print(f"Heart image exists: {os.path.exists(heart_img_path)}")  # Check if the file exists
-        
-        # Load the heart image with error handling
-        if os.path.exists(heart_img_path):
-            self.heart_pixmap = QPixmap(heart_img_path)
-            if self.heart_pixmap.isNull():
-                print(f"Error: Failed to load heart image from {heart_img_path}")
-                # Create a placeholder pixmap
-                self.heart_pixmap = QPixmap(220, 220)
-                self.heart_pixmap.fill(Qt.lightGray)
-        else:
-            print(f"Error: Heart image not found at {heart_img_path}")
-            # Create a placeholder pixmap
-            self.heart_pixmap = QPixmap(220, 220)
-            self.heart_pixmap.fill(Qt.lightGray)
->>>>>>> main
         self.heart_base_size = 220
         heart_img.setFixedSize(self.heart_base_size + 20, self.heart_base_size + 20)
         heart_img.setAlignment(Qt.AlignCenter)
@@ -432,12 +309,6 @@ class Dashboard(QWidget):
         
         # --- ECG Recording (Animated Chart) ---
         ecg_card = QFrame()
-<<<<<<< HEAD
-        ecg_card.setStyle
-=======
-        ecg_card.setStyleSheet("background: white; border-radius: 16px;")
-        ecg_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
->>>>>>> main
         ecg_layout = QVBoxLayout(ecg_card)
         
         ecg_label = QLabel("Live Lead 2 ECG Recording")
@@ -571,32 +442,6 @@ class Dashboard(QWidget):
         metrics_card.setStyleSheet("background: white; border-radius: 16px;")
         metrics_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         metrics_layout = QHBoxLayout(metrics_card)
-<<<<<<< HEAD
-        # Store metric labels for live update
-        self.metric_labels = {}
-        metric_info = [
-            ("Heart Rate", "76", "bpm", "heart_rate"),
-            ("PR Interval", "160", "ms", "pr_interval"),
-            ("QRS Duration", "90", "ms", "qrs_duration"),
-            ("QTc Interval", "410", "ms", "qtc_interval"),
-            ("QRS Axis", "+60", "°", "qrs_axis"),
-            ("ST Segment", "Normal", "", "st_segment"),
-        ]
-=======
-        
-        # Store metric labels for live update
-        self.metric_labels = {}
-        metric_info = [
-            ("Heart Rate", "--", "bpm", "heart_rate"),
-            ("PR Interval", "--", "ms", "pr_interval"),
-            ("QRS Duration", "--", "ms", "qrs_duration"),
-            ("QTc Interval", "--", "ms", "qtc_interval"),
-            ("QRS Axis", "--", "", "qrs_axis"),
-            ("ST Segment", "--", "", "st_segment"),
-            ("Sampling Rate", "--", "Hz", "sampling_rate"),
-        ]
-        
->>>>>>> main
         for title, value, unit, key in metric_info:
             box = QVBoxLayout()
             lbl = QLabel(title)
@@ -609,102 +454,17 @@ class Dashboard(QWidget):
             box.addWidget(val)
             metrics_layout.addLayout(box)
             self.metric_labels[key] = val  # Store reference for live update
-<<<<<<< HEAD
-        grid.addWidget(metrics_card, 0, 1, 1, 2)
-        dashboard_layout.addLayout(grid)
-=======
-        
-        grid.addWidget(metrics_card, 0, 1, 1, 2)
-        
-        # Add the grid widget to the scroll area
-        scroll_area.setWidget(grid_widget)
-        
-        # Add scroll area to dashboard layout
-        dashboard_layout.addWidget(scroll_area)
-        
-        # Add generate report button
-        self.generate_report_btn = QPushButton("Generate Report")
-        self.generate_report_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 10px; padding: 8px 24px; font-size: 16px; font-weight: bold;")
-        self.generate_report_btn.clicked.connect(self.generate_pdf_report)
-        self.generate_report_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        dashboard_layout.addWidget(self.generate_report_btn, alignment=Qt.AlignRight)
-        
->>>>>>> main
         # --- ECG Animation Setup ---
         self.ecg_x = np.linspace(0, 2, 500)
         self.ecg_y = 1000 + 200 * np.sin(2 * np.pi * 2 * self.ecg_x) + 50 * np.random.randn(500)
         self.ecg_line, = self.ecg_canvas.axes.plot(self.ecg_x, self.ecg_y, color="#ff6600")
         self.anim = FuncAnimation(self.ecg_canvas.figure, self.update_ecg, interval=50, blit=True)
-<<<<<<< HEAD
-        # Add dashboard_page to stack
-        self.page_stack.addWidget(self.dashboard_page)
-        # --- ECG Test Page ---
-        from ecg.twelve_lead_test import ECGTestPage
-        self.ecg_test_page = ECGTestPage("12 Lead ECG Test", self.page_stack)
-=======
-        
-        # --- Dashboard Metrics Update Timer ---
-        self.metrics_timer = QTimer(self)
-        self.metrics_timer.timeout.connect(self.update_dashboard_metrics_from_ecg)
-        self.metrics_timer.start(1000)  # Update every second
-        # Add dashboard_page to stack
-        self.page_stack.addWidget(self.dashboard_page)
-        # --- ECG Test Page ---
-        try:
-            # Add the src directory to the path for ECG imports
-            src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if src_dir not in sys.path:
-                sys.path.insert(0, src_dir)
-                print(f"✅ Added src directory to path: {src_dir}")
-            
-            from ecg.twelve_lead_test import ECGTestPage
-            print("✅ ECG Test Page imported successfully")
-                    
-        except ImportError as e:
-            print(f"❌ ECG Test Page import error: {e}")
-            print("💡 Creating fallback ECG Test Page")
-            # Create a fallback ECG test page
-            class ECGTestPage(QWidget):
-                def __init__(self, title, parent):
-                    super().__init__()
-                    self.title = title
-                    self.parent = parent
-                    self.dashboard_callback = None
-                    layout = QVBoxLayout()
-                    label = QLabel("ECG Test Page - Import Error")
-                    label.setAlignment(Qt.AlignCenter)
-                    layout.addWidget(label)
-                    self.setLayout(layout)
-                    print("⚠️ Using fallback ECG Test Page")
-        self.ecg_test_page = ECGTestPage("12 Lead ECG Test", self.page_stack)
-        self.ecg_test_page.dashboard_callback = self.update_ecg_metrics
-
-        if hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
-            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
-        
->>>>>>> main
         self.page_stack.addWidget(self.ecg_test_page)
         # --- Main layout ---
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.page_stack)
         self.setLayout(main_layout)
         self.page_stack.setCurrentWidget(self.dashboard_page)
-<<<<<<< HEAD
-=======
-
-        # Add a content_frame for ECGMenu to use
-        self.content_frame = QFrame(self)
-        self.content_frame.setStyleSheet("background: transparent; border: none;")
-        main_layout.addWidget(self.content_frame)
-
-        self.setLayout(main_layout)
-        self.page_stack.setCurrentWidget(self.dashboard_page)
-
-    def open_chatbot_dialog(self):
-        dlg = ChatbotDialog(self)
-        dlg.exec_()
-
->>>>>>> main
     def update_ecg(self, frame):
         """Update the animated ECG plot with live Lead II data from the ECGTestPage."""
         try:
@@ -1282,22 +1042,7 @@ class Dashboard(QWidget):
         self.sign_btn.setText("Sign In")
         self.close()
     def go_to_lead_test(self):
-<<<<<<< HEAD
-        self.page_stack.setCurrentWidget(self.ecg_test_page)
-    def go_to_dashboard(self):
-        self.page_stack.setCurrentWidget(self.dashboard_page)
-=======
-        if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
-            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
-            
-        self.page_stack.setCurrentWidget(self.ecg_test_page)
-        # Update metrics when opening ECG test page
-        self.update_dashboard_metrics_from_ecg()
-    def go_to_dashboard(self):
-        self.page_stack.setCurrentWidget(self.dashboard_page)
-        # Update metrics when returning to dashboard
-        self.update_dashboard_metrics_from_ecg()
->>>>>>> main
+        pass
     def update_internet_status(self):
         import socket
         try:

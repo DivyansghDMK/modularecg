@@ -1,26 +1,9 @@
-<<<<<<< HEAD
-from PyQt5.QtWidgets import QGroupBox, QVBoxLayout, QPushButton, QWidget, QLabel
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import numpy as np
-from PyQt5.QtCore import QTimer, Qt
-
-=======
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, 
-    QLineEdit, QComboBox, QSlider, QGroupBox, QListWidget, QDialog,
-    QGridLayout, QFormLayout, QSizePolicy, QMessageBox, QApplication, QRadioButton
-)
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import numpy as np
-from PyQt5.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve, QTimer, pyqtProperty
-from utils.settings_manager import SettingsManager
+import sys
 import os
-import matplotlib.pyplot as plt
-import pandas as pd 
- 
->>>>>>> main
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
+
 class ECGRecording:
     def __init__(self):
         self.recording = False
@@ -41,6 +24,10 @@ class ECGRecording:
             pass
         else:
             raise Exception("Recording is still in progress or no data to save.")
+
+class ECGMenu:
+    def __init__(self, parent=None):
+        self.parent = parent
         
 class Lead12BlackPage(QWidget):
     def __init__(self, parent=None, dashboard=None):
@@ -132,260 +119,6 @@ class Lead12BlackPage(QWidget):
                     QTimer.singleShot(0, self.dashboard.repaint)
             except Exception as e:
                 print("ECG analysis error:", e)
-<<<<<<< HEAD
-
-class ECGMenu(QGroupBox):
-    def __init__(self, parent=None, dashboard=None):
-        super().__init__("Menu", parent)
-        self.dashboard = dashboard
-=======
-
-class SlidingPanel(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent = parent
-        
-        # Responsive sizing based on parent size
-        if parent:
-            parent_width = parent.width()
-            parent_height = parent.height()
-            
-            # Calculate responsive panel size (25-35% of parent width, max 900px)
-            panel_width = min(max(int(parent_width * 0.30), 400), 900)
-            panel_height = min(max(int(parent_height * 0.85), 500), 1000)
-        else:
-            panel_width, panel_height = 600, 800
-        
-        self.panel_width = panel_width
-        self.panel_height = panel_height
-        
-        # Set size policy for responsiveness
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.setFixedSize(panel_width, panel_height)
-        
-        # Responsive styling with dynamic sizing
-        self.setStyleSheet(f"""
-            QWidget {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #ffffff, stop:1 #f8f9fa);
-                border: 3px solid #ff6600;
-                border-radius: 15px;
-            }}
-        """)
-        
-        # Initialize position off-screen to the right
-        if parent:
-            self.setGeometry(parent.width(), (parent.height() - self.height()) // 2, 
-                           panel_width, panel_height)
-        else:
-            self.setGeometry(1200, 200, panel_width, panel_height)
-        
-        # Create responsive layout with dynamic margins
-        self.layout = QVBoxLayout(self)
-        margin_size = max(12, min(30, int(panel_width * 0.04)))  # Responsive margins
-        spacing_size = max(10, min(25, int(panel_height * 0.03)))  # Responsive spacing
-        
-        self.layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
-        self.layout.setSpacing(spacing_size)
-        
-        # Content area with scroll support
-        self.content_widget = QWidget()
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.layout.addWidget(self.content_widget)
-        
-        # Animation setup
-        self.animation = QPropertyAnimation(self, b"geometry")
-        self.animation.setDuration(300)
-        self.animation.setEasingCurve(QEasingCurve.OutCubic)
-        
-        self.is_visible = False
-        self.is_animating = False
-        
-        # Store responsive parameters
-        self.margin_size = margin_size
-        self.spacing_size = spacing_size
-        
-        # Add resize event handler for responsiveness
-        if parent:
-            parent.resizeEvent = self.parent_resize_handler
-        
-    def parent_resize_handler(self, event):
-        """Handle parent resize events for responsive behavior"""
-        if hasattr(event, 'size'):
-            self.update_responsive_sizing()
-        if hasattr(event, 'oldSize'):
-            event.oldSize = event.size()
-        event.accept()
-        
-    def update_responsive_sizing(self):
-        if self.parent:
-            parent_width = self.parent.width()
-            parent_height = self.parent.height()
-            
-            # Recalculate responsive sizes
-            new_width = min(max(int(parent_width * 0.30), 400), 900)
-            new_height = min(max(int(parent_height * 0.85), 500), 1000)
-            
-            if new_width != self.panel_width or new_height != self.panel_height:
-                self.panel_width = new_width
-                self.panel_height = new_height
-                
-                # Update margins and spacing
-                self.margin_size = max(12, min(30, int(new_width * 0.04)))
-                self.spacing_size = max(10, min(25, int(new_height * 0.03)))
-                
-                # Update layout
-                self.layout.setContentsMargins(self.margin_size, self.margin_size, 
-                                            self.margin_size, self.margin_size)
-                self.layout.setSpacing(self.spacing_size)
-                
-                # Resize panel
-                self.setFixedSize(new_width, new_height)
-                
-                # Reposition if visible
-                if self.is_visible:
-                    self.reposition_panel()
-        
-    def reposition_panel(self):
-        if self.parent and self.is_visible:
-            target_x = self.parent.width() - self.width() - 15  # Reduced margin
-            target_y = (self.parent.height() - self.height()) // 2
-            self.move(target_x, target_y)
-        
-    def set_title(self, title):
-        pass
-        
-    def clear_content(self):
-        # Clear existing content
-        while self.content_layout.count():
-            child = self.content_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-                
-    def slide_in(self, content_widget=None, title="Settings Panel"):
-        
-        if self.parent and not self.is_animating:
-            self.is_animating = True
-            self.clear_content()
-            
-            # Update responsive sizing before showing
-            self.update_responsive_sizing()
-            
-            if content_widget:
-                # Make content widget responsive
-                self.make_content_responsive(content_widget)
-                self.content_layout.addWidget(content_widget)
-            
-            # Calculate target position (centered on the right side with proper margins)
-            # Ensure panel doesn't go off-screen on small devices
-            target_x = max(10, self.parent.width() - self.width() - 10)  # At least 10px from right edge
-            target_y = max(10, (self.parent.height() - self.height()) // 2)  # At least 10px from top/bottom
-            
-            # Ensure panel doesn't exceed parent bounds
-            if target_y + self.height() > self.parent.height() - 10:
-                target_y = self.parent.height() - self.height() - 10
-            
-            # Set up animation
-            self.animation.setStartValue(self.geometry())
-            self.animation.setEndValue(self.parent.geometry().adjusted(target_x, target_y, 
-                                                                     target_x + self.width(), 
-                                                                     target_y + self.height()))
-
-            # Disconnect any existing connections
-            try:
-                self.animation.finished.disconnect()
-            except:
-                pass
-            
-            # Connect animation finished signal
-            self.animation.finished.connect(self.on_slide_in_finished)
-            
-            self.show()
-            self.raise_()
-            self.animation.start()
-
-    def make_content_responsive(self, content_widget):
-        if hasattr(content_widget, 'layout'):
-            layout = content_widget.layout()
-            if layout:
-                # Adjust margins and spacing based on panel size
-                content_margin = max(15, min(35, int(self.panel_width * 0.04)))
-                content_spacing = max(10, min(20, int(self.panel_height * 0.025)))
-                
-                layout.setContentsMargins(content_margin, content_margin, 
-                                       content_margin, content_margin)
-                layout.setSpacing(content_spacing)
-                
-                # Make child widgets responsive
-                self.make_children_responsive(content_widget)
-    
-    def make_children_responsive(self, parent_widget):
-        for child in parent_widget.findChildren(QWidget):
-            if hasattr(child, 'setFixedSize'):
-                # Adjust fixed sizes for smaller panels
-                if self.panel_width < 500:
-                    # Scale down fixed sizes for small panels
-                    if hasattr(child, 'width') and hasattr(child, 'height'):
-                        current_width = child.width()
-                        current_height = child.height()
-                        if current_width > 0 and current_height > 0:
-                            scale_factor = min(self.panel_width / 600, 1.0)
-                            new_width = max(int(current_width * scale_factor), 60)
-                            new_height = max(int(current_height * scale_factor), 25)
-                            child.setFixedSize(new_width, new_height)
-            
-            # Recursively process children
-            self.make_children_responsive(child)
-
-    def on_slide_in_finished(self):
-        self.is_visible = True
-        self.is_animating = False
-            
-    def slide_out(self):
-        if self.parent and self.is_visible and not self.is_animating:
-            self.is_animating = True
-
-            # Calculate end position (off-screen to the right)
-            end_x = self.parent.width()
-            end_y = (self.parent.height() - self.height()) // 2
-            
-            # Set up animation
-            self.animation.setStartValue(self.geometry())
-            self.animation.setEndValue(self.parent.geometry().adjusted(end_x, end_y, 
-                                                                     end_x + self.width(), 
-                                                                     end_y + self.height()))
-            
-            # Disconnect any existing connections
-            try:
-                self.animation.finished.disconnect()
-            except:
-                pass
-            
-            # Connect animation finished signal
-            self.animation.finished.connect(self.on_slide_out_finished)
-            self.animation.start()
-
-    def on_slide_out_finished(self):
-        self.hide()
-        self.is_visible = False
-        self.is_animating = False
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.parent and self.is_visible:
-            self.reposition_panel()
-
-class ECGMenu(QGroupBox):
-    def __init__(self, parent=None, dashboard=None):
-        super().__init__("", parent)
-        self.dashboard = dashboard
-        # Reference to ECG test page for cross-component communication
-        self.ecg_test_page = None
-        self.settings_manager = None
-        self.sliding_panel = None
-        self.settings_changed_callback = None
-
->>>>>>> main
         self.setStyleSheet("QGroupBox { font: bold 14pt Arial; background-color: #fff; border-radius: 10px; }")
         layout = QVBoxLayout(self)
         self.buttons = {}
@@ -504,16 +237,7 @@ class ECGMenu(QGroupBox):
     def on_version_info(self):
         self.show_version_info()
     def on_factory_maintain(self):
-<<<<<<< HEAD
-        pass
-    def on_12to1(self):
-        self.lead12_window = Lead12BlackPage(dashboard=self.dashboard)
-        self.lead12_window.setWindowTitle("12:1 ECG Leads")
-        self.lead12_window.resize(1600, 300)
-        self.lead12_window.show()
-=======
         self.show_factory_maintain()
->>>>>>> main
     def on_exit(self):
         self.show_exit()
 
