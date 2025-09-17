@@ -1,100 +1,125 @@
-# ECG Monitor Software
+# ECG Monitor Application
 
-A modern, modular ECG monitor app for 12-lead ECG tests, real-time recording, and advanced dashboard analytics. Features a beautiful, responsive UI/UX with dark mode, animated splash, and robust authentication.
+A comprehensive ECG monitoring application with 12-lead ECG analysis, real-time metrics calculation, and dashboard visualization.
 
 ## Features
 
-- **Animated Splash Screen**: Modern, centered, always-on-top splash with GIF animation.
-- **Authentication**: Modular sign in/sign up with two-column, Instagram-style dialog. Supports email and phone login.
-- **Dashboard**: Personalized greeting, heartbeat animation, ECG chart (shows real Lead II data if available), pie chart, calendar with last ECG date highlight, and medical/dark mode toggles.
-- **12-Lead ECG Test**: Standalone window for live 12-lead test, with menu actions (Save/Open/Export/Print/Back). Writes Lead II data for dashboard.
-- **Dark Mode**: All dashboard blocks/widgets adapt to dark mode with white borders and seamless black backgrounds.
-- **Medical Mode**: Blue/green/white color coding for clinical use.
-- **Responsive UI**: All dialogs and windows are centered and adapt to resizing. No fixed sizes; uses size policies and stretches.
-- **Robust Menu**: Modular ECGMenu for all test actions.
-- **Live Data Sharing**: Dashboard ECG chart auto-updates from test page via `lead_ii_live.json`.
+- **12-Lead ECG Analysis**: Real-time ECG signal processing and visualization
+- **Medical-Grade Signal Filtering**: Advanced filtering system for smooth, clean ECG waves like professional medical devices
+- **Expanded Lead View**: Detailed analysis page for individual ECG leads with PQRST labeling
+- **Live Metrics Calculation**: Heart Rate, PR Interval, QRS Duration, QTc Interval, QRS Axis, ST Segment
+- **Arrhythmia Detection**: Automatic detection of various cardiac arrhythmias
+- **Dashboard Interface**: Clean, modern dashboard with live metric updates
+- **User Authentication**: Sign-in/sign-out functionality
+- **PDF Report Generation**: Generate comprehensive ECG reports
+- **Background GIF Support**: Animated background on sign-in screen
+- **Real-time Data Processing**: Live ECG data acquisition and processing from hardware
 
 ## Project Structure
 
 ```
 modularecg/
-├── src/
-│   ├── main.py
-│   ├── splash_screen.py
-│   ├── nav_home.py / nav_about.py / nav_blog.py / nav_pricing.py
-│   ├── auth/
-│   │   ├── sign_in.py
-│   │   └── sign_out.py
-│   ├── dashboard/
-│   │   └── dashboard.py
-│   ├── ecg/
-│   │   ├── lead_grid_view.py
-│   │   ├── lead_sequential_view.py
-│   │   ├── pan_tompkins.py
-│   │   ├── recording.py
-│   │   └── twelve_lead_test.py
-│   └── utils/
-│       ├── helpers.py
-│       └── heartbeat_widget.py
-├── assets/  # All images, GIFs, etc.
-├── users.json
-├── lead_ii_live.json
-├── requirements.txt
-└── README.md
+├── src/                    # Main application source code
+│   ├── main.py            # Application entry point
+│   ├── auth/              # Authentication modules
+│   ├── dashboard/         # Dashboard and UI components
+│   ├── ecg/               # ECG processing and analysis
+│   ├── utils/             # Utility functions and helpers
+│   └── nav_*.py           # Navigation components
+├── assets/                # Images, GIFs, and other resources
+├── requirements.txt       # Python dependencies
+├── launch_app.bat        # Windows batch launcher
+├── launch_app.ps1        # PowerShell launcher
+├── users.json            # User data storage
+└── clutter/              # Archived files and backups
 ```
-
-## Flow of Code
-
-1. **Start**: User runs `src/main.py`.
-2. **Splash Screen**: Shows animated splash while loading.
-3. **Login/Register**: User signs in or registers (handled by `auth/sign_in.py`).
-4. **Dashboard**: On successful login, `dashboard/dashboard.py` loads:
-   - Shows user info, heartbeat animation, and live ECG chart (from `lead_ii_live.json`).
-   - User can navigate to 12-lead ECG test, view statistics, or access other features.
-5. **12-Lead ECG Test**: User opens the test window (`ecg/twelve_lead_test.py`):
-   - Real-time ECG data is displayed for all leads.
-   - Menu allows saving, exporting, and switching views.
-   - Lead II data is written to `lead_ii_live.json` for dashboard sharing.
-6. **Live/Sequential View**: User can open sequential or overlay views for detailed analysis (`ecg/lead_sequential_view.py`).
-7. **Utilities**: Helper functions and widgets are in `utils/`.
-8. **Assets**: All images and GIFs are loaded from `assets/` using a resource path for PyInstaller compatibility.
 
 ## Installation
 
-1. Clone the repository:
-   ```sh
-   git clone <repository-url>
-   cd modularecg
-   ```
-2. (Recommended) Create a virtual environment:
-   ```sh
-   python -m venv .venv
-   .venv\Scripts\activate  # On Windows
-   ```
-3. Install dependencies:
-   ```sh
+1. **Clone the repository**
+2. **Install dependencies**:
+   ```bash
    pip install -r requirements.txt
    ```
 
+## Running the Application
+
+### Option 1: Using Batch File (Windows)
+```bash
+launch_app.bat
+```
+
+### Option 2: Using PowerShell Script
+```bash
+.\launch_app.ps1
+```
+
+### Option 3: Direct Python Execution
+```bash
+cd src
+python main.py
+```
+
 ## Usage
 
-1. Run the application:
-   ```sh
-   python src/main.py
-   ```
-2. Sign in or sign up. Use the dashboard to view live ECG, statistics, and run a 12-lead test.
-3. Use the dark mode/medical mode toggles for different UI themes.
-4. All data is stored locally in JSON files.
+1. **Launch the application** using one of the methods above
+2. **Sign in** with your credentials
+3. **Navigate to the dashboard** to view live ECG metrics
+4. **Click "ECG Lead Test 12"** to open the 12-lead ECG analysis page
+5. **View live metrics** including Heart Rate, PR Interval, QRS Duration, QTc Interval, QRS Axis, and ST Segment
+6. **Click on any ECG lead** to open the expanded lead view for detailed analysis
+7. **View PQRST labeling** and detailed metrics for individual leads
+8. **Monitor arrhythmia detection** in real-time
 
-## Notes
-- For best experience, use on Windows with all assets present in the `assets/` folder.
-- The dashboard ECG chart will show a mock wave if no real Lead II data is available.
-- Menu actions in the 12-lead test window are modular and can be extended.
+## ECG Metrics
 
-## Contributing
+The application calculates and displays the following metrics in real-time:
 
-Contributions are welcome! Please submit a pull request or open an issue for any enhancements or bug fixes.
+- **Heart Rate**: Beats per minute (BPM)
+- **PR Interval**: Time from P-wave to QRS complex (ms)
+- **QRS Duration**: Duration of QRS complex (ms)
+- **QTc Interval**: Corrected QT interval using Bazett's formula (ms)
+- **QRS Axis**: Electrical axis of the heart (degrees)
+- **ST Segment**: ST elevation/depression (mV)
 
-## License
+## Technical Details
 
-This project is licensed under the MIT License. See the LICENSE file for more details.
+- **Framework**: PyQt5 for GUI
+- **Plotting**: PyQtGraph for real-time ECG visualization
+- **Signal Processing**: NumPy and SciPy for ECG analysis
+- **Medical-Grade Filtering**: Advanced filtering pipeline including Wiener filter, Gaussian smoothing, adaptive median filtering
+- **Report Generation**: Matplotlib for static plots and PDF generation
+- **Real-time Processing**: Live data acquisition and processing from ECG hardware
+- **Arrhythmia Detection**: Pan-Tompkins algorithm for R-peak detection and cardiac rhythm analysis
+
+## File Organization
+
+- **Essential Files**: Only the necessary files for the application to run are kept in the root directory
+- **Clutter Folder**: All test files, backups, and temporary files are moved to the `clutter/` folder for organization
+- **Clean Structure**: The codebase is organized with clear separation of concerns
+
+## Recent Updates
+
+### Medical-Grade ECG Filtering System
+- **Advanced Filtering Pipeline**: Implemented 8-stage filtering system for professional medical device-quality signals
+- **Wiener Filter**: Statistical noise reduction optimized for ECG signals
+- **Gaussian Smoothing**: Multi-stage smoothing for clean waveform appearance
+- **Adaptive Median Filtering**: Dynamic noise removal based on signal characteristics
+- **Real-time Smoothing**: Individual data point smoothing for live data processing
+
+### Expanded Lead View
+- **Detailed Analysis**: Click any ECG lead to open expanded analysis view
+- **PQRST Labeling**: Automatic detection and labeling of cardiac waveform components
+- **Enhanced Metrics**: Comprehensive metrics display with improved visibility
+- **Arrhythmia Detection**: Real-time detection of various cardiac arrhythmias
+- **Responsive UI**: Optimized layout and sizing for better user experience
+
+### Signal Quality Improvements
+- **Smooth Waveforms**: Medical-grade signal processing for clean, professional appearance
+- **Stable Baseline**: Reduced drift and improved signal stability
+- **Sharp R-peaks**: Enhanced peak detection for accurate heart rate calculation
+- **Noise Reduction**: Comprehensive noise filtering for clear signal visualization
+
+## Support
+
+For issues or questions, please refer to the application documentation or contact the development team.
