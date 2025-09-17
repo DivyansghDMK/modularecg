@@ -711,6 +711,21 @@ class Dashboard(QWidget):
                         if qrs_text and qrs_text != '--':
                             self.metric_labels['qrs_duration'].setText(f"{qrs_text} ms")
                     
+                    if 'qtc_interval' in ecg_metrics:
+                        qtc_text = ecg_metrics['qtc_interval']
+                        if qtc_text and qtc_text != '--':
+                            self.metric_labels['qtc_interval'].setText(f"{qtc_text} ms")
+                    
+                    if 'qrs_axis' in ecg_metrics:
+                        qrs_axis_text = ecg_metrics['qrs_axis']
+                        if qrs_axis_text and qrs_axis_text != '--':
+                            self.metric_labels['qrs_axis'].setText(f"{qrs_axis_text}°")
+                    
+                    if 'st_segment' in ecg_metrics:
+                        st_segment_text = ecg_metrics['st_segment']
+                        if st_segment_text and st_segment_text != '--':
+                            self.metric_labels['st_segment'].setText(f"{st_segment_text} mV")
+                    
                     if 'sampling_rate' in ecg_metrics:
                         sr_text = ecg_metrics['sampling_rate']
                         if sr_text and sr_text != '--':
@@ -753,7 +768,7 @@ class Dashboard(QWidget):
         # --- UPDATED: Better real ECG graph capture ---
         lead_img_paths = {}
         ordered_leads = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
-        
+
         print(" Looking for ECG test page...")
         
         # Method 1: Check if ecg_test_page exists and has figures
@@ -850,8 +865,8 @@ class Dashboard(QWidget):
                                 ax = fig.axes[0]
                                 
                                 # REMOVE ALL NUMBERS AND LABELS
-                                ax.set_xticks([])         
-                                ax.set_yticks([])          
+                ax.set_xticks([])
+                ax.set_yticks([])
                                 ax.set_xlabel('')         
                                 ax.set_ylabel('')          
                                 ax.set_title('')           
@@ -898,7 +913,7 @@ class Dashboard(QWidget):
                                       edgecolor='none',
                                       transparent=True)
                             
-                            lead_img_paths[lead] = img_path
+                lead_img_paths[lead] = img_path
                             print(f"Saved clean Lead {lead}")
                             
                         except Exception as e:
@@ -1007,7 +1022,7 @@ class Dashboard(QWidget):
                 " No real ECG graphs found!\n\n Please:\n1. Start ECG test first\n2. Make sure 12-lead graphs are displayed\n3. Try again while ECG is running"
             )
             return
-        
+
         # Ask user where to save the PDF
         filename, _ = QFileDialog.getSaveFileName(
             self, 

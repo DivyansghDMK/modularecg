@@ -750,7 +750,7 @@ class ECGTestPage(QWidget):
         header_label.setAlignment(Qt.AlignCenter)
         header_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         menu_layout.addWidget(header_label)
-        
+
         # Create ECGMenu instance to use its methods
         self.ecg_menu = ECGMenu(parent=self, dashboard=self.stacked_widget.parent())
         # Connect ECGMenu to this ECG test page for data communication
@@ -1081,7 +1081,7 @@ class ECGTestPage(QWidget):
             self.r_peaks_scatter = self.plot_widgets[1].plot([], [], pen=None, symbol='o', symbolBrush='r', symbolSize=8)
         else:
             self.r_peaks_scatter = None
-        
+
         main_vbox.setSpacing(12)  # Reduced from 16px
         main_vbox.setContentsMargins(16, 16, 16, 16)  # Reduced from 24px
 
@@ -1438,6 +1438,10 @@ class ECGTestPage(QWidget):
                     metrics['qrs_axis'] = self.metric_labels['qrs_axis'].text().replace('°', '')
                 if 'st_interval' in self.metric_labels:
                     metrics['st_interval'] = self.metric_labels['st_interval'].text().replace(' ms', '')
+                if 'qtc_interval' in self.metric_labels:
+                    metrics['qtc_interval'] = self.metric_labels['qtc_interval'].text().replace(' ms', '')
+                if 'st_segment' in self.metric_labels:
+                    metrics['st_segment'] = self.metric_labels['st_segment'].text().replace(' mV', '')
             
             # Get sampling rate
             if hasattr(self, 'sampler') and self.sampler.sampling_rate > 0:
@@ -1449,6 +1453,16 @@ class ECGTestPage(QWidget):
         except Exception as e:
             print(f"Error getting current metrics: {e}")
             return {}
+
+    def get_current_lead_data(self, lead_index):
+        """Get current data for a specific lead by index"""
+        try:
+            if lead_index < len(self.data) and len(self.data[lead_index]) > 0:
+                return self.data[lead_index]
+            return []
+        except Exception as e:
+            print(f"Error getting lead data for index {lead_index}: {e}")
+            return []
 
     def update_plot_y_range(self, plot_index):
         """Update Y-axis range for a specific plot using robust stats to avoid cropping"""
@@ -1551,7 +1565,7 @@ class ECGTestPage(QWidget):
         print(f"Applied settings: speed={wave_speed}mm/s, gain={wave_gain}mm/mV, buffer={self.buffer_size}, ylim={self.ylim}")
 
     # ------------------------ Update Dashboard Metrics on the top of the lead graphs ------------------------
-    
+
     def create_metrics_frame(self):
         metrics_frame = QFrame()
         metrics_frame.setObjectName("metrics_frame")
@@ -1841,7 +1855,7 @@ class ECGTestPage(QWidget):
                 'QRS_axis': qrs_axis,
                 'ST': st_segment * 1000
             }
-                
+            
         except Exception as e:
             print(f"Error calculating ECG intervals: {e}")
             return {}
@@ -2517,7 +2531,7 @@ class ECGTestPage(QWidget):
             for i, line in enumerate(self.lines):
                 if i < len(self.leads):
                     lead = self.leads[i]
-                    data = self.data.get(lead, [])
+                    data = self.data[i] if i < len(self.data) else []
                     
                     if len(data) > 0:
                         # Apply current settings to the real data
@@ -3001,24 +3015,24 @@ class ECGTestPage(QWidget):
                     return
             
             # Update data buffers for all leads
-            for lead in self.leads:
-                if lead in lead_data:
-                    self.data[lead].append(lead_data[lead])
-                    if len(self.data[lead]) > self.buffer_size:
-                        self.data[lead].pop(0)
+            for i, lead in enumerate(self.leads):
+                if lead in lead_data and i < len(self.data):
+                    self.data[i].append(lead_data[lead])
+                    if len(self.data[i]) > self.buffer_size:
+                        self.data[i].pop(0)
             
-            print(f"[DEBUG] ECGTestPage - Updated data buffers, Lead II has {len(self.data['II'])} points")
+            print(f"[DEBUG] ECGTestPage - Updated data buffers, Lead II has {len(self.data[1]) if len(self.data) > 1 else 0} points")
             
             # Write latest Lead II data to file for dashboard
             try:
                 import json
                 with open('lead_ii_live.json', 'w') as f:
-                    json.dump(self.data["II"][-500:], f)
+                    json.dump(self.data[1][-500:] if len(self.data) > 1 else [], f)
             except Exception as e:
                 print("Error writing lead_ii_live.json:", e)
             
             # Calculate and update ECG metrics in real-time
-            lead_ii_data = self.data.get("II", [])
+            lead_ii_data = self.data[1] if len(self.data) > 1 else []
             if lead_ii_data:
                 intervals = self.calculate_ecg_intervals(lead_ii_data)
                 self.update_ecg_metrics_on_top_of_lead_graphs(intervals)
@@ -3094,7 +3108,7 @@ class ECGTestPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Export ECG Data as CSV", "", "CSV Files (*.csv)")
         if path:
             try:
-                with open(path, 'w', newline='') as f:
+            with open(path, 'w', newline='') as f:
                     writer = csv.writer(f, delimiter='\t')  # Use tab delimiter like dummydata.csv
                     
                     # Write header exactly like dummydata.csv
@@ -3147,15 +3161,15 @@ class ECGTestPage(QWidget):
                                         # Only include non-zero values (actual data)
                                         if value != 0:
                                             row.append(int(value))
-                                        else:
-                                            row.append("")
+                        else:
+                            row.append("")
                                     else:
                                         row.append("")
                                 else:
                                     row.append("")
                             
-                            writer.writerow(row)
-                
+                    writer.writerow(row)
+
                 print(f"✅ CSV export completed: {path}")
                 QMessageBox.information(
                     self, 
