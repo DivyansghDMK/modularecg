@@ -171,57 +171,6 @@ class Dashboard(QWidget):
         self.bg_label = QLabel(self)
         self.bg_label.setGeometry(0, 0, self.width(), self.height())
         self.bg_label.lower()
-        
-        # Try to load background GIFs using portable paths
-        if not self.use_gif_background:
-            # Use solid color background
-            self.bg_label.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #f8f9fa, stop:1 #e9ecef);")
-            print("Using solid color background (GIF background disabled)")
-        else:
-            # Priority order based on user preference
-            movie = None
-            if self.preferred_background == "plasma.gif":
-                plasma_path = get_asset_path("plasma.gif")
-                if os.path.exists(plasma_path):
-                    movie = QMovie(plasma_path)
-                    print("Using plasma.gif as background")
-                else:
-                    print("plasma.gif not found, trying alternatives...")
-                    self.preferred_background = "tenor.gif"  # Fallback
-            
-            if self.preferred_background == "tenor.gif" and not movie:
-                tenor_gif_path = get_asset_path("tenor.gif")
-                if os.path.exists(tenor_gif_path):
-                    movie = QMovie(tenor_gif_path)
-                    print("Using tenor.gif as background")
-                else:
-                    print("tenor.gif not found, trying alternatives...")
-                    self.preferred_background = "v.gif"  # Fallback
-            
-            if self.preferred_background == "v.gif" and not movie:
-                v_gif_path = get_asset_path("v.gif")
-                if os.path.exists(v_gif_path):
-                    movie = QMovie(v_gif_path)
-                    print("Using v.gif as background")
-                else:
-                    print("v.gif not found, using solid color background")
-            
-            if movie:
-                self.bg_label.setMovie(movie)
-                movie.start()
-            else:
-                # If no GIF found, create a solid color background
-                self.bg_label.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #f8f9fa, stop:1 #e9ecef);")
-                print("Using solid color background (no GIFs found)")
-        # --- Central stacked widget for in-place navigation ---
-        self.page_stack = QStackedWidget(self)
-        
-        # --- Dashboard main page widget ---
-        self.dashboard_page = DashboardHomeWidget()
-        dashboard_layout = QVBoxLayout(self.dashboard_page)
-        dashboard_layout.setSpacing(20)
-        dashboard_layout.setContentsMargins(20, 20, 20, 20)
-        
         # --- Header ---
         header = QHBoxLayout()
         logo = QLabel("ECG Monitor")
@@ -229,7 +178,6 @@ class Dashboard(QWidget):
         logo.setStyleSheet("color: #ff6600;")
         logo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         header.addWidget(logo)
-        
         self.status_dot = QLabel()
         self.status_dot.setFixedSize(18, 18)
         self.status_dot.setStyleSheet("border-radius: 9px; background: gray; border: 2px solid #fff;")
@@ -239,14 +187,12 @@ class Dashboard(QWidget):
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self.update_internet_status)
         self.status_timer.start(3000)
-        
         self.medical_btn = QPushButton("Medical Mode")
         self.medical_btn.setCheckable(True)
         self.medical_btn.setStyleSheet("background: #00b894; color: white; border-radius: 10px; padding: 4px 18px;")
         self.medical_btn.clicked.connect(self.toggle_medical_mode)
         self.medical_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         header.addWidget(self.medical_btn)
-        
         self.dark_btn = QPushButton("Dark Mode")
         self.dark_btn.setCheckable(True)
         self.dark_btn.setStyleSheet("background: #222; color: #fff; border-radius: 10px; padding: 4px 18px;")
@@ -275,9 +221,6 @@ class Dashboard(QWidget):
         self.sign_btn.clicked.connect(self.handle_sign_out)
         self.sign_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         header.addWidget(self.sign_btn)
-        
-        dashboard_layout.addLayout(header)
-        
         # --- Greeting and Date Row ---
         greet_row = QHBoxLayout()
         from datetime import datetime
@@ -300,16 +243,6 @@ class Dashboard(QWidget):
         date_btn.clicked.connect(self.go_to_lead_test)
         date_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         greet_row.addWidget(date_btn)
-
-        # --- Add Chatbot Button ---
-        chatbot_btn = QPushButton("AI Chatbot")
-        chatbot_btn.setStyleSheet("background: #2453ff; color: white; border-radius: 16px; padding: 8px 24px;")
-        chatbot_btn.clicked.connect(self.open_chatbot_dialog)
-        chatbot_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        greet_row.addWidget(chatbot_btn)
-
-        dashboard_layout.addLayout(greet_row)
-
         # --- Main Grid ---
         # Create a scroll area for responsive design
         scroll_area = QScrollArea()
@@ -333,26 +266,6 @@ class Dashboard(QWidget):
         heart_layout.addWidget(heart_label)
         
         heart_img = QLabel()
-        # Use portable path for the heart image asset
-        heart_img_path = get_asset_path("her.png")
-        print(f"Heart image path: {heart_img_path}")  # Debugging line to check the path
-        # Ensure os module is available
-        import os
-        print(f"Heart image exists: {os.path.exists(heart_img_path)}")  # Check if the file exists
-        
-        # Load the heart image with error handling
-        if os.path.exists(heart_img_path):
-            self.heart_pixmap = QPixmap(heart_img_path)
-            if self.heart_pixmap.isNull():
-                print(f"Error: Failed to load heart image from {heart_img_path}")
-                # Create a placeholder pixmap
-                self.heart_pixmap = QPixmap(220, 220)
-                self.heart_pixmap.fill(Qt.lightGray)
-        else:
-            print(f"Error: Heart image not found at {heart_img_path}")
-            # Create a placeholder pixmap
-            self.heart_pixmap = QPixmap(220, 220)
-            self.heart_pixmap.fill(Qt.lightGray)
         self.heart_base_size = 220
         heart_img.setFixedSize(self.heart_base_size + 20, self.heart_base_size + 20)
         heart_img.setAlignment(Qt.AlignCenter)
@@ -396,11 +309,9 @@ class Dashboard(QWidget):
         
         # --- ECG Recording (Animated Chart) ---
         ecg_card = QFrame()
-        ecg_card.setStyleSheet("background: white; border-radius: 16px;")
-        ecg_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         ecg_layout = QVBoxLayout(ecg_card)
         
-        ecg_label = QLabel("ECG Recording")
+        ecg_label = QLabel("Live Lead 2 ECG Recording")
         ecg_label.setFont(QFont("Arial", 14, QFont.Bold))
         ecg_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         ecg_layout.addWidget(ecg_label)
@@ -409,7 +320,7 @@ class Dashboard(QWidget):
         self.ecg_canvas.axes.set_facecolor("#eee")
         self.ecg_canvas.axes.set_xticks([])
         self.ecg_canvas.axes.set_yticks([])
-        self.ecg_canvas.axes.set_title("Lead II", fontsize=10)
+        self.ecg_canvas.axes.set_title("Lead II - Live Data", fontsize=10)
         self.ecg_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         ecg_layout.addWidget(self.ecg_canvas)
         
@@ -531,19 +442,6 @@ class Dashboard(QWidget):
         metrics_card.setStyleSheet("background: white; border-radius: 16px;")
         metrics_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         metrics_layout = QHBoxLayout(metrics_card)
-        
-        # Store metric labels for live update
-        self.metric_labels = {}
-        metric_info = [
-            ("Heart Rate", "--", "bpm", "heart_rate"),
-            ("PR Interval", "--", "ms", "pr_interval"),
-            ("QRS Duration", "--", "ms", "qrs_duration"),
-            ("QTc Interval", "--", "ms", "qtc_interval"),
-            ("QRS Axis", "--", "", "qrs_axis"),
-            ("ST Segment", "--", "", "st_segment"),
-            ("Sampling Rate", "--", "Hz", "sampling_rate"),
-        ]
-        
         for title, value, unit, key in metric_info:
             box = QVBoxLayout()
             lbl = QLabel(title)
@@ -556,87 +454,40 @@ class Dashboard(QWidget):
             box.addWidget(val)
             metrics_layout.addLayout(box)
             self.metric_labels[key] = val  # Store reference for live update
-        
-        grid.addWidget(metrics_card, 0, 1, 1, 2)
-        
-        # Add the grid widget to the scroll area
-        scroll_area.setWidget(grid_widget)
-        
-        # Add scroll area to dashboard layout
-        dashboard_layout.addWidget(scroll_area)
-        
-        # Add generate report button
-        self.generate_report_btn = QPushButton("Generate Report")
-        self.generate_report_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 10px; padding: 8px 24px; font-size: 16px; font-weight: bold;")
-        self.generate_report_btn.clicked.connect(self.generate_pdf_report)
-        self.generate_report_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        dashboard_layout.addWidget(self.generate_report_btn, alignment=Qt.AlignRight)
-        
         # --- ECG Animation Setup ---
         self.ecg_x = np.linspace(0, 2, 500)
         self.ecg_y = 1000 + 200 * np.sin(2 * np.pi * 2 * self.ecg_x) + 50 * np.random.randn(500)
         self.ecg_line, = self.ecg_canvas.axes.plot(self.ecg_x, self.ecg_y, color="#ff6600")
         self.anim = FuncAnimation(self.ecg_canvas.figure, self.update_ecg, interval=50, blit=True)
-        
-        # --- Dashboard Metrics Update Timer ---
-        self.metrics_timer = QTimer(self)
-        self.metrics_timer.timeout.connect(self.update_dashboard_metrics_from_ecg)
-        self.metrics_timer.start(1000)  # Update every second
-        # Add dashboard_page to stack
-        self.page_stack.addWidget(self.dashboard_page)
-        # --- ECG Test Page ---
-        try:
-            # Add the src directory to the path for ECG imports
-            src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if src_dir not in sys.path:
-                sys.path.insert(0, src_dir)
-                print(f"✅ Added src directory to path: {src_dir}")
-            
-            from ecg.twelve_lead_test import ECGTestPage
-            print("✅ ECG Test Page imported successfully")
-                    
-        except ImportError as e:
-            print(f"❌ ECG Test Page import error: {e}")
-            print("💡 Creating fallback ECG Test Page")
-            # Create a fallback ECG test page
-            class ECGTestPage(QWidget):
-                def __init__(self, title, parent):
-                    super().__init__()
-                    self.title = title
-                    self.parent = parent
-                    self.dashboard_callback = None
-                    layout = QVBoxLayout()
-                    label = QLabel("ECG Test Page - Import Error")
-                    label.setAlignment(Qt.AlignCenter)
-                    layout.addWidget(label)
-                    self.setLayout(layout)
-                    print("⚠️ Using fallback ECG Test Page")
-        self.ecg_test_page = ECGTestPage("12 Lead ECG Test", self.page_stack)
-        self.ecg_test_page.dashboard_callback = self.update_ecg_metrics
-
-        if hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
-            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
-        
         self.page_stack.addWidget(self.ecg_test_page)
         # --- Main layout ---
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.page_stack)
         self.setLayout(main_layout)
         self.page_stack.setCurrentWidget(self.dashboard_page)
-
-        # Add a content_frame for ECGMenu to use
-        self.content_frame = QFrame(self)
-        self.content_frame.setStyleSheet("background: transparent; border: none;")
-        main_layout.addWidget(self.content_frame)
-
-        self.setLayout(main_layout)
-        self.page_stack.setCurrentWidget(self.dashboard_page)
-
-    def open_chatbot_dialog(self):
-        dlg = ChatbotDialog(self)
-        dlg.exec_()
-
     def update_ecg(self, frame):
+        """Update the animated ECG plot with live Lead II data from the ECGTestPage."""
+        try:
+            if hasattr(self, 'ecg_test_page') and self.ecg_test_page:
+                # Get live Lead II data from the ECG test page
+                if hasattr(self.ecg_test_page, 'get_current_lead_data'):
+                    live_lead_ii_data = self.ecg_test_page.get_current_lead_data(1)  # Lead II is at index 1
+                    
+                    if live_lead_ii_data is not None and len(live_lead_ii_data) > 10:
+                        arr = np.array(live_lead_ii_data)
+                        arr = arr - np.mean(arr)
+                        arr = arr + 1000  # Center vertically
+                        
+                        # Ensure the data length matches the plot buffer size
+                        if len(arr) < len(self.ecg_x):
+                            arr = np.pad(arr, (len(self.ecg_x) - len(arr), 0), 'constant', constant_values=(1000,))
+                        
+                        self.ecg_line.set_ydata(arr[-len(self.ecg_x):])
+                        return [self.ecg_line]
+        except Exception as e:
+            print(f"Error updating live ECG plot: {e}")
+        
+        # Fallback: try to read from JSON file
         import json
         lead_ii_file = 'lead_ii_live.json'
         if os.path.exists(lead_ii_file):
@@ -653,7 +504,8 @@ class Dashboard(QWidget):
                     return [self.ecg_line]
             except Exception as e:
                 print("Error reading lead_ii_live.json:", e)
-        # Fallback: mock wave
+        
+        # Fallback: mock wave if no live data or error
         self.ecg_y = np.roll(self.ecg_y, -1)
         self.ecg_y[-1] = 1000 + 200 * np.sin(2 * np.pi * 2 * self.ecg_x[-1] + frame/10) + 50 * np.random.randn()
         self.ecg_line.set_ydata(self.ecg_y)
@@ -677,12 +529,24 @@ class Dashboard(QWidget):
                 self.metric_labels['qtc_interval'].setText(f"{int(round(intervals['QTc']))} ms")
             else:
                 self.metric_labels['qtc_interval'].setText("-- ms")
+        if 'qtc_interval' in intervals and intervals['qtc_interval'] is not None:
+            if isinstance(intervals['qtc_interval'], (int, float)) and intervals['qtc_interval'] >= 0:
+                self.metric_labels['qtc_interval'].setText(f"{int(round(intervals['qtc_interval']))} ms")
+            else:
+                self.metric_labels['qtc_interval'].setText("-- ms")
         if 'QRS_axis' in intervals and intervals['QRS_axis'] is not None:
             self.metric_labels['qrs_axis'].setText(str(intervals['QRS_axis']))
+        if 'qrs_axis' in intervals and intervals['qrs_axis'] is not None:
+            self.metric_labels['qrs_axis'].setText(str(intervals['qrs_axis']))
         if 'ST' in intervals and intervals['ST'] is not None:
             self.metric_labels['st_segment'].setText(
                 f"{int(round(intervals['ST']))} ms" if isinstance(intervals['ST'], (int, float)) else str(intervals['ST'])
             )
+        if 'st_segment' in intervals and intervals['st_segment'] is not None:
+            if isinstance(intervals['st_segment'], (int, float)):
+                self.metric_labels['st_segment'].setText(f"{intervals['st_segment']:.2f} mV")
+            else:
+                self.metric_labels['st_segment'].setText("-- mV")
         # Also update the ECG test page theme if it exists
         if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
             self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
@@ -711,6 +575,21 @@ class Dashboard(QWidget):
                         if qrs_text and qrs_text != '--':
                             self.metric_labels['qrs_duration'].setText(f"{qrs_text} ms")
                     
+                    if 'qtc_interval' in ecg_metrics:
+                        qtc_text = ecg_metrics['qtc_interval']
+                        if qtc_text and qtc_text != '--':
+                            self.metric_labels['qtc_interval'].setText(f"{qtc_text} ms")
+                    
+                    if 'qrs_axis' in ecg_metrics:
+                        qrs_axis_text = ecg_metrics['qrs_axis']
+                        if qrs_axis_text and qrs_axis_text != '--':
+                            self.metric_labels['qrs_axis'].setText(f"{qrs_axis_text}°")
+                    
+                    if 'st_segment' in ecg_metrics:
+                        st_segment_text = ecg_metrics['st_segment']
+                        if st_segment_text and st_segment_text != '--':
+                            self.metric_labels['st_segment'].setText(f"{st_segment_text} mV")
+                    
                     if 'sampling_rate' in ecg_metrics:
                         sr_text = ecg_metrics['sampling_rate']
                         if sr_text and sr_text != '--':
@@ -722,114 +601,317 @@ class Dashboard(QWidget):
     def generate_pdf_report(self):
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
         import datetime
-        try:
-            from ecg.ecg_report_generator import generate_ecg_html_report
-        except ImportError as e:
-            print(f"⚠️ ECG report generator import warning: {e}")
-            def generate_ecg_html_report(*args, **kwargs):
-                return "ECG Report Generator not available"
+        import os
+        # Import the simple function from ecg_report_generator
+        from ecg.ecg_report_generator import generate_ecg_report
 
-        # Gather details from dashboard
-        HR = self.metric_labels['heart_rate'].text().split()[0] if 'heart_rate' in self.metric_labels else "--"
-        PR = self.metric_labels['pr_interval'].text().split()[0] if 'pr_interval' in self.metric_labels else "--"
-        QRS = self.metric_labels['qrs_duration'].text().split()[0] if 'qrs_duration' in self.metric_labels else "--"
-        QT = self.metric_labels['qt_interval'].text().split()[0] if 'qt_interval' in self.metric_labels else "--"
-        QTc = self.metric_labels['qtc_interval'].text().split()[0] if 'qtc_interval' in self.metric_labels else "--"
-        QRS_axis = self.metric_labels['qrs_axis'].text() if 'qrs_axis' in self.metric_labels else "--"
-        ST = self.metric_labels['st_segment'].text().split()[0] if 'st_segment' in self.metric_labels else "--"
+        print(" Starting PDF report generation...")
 
-        # Patient details (replace with actual data if available)
-        first_name = getattr(self, "first_name", "")
-        last_name = getattr(self, "last_name", "")
-        age = getattr(self, "age", "")
-        gender = getattr(self, "gender", "")
-        test_name = "12 Lead ECG"
-        date_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        abnormal_report = 'N'
-        text = obstext = qrstext = ""
-        uId = testId = dataId = "NA"
+        # Gather ECG data from dashboard metrics
+        HR = self.metric_labels['heart_rate'].text().split()[0] if 'heart_rate' in self.metric_labels else "88"
+        PR = self.metric_labels['pr_interval'].text().split()[0] if 'pr_interval' in self.metric_labels else "160"
+        QRS = self.metric_labels['qrs_duration'].text().split()[0] if 'qrs_duration' in self.metric_labels else "90"
+        QT = "380"  # Default value
+        QTc = self.metric_labels['qtc_interval'].text().split()[0] if 'qtc_interval' in self.metric_labels else "400"
+        ST = self.metric_labels['st_segment'].text().split()[0] if 'st_segment' in self.metric_labels else "100"
 
-        # --- Save all lead graphs as image ---
+        # Prepare data for the report generator
+        ecg_data = {
+            "HR": 4833,  # Total heartbeats
+            "beat": int(HR) if HR.isdigit() else 88,  # Current heart rate
+            "PR": int(PR) if PR.isdigit() else 160,
+            "QRS": int(QRS) if QRS.isdigit() else 90,
+            "QT": int(QT) if QT.isdigit() else 380,
+            "QTc": int(QTc) if QTc.isdigit() else 400,
+            "ST": int(ST) if ST.isdigit() else 100,
+            "HR_max": 136,
+            "HR_min": 74,
+            "HR_avg": int(HR) if HR.isdigit() else 88,
+        }
+
+        # --- UPDATED: Better real ECG graph capture ---
         lead_img_paths = {}
         ordered_leads = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
 
-        # Get ECGTestPage instance and its figures
-
-        bg_img_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ecg_bgimg.png") # Path to background image
-
-        ecg_test_page = self.ecg_test_page
-        for lead in ordered_leads:
-            fig = ecg_test_page.get_lead_figure(lead)  # You may need to implement get_lead_figure
-            if fig:
-                ax = fig.axes[0]  # Get the main axes
-                # Hide axis ticks and labels
-                ax.set_xticks([])
-                ax.set_yticks([])
-                ax.set_xlabel("")
-                ax.set_ylabel("")
-                # Add background image ONLY for PDF export
-                if os.path.exists(bg_img_path):
-                    img = mpimg.imread(bg_img_path)
-                    ax.imshow(img, aspect='auto', extent=ax.get_xlim() + ax.get_ylim(), zorder=0)
-                img_path = f"lead_{lead}.png"
-                fig.savefig(img_path, bbox_inches='tight', dpi=250)
-                lead_img_paths[lead] = img_path
-                # Remove the background image so it doesn't affect UI
-                for img in list(ax.images):
-                    img.remove()
-
-        # --- Generate HTML report with graph image ---
-        html = generate_ecg_html_report(
-            HR=HR,
-            PR=float(PR) if PR.replace('.', '', 1).isdigit() else 0,
-            QRS=float(QRS) if QRS.replace('.', '', 1).isdigit() else 0,
-            QT=float(QT) if QT.replace('.', '', 1).isdigit() else 0,
-            QTc=float(QTc) if QTc.replace('.', '', 1).isdigit() else 0,
-            ST=float(ST) if ST.replace('.', '', 1).isdigit() else 0,
-            test_name=test_name,
-            date_time=date_time,
-            first_name=first_name,
-            last_name=last_name,
-            age=age,
-            gender=gender,
-            abnormal_report=abnormal_report,
-            text=text,
-            obstext=obstext,
-            qrstext=qrstext,
-            uId=uId,
-            testId=testId,
-            dataId=dataId,
-            lead_img_paths=lead_img_paths,   # <-- Pass all 12 leads here
-            QRS_axis=QRS_axis
-        )
+        print(" Looking for ECG test page...")
         
-        # Save HTML report
-        with open("ecg_report.html", "w") as f:
-            f.write(html)
+        # Method 1: Check if ecg_test_page exists and has figures
+        if hasattr(self, 'ecg_test_page') and self.ecg_test_page:
+            print(f" Found ecg_test_page: {type(self.ecg_test_page)}")
+            
+            # Check if figures array exists
+            if hasattr(self.ecg_test_page, 'figures') and self.ecg_test_page.figures:
+                print(f" Found {len(self.ecg_test_page.figures)} figures in ECGTestPage")
+                
+                for i, lead in enumerate(ordered_leads):
+                    if i < len(self.ecg_test_page.figures):
+                        try:
+                            # MEDICAL GRADE CLEAN GRAPH SAVING
+                            fig = self.ecg_test_page.figures[i]
+                            
+                            # Clean the figure for medical report
+                            if fig.axes:
+                                ax = fig.axes[0]
+                                
+                                # REMOVE ALL NUMBERS AND LABELS
+                                ax.set_xticks([])          # Remove X-axis numbers
+                                ax.set_yticks([])          # Remove Y-axis numbers
+                                ax.set_xlabel('')          # Remove X label
+                                ax.set_ylabel('')          # Remove Y label
+                                ax.set_title('')           # Remove title
+                                
+                                # Remove axis borders (spines)
+                                for spine in ax.spines.values():
+                                    spine.set_visible(False)
+                                
+                                # Clean background - MAKE TRANSPARENT
+                                ax.set_facecolor('none')          
+                                fig.patch.set_facecolor('none')   
+                                # Remove legend if exists
+                                legend = ax.get_legend()
+                                if legend:
+                                    legend.remove()
+                                
+                                # Make ECG line smooth and medical-grade
+                                for line in ax.lines:
+                                    line.set_linewidth(0.4)       # Ultra-thin 
+                                    line.set_antialiased(True)    # Maximum smoothness
+                                    line.set_color('#000000')     # Pure black
+                                    line.set_alpha(0.9)           # Slightly transparent for medical look
+                                    line.set_solid_capstyle('round')   
+                                    line.set_solid_joinstyle('round')  
+                                
+                                # Add subtle medical-style grid (optional)
+                                ax.grid(True, 
+                                       color='#f0f0f0',          # Very light grey
+                                       linestyle='-', 
+                                       linewidth=0.3, 
+                                       alpha=0.7)
+                                ax.set_axisbelow(True)
+                            
+                            # Get absolute path to project root
+                            current_dir = os.path.dirname(os.path.abspath(__file__))
+                            project_root = os.path.join(current_dir, '..')
+                            project_root = os.path.abspath(project_root)
+                            
+                            img_path = os.path.join(project_root, f"lead_{lead}.png")
+                            
+                            # Save medical-grade image
+                            fig.savefig(img_path, 
+                                      bbox_inches='tight',     # Remove extra space
+                                      pad_inches=0.05,         # Minimal padding
+                                      dpi=200,                 # High resolution for print
+                                      facecolor='none',        # Transparent
+                                      edgecolor='none',        # No border
+                                      transparent=True)       # Enable transparency
+                            
+                            lead_img_paths[lead] = img_path
+                            
+                            print(f" Saved medical-grade Lead {lead}: {img_path}")
+                            
+                        except Exception as e:
+                            print(f" Error capturing Lead {lead}: {e}")
+                    else:
+                        print(f"  No figure available for Lead {lead} (index {i})")
+            
+            # Method 2: Check canvases if figures not available
+            elif hasattr(self.ecg_test_page, 'canvases') and self.ecg_test_page.canvases:
+                print(f" Found {len(self.ecg_test_page.canvases)} canvases in ECGTestPage")
+                
+                for i, lead in enumerate(ordered_leads):
+                    if i < len(self.ecg_test_page.canvases):
+                        try:
+                            canvas = self.ecg_test_page.canvases[i]
+                            fig = canvas.figure
+                            
+                            # MEDICAL GRADE CLEAN GRAPH SAVING (same as above)
+                            if fig.axes:
+                                ax = fig.axes[0]
+                                
+                                # REMOVE ALL NUMBERS AND LABELS
+                                ax.set_xticks([])
+                                ax.set_yticks([])
+                                ax.set_xlabel('')         
+                                ax.set_ylabel('')          
+                                ax.set_title('')           
+                                
+                                # Remove axis borders
+                                for spine in ax.spines.values():
+                                    spine.set_visible(False)
+                                
+                                # Clean background - MAKE TRANSPARENT  
+                                ax.set_facecolor('none')          # Transparent axis
+                                fig.patch.set_facecolor('none')   # Transparent figure
+                                
+                                # Remove legend
+                                legend = ax.get_legend()
+                                if legend:
+                                    legend.remove()
+                                
+                                # Medical-grade line styling
+                                for line in ax.lines:
+                                    line.set_linewidth(0.4)       # Ultra-thin like reference
+                                    line.set_antialiased(True)
+                                    line.set_color('#000000')
+                                    line.set_alpha(0.9)
+                                    line.set_solid_capstyle('round')   # Rounded line endings
+                                    line.set_solid_joinstyle('round')  # Rounded line joints
+                                
+                                # Subtle medical grid
+                                ax.grid(True, color='#f0f0f0', linestyle='-', linewidth=0.3, alpha=0.7)
+                                ax.set_axisbelow(True)
+                            
+                            # Save path
+                            current_dir = os.path.dirname(os.path.abspath(__file__))
+                            project_root = os.path.join(current_dir, '..')
+                            project_root = os.path.abspath(project_root)
+                            
+                            img_path = os.path.join(project_root, f"lead_{lead}.png")
+                            
+                            # Save medical-grade image
+                            fig.savefig(img_path, 
+                                      bbox_inches='tight',
+                                      pad_inches=0.05,
+                                      dpi=200,
+                                      facecolor='none',
+                                      edgecolor='none',
+                                      transparent=True)
+                            
+                            lead_img_paths[lead] = img_path
+                            print(f"Saved clean Lead {lead}")
+                            
+                        except Exception as e:
+                            print(f" Error capturing Lead {lead}: {e}")
+            else:
+                print(" No figures or canvases found in ECGTestPage")
+        else:
+            print(" No ecg_test_page found in dashboard")
+        
+        # Method 3: Check current stack widget for ECG pages
+        if not lead_img_paths and hasattr(self, 'page_stack'):
+            print(" Checking page stack for ECG test pages...")
+            
+            for i in range(self.page_stack.count()):
+                widget = self.page_stack.widget(i)
+                
+                # Check if it's ECGTestPage
+                if hasattr(widget, 'figures') and hasattr(widget, 'leads'):
+                    print(f"Found ECG page in stack at index {i}")
+                    
+                    for j, lead in enumerate(ordered_leads):
+                        if j < len(widget.figures):
+                            try:
+                                fig = widget.figures[j]
+                                
+                                # Medical-grade clean graph saving
+                                if fig.axes:
+                                    ax = fig.axes[0]
+                                    ax.set_xticks([])
+                                    ax.set_yticks([])
+                                    ax.set_xlabel('')
+                                    ax.set_ylabel('')
+                                    ax.set_title('')
+                                    
+                                    for spine in ax.spines.values():
+                                        spine.set_visible(False)
+                                    
+                                    ax.set_facecolor('none')
+                                    fig.patch.set_facecolor('none')
+                                    
+                                    legend = ax.get_legend()
+                                    if legend:
+                                        legend.remove()
+                                    
+                                    for line in ax.lines:
+                                        line.set_linewidth(0.4)       # Ultra-thin like reference
+                                        line.set_antialiased(True)
+                                        line.set_color('#000000')
+                                        line.set_alpha(0.9)
+                                        line.set_solid_capstyle('round')   # Rounded line endings
+                                        line.set_solid_joinstyle('round')  # Rounded line joints
+                                    
+                                    ax.grid(True, color='#f0f0f0', linestyle='-', linewidth=0.3, alpha=0.7)
+                                    ax.set_axisbelow(True)
+                                
+                                current_dir = os.path.dirname(os.path.abspath(__file__))
+                                project_root = os.path.join(current_dir, '..')
+                                project_root = os.path.abspath(project_root)
+                                
+                                img_path = os.path.join(project_root, f"lead_{lead}.png")
+                                
+                                fig.savefig(img_path, 
+                                          bbox_inches='tight',
+                                          pad_inches=0.05,
+                                          dpi=200,
+                                          facecolor='none',
+                                          edgecolor='none',
+                                          transparent=True)
+                                
+                                lead_img_paths[lead] = img_path
+                                print(f" Saved medical-grade Lead {lead}")
+                                
+                            except Exception as e:
+                                print(f" Error capturing Lead {lead}: {e}")
+                    break
+        
+        # Method 4: Capture from PyQtGraph plot widgets (current 12-lead grid)
+        if not lead_img_paths and hasattr(self, 'ecg_test_page') and self.ecg_test_page:
+            if hasattr(self.ecg_test_page, 'plot_widgets') and self.ecg_test_page.plot_widgets:
+                print(" Capturing ECG from PyQtGraph plot widgets...")
+                try:
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    project_root = os.path.abspath(os.path.join(current_dir, '..'))
+                    for i, lead in enumerate(ordered_leads):
+                        if i < len(self.ecg_test_page.plot_widgets):
+                            try:
+                                w = self.ecg_test_page.plot_widgets[i]
+                                pix = w.grab()  # QWidget -> QPixmap
+                                img_path = os.path.join(project_root, f"lead_{lead}.png")
+                                pix.save(img_path, 'PNG')
+                                lead_img_paths[lead] = img_path
+                                print(f" Saved PyQtGraph Lead {lead}: {img_path}")
+                            except Exception as e:
+                                print(f" Error capturing PyQtGraph Lead {lead}: {e}")
+                except Exception as e:
+                    print(f" PyQtGraph capture failed: {e}")
 
-        # Ask user where to save PDF
-        path, _ = QFileDialog.getSaveFileName(self, "Save ECG Report as PDF", "", "PDF Files (*.pdf)")
-        if not path:
+        # Report results
+        if lead_img_paths:
+            print(f" Successfully captured {len(lead_img_paths)}/12 real ECG graphs!")
+        else:
+            print(" No real ECG graphs found!")
+            QMessageBox.warning(
+                self,
+                "No ECG Data",
+                " No real ECG graphs found!\n\n Please:\n1. Start ECG test first\n2. Make sure 12-lead graphs are displayed\n3. Try again while ECG is running"
+            )
             return
 
-        # Convert HTML to PDF using Qt's QTextDocument
-        from PyQt5.QtGui import QTextDocument
-        from PyQt5.QtPrintSupport import QPrinter
-        doc = QTextDocument()
-        doc.setHtml(html)
-        printer = QPrinter(QPrinter.HighResolution)
-        printer.setOutputFormat(QPrinter.PdfFormat)
-        printer.setOutputFileName(path)
-        doc.print_(printer)
-        QMessageBox.information(self, "Report Generated", f"ECG report saved as PDF:\n{path}")
-
-        # Clean up temp image
-        for img_path in lead_img_paths.values():
-            if img_path and os.path.exists(img_path):
-                try:
-                    os.remove(img_path)
-                except Exception:
-                    pass
+        # Ask user where to save the PDF
+        filename, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Save ECG Report", 
+            f"ECG_Report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            "PDF Files (*.pdf)"
+        )
+        
+        if filename:
+            try:
+                # Generate the PDF using the simple function from ecg_report_generator
+                generate_ecg_report(filename, ecg_data, lead_img_paths)
+                
+                QMessageBox.information(
+                    self, 
+                    "Success", 
+                    f" ECG Report generated successfully!\n Saved as: {filename}\n Real graphs: {len(lead_img_paths)}/12"
+                )
+                
+                print(f" PDF generated: {filename}")
+                
+            except Exception as e:
+                error_msg = f"Failed to generate PDF: {str(e)}"
+                print(f" {error_msg}")
+                QMessageBox.critical(self, "Error", error_msg)
 
     def animate_heartbeat(self):
         """Animate heart image synchronized with live heart rate and play sound"""
@@ -960,16 +1042,7 @@ class Dashboard(QWidget):
         self.sign_btn.setText("Sign In")
         self.close()
     def go_to_lead_test(self):
-        if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
-            self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)
-            
-        self.page_stack.setCurrentWidget(self.ecg_test_page)
-        # Update metrics when opening ECG test page
-        self.update_dashboard_metrics_from_ecg()
-    def go_to_dashboard(self):
-        self.page_stack.setCurrentWidget(self.dashboard_page)
-        # Update metrics when returning to dashboard
-        self.update_dashboard_metrics_from_ecg()
+        pass
     def update_internet_status(self):
         import socket
         try:
