@@ -1,9 +1,26 @@
+<<<<<<< HEAD
 from PyQt5.QtWidgets import QGroupBox, QVBoxLayout, QPushButton, QWidget, QLabel
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import numpy as np
 from PyQt5.QtCore import QTimer, Qt
 
+=======
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, 
+    QLineEdit, QComboBox, QSlider, QGroupBox, QListWidget, QDialog,
+    QGridLayout, QFormLayout, QSizePolicy, QMessageBox, QApplication, QRadioButton
+)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
+from PyQt5.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve, QTimer, pyqtProperty
+from utils.settings_manager import SettingsManager
+import os
+import matplotlib.pyplot as plt
+import pandas as pd 
+ 
+>>>>>>> main
 class ECGRecording:
     def __init__(self):
         self.recording = False
@@ -115,11 +132,260 @@ class Lead12BlackPage(QWidget):
                     QTimer.singleShot(0, self.dashboard.repaint)
             except Exception as e:
                 print("ECG analysis error:", e)
+<<<<<<< HEAD
 
 class ECGMenu(QGroupBox):
     def __init__(self, parent=None, dashboard=None):
         super().__init__("Menu", parent)
         self.dashboard = dashboard
+=======
+
+class SlidingPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        
+        # Responsive sizing based on parent size
+        if parent:
+            parent_width = parent.width()
+            parent_height = parent.height()
+            
+            # Calculate responsive panel size (25-35% of parent width, max 900px)
+            panel_width = min(max(int(parent_width * 0.30), 400), 900)
+            panel_height = min(max(int(parent_height * 0.85), 500), 1000)
+        else:
+            panel_width, panel_height = 600, 800
+        
+        self.panel_width = panel_width
+        self.panel_height = panel_height
+        
+        # Set size policy for responsiveness
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setFixedSize(panel_width, panel_height)
+        
+        # Responsive styling with dynamic sizing
+        self.setStyleSheet(f"""
+            QWidget {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
+                    stop:0 #ffffff, stop:1 #f8f9fa);
+                border: 3px solid #ff6600;
+                border-radius: 15px;
+            }}
+        """)
+        
+        # Initialize position off-screen to the right
+        if parent:
+            self.setGeometry(parent.width(), (parent.height() - self.height()) // 2, 
+                           panel_width, panel_height)
+        else:
+            self.setGeometry(1200, 200, panel_width, panel_height)
+        
+        # Create responsive layout with dynamic margins
+        self.layout = QVBoxLayout(self)
+        margin_size = max(12, min(30, int(panel_width * 0.04)))  # Responsive margins
+        spacing_size = max(10, min(25, int(panel_height * 0.03)))  # Responsive spacing
+        
+        self.layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
+        self.layout.setSpacing(spacing_size)
+        
+        # Content area with scroll support
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.layout.addWidget(self.content_widget)
+        
+        # Animation setup
+        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation.setDuration(300)
+        self.animation.setEasingCurve(QEasingCurve.OutCubic)
+        
+        self.is_visible = False
+        self.is_animating = False
+        
+        # Store responsive parameters
+        self.margin_size = margin_size
+        self.spacing_size = spacing_size
+        
+        # Add resize event handler for responsiveness
+        if parent:
+            parent.resizeEvent = self.parent_resize_handler
+        
+    def parent_resize_handler(self, event):
+        """Handle parent resize events for responsive behavior"""
+        if hasattr(event, 'size'):
+            self.update_responsive_sizing()
+        if hasattr(event, 'oldSize'):
+            event.oldSize = event.size()
+        event.accept()
+        
+    def update_responsive_sizing(self):
+        if self.parent:
+            parent_width = self.parent.width()
+            parent_height = self.parent.height()
+            
+            # Recalculate responsive sizes
+            new_width = min(max(int(parent_width * 0.30), 400), 900)
+            new_height = min(max(int(parent_height * 0.85), 500), 1000)
+            
+            if new_width != self.panel_width or new_height != self.panel_height:
+                self.panel_width = new_width
+                self.panel_height = new_height
+                
+                # Update margins and spacing
+                self.margin_size = max(12, min(30, int(new_width * 0.04)))
+                self.spacing_size = max(10, min(25, int(new_height * 0.03)))
+                
+                # Update layout
+                self.layout.setContentsMargins(self.margin_size, self.margin_size, 
+                                            self.margin_size, self.margin_size)
+                self.layout.setSpacing(self.spacing_size)
+                
+                # Resize panel
+                self.setFixedSize(new_width, new_height)
+                
+                # Reposition if visible
+                if self.is_visible:
+                    self.reposition_panel()
+        
+    def reposition_panel(self):
+        if self.parent and self.is_visible:
+            target_x = self.parent.width() - self.width() - 15  # Reduced margin
+            target_y = (self.parent.height() - self.height()) // 2
+            self.move(target_x, target_y)
+        
+    def set_title(self, title):
+        pass
+        
+    def clear_content(self):
+        # Clear existing content
+        while self.content_layout.count():
+            child = self.content_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+                
+    def slide_in(self, content_widget=None, title="Settings Panel"):
+        
+        if self.parent and not self.is_animating:
+            self.is_animating = True
+            self.clear_content()
+            
+            # Update responsive sizing before showing
+            self.update_responsive_sizing()
+            
+            if content_widget:
+                # Make content widget responsive
+                self.make_content_responsive(content_widget)
+                self.content_layout.addWidget(content_widget)
+            
+            # Calculate target position (centered on the right side with proper margins)
+            # Ensure panel doesn't go off-screen on small devices
+            target_x = max(10, self.parent.width() - self.width() - 10)  # At least 10px from right edge
+            target_y = max(10, (self.parent.height() - self.height()) // 2)  # At least 10px from top/bottom
+            
+            # Ensure panel doesn't exceed parent bounds
+            if target_y + self.height() > self.parent.height() - 10:
+                target_y = self.parent.height() - self.height() - 10
+            
+            # Set up animation
+            self.animation.setStartValue(self.geometry())
+            self.animation.setEndValue(self.parent.geometry().adjusted(target_x, target_y, 
+                                                                     target_x + self.width(), 
+                                                                     target_y + self.height()))
+
+            # Disconnect any existing connections
+            try:
+                self.animation.finished.disconnect()
+            except:
+                pass
+            
+            # Connect animation finished signal
+            self.animation.finished.connect(self.on_slide_in_finished)
+            
+            self.show()
+            self.raise_()
+            self.animation.start()
+
+    def make_content_responsive(self, content_widget):
+        if hasattr(content_widget, 'layout'):
+            layout = content_widget.layout()
+            if layout:
+                # Adjust margins and spacing based on panel size
+                content_margin = max(15, min(35, int(self.panel_width * 0.04)))
+                content_spacing = max(10, min(20, int(self.panel_height * 0.025)))
+                
+                layout.setContentsMargins(content_margin, content_margin, 
+                                       content_margin, content_margin)
+                layout.setSpacing(content_spacing)
+                
+                # Make child widgets responsive
+                self.make_children_responsive(content_widget)
+    
+    def make_children_responsive(self, parent_widget):
+        for child in parent_widget.findChildren(QWidget):
+            if hasattr(child, 'setFixedSize'):
+                # Adjust fixed sizes for smaller panels
+                if self.panel_width < 500:
+                    # Scale down fixed sizes for small panels
+                    if hasattr(child, 'width') and hasattr(child, 'height'):
+                        current_width = child.width()
+                        current_height = child.height()
+                        if current_width > 0 and current_height > 0:
+                            scale_factor = min(self.panel_width / 600, 1.0)
+                            new_width = max(int(current_width * scale_factor), 60)
+                            new_height = max(int(current_height * scale_factor), 25)
+                            child.setFixedSize(new_width, new_height)
+            
+            # Recursively process children
+            self.make_children_responsive(child)
+
+    def on_slide_in_finished(self):
+        self.is_visible = True
+        self.is_animating = False
+            
+    def slide_out(self):
+        if self.parent and self.is_visible and not self.is_animating:
+            self.is_animating = True
+
+            # Calculate end position (off-screen to the right)
+            end_x = self.parent.width()
+            end_y = (self.parent.height() - self.height()) // 2
+            
+            # Set up animation
+            self.animation.setStartValue(self.geometry())
+            self.animation.setEndValue(self.parent.geometry().adjusted(end_x, end_y, 
+                                                                     end_x + self.width(), 
+                                                                     end_y + self.height()))
+            
+            # Disconnect any existing connections
+            try:
+                self.animation.finished.disconnect()
+            except:
+                pass
+            
+            # Connect animation finished signal
+            self.animation.finished.connect(self.on_slide_out_finished)
+            self.animation.start()
+
+    def on_slide_out_finished(self):
+        self.hide()
+        self.is_visible = False
+        self.is_animating = False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.parent and self.is_visible:
+            self.reposition_panel()
+
+class ECGMenu(QGroupBox):
+    def __init__(self, parent=None, dashboard=None):
+        super().__init__("", parent)
+        self.dashboard = dashboard
+        # Reference to ECG test page for cross-component communication
+        self.ecg_test_page = None
+        self.settings_manager = None
+        self.sliding_panel = None
+        self.settings_changed_callback = None
+
+>>>>>>> main
         self.setStyleSheet("QGroupBox { font: bold 14pt Arial; background-color: #fff; border-radius: 10px; }")
         layout = QVBoxLayout(self)
         self.buttons = {}
@@ -143,30 +409,2771 @@ class ECGMenu(QGroupBox):
             layout.addWidget(btn)
             self.buttons[text] = btn
         layout.addStretch(1)
+    
+        # Initialize sliding panel
+        self.sliding_panel = None
+        self.current_panel_content = None
+        self.current_open_panel = None
+        self.panel_buttons = {}
+        
+        # Store parent reference for responsive updates
+        self.parent_widget = None
+        self.ecg_test_page = None  # Reference to the ECG test page
+        
+        # Connect to parent resize events
+        if parent:
+            self.setup_parent_monitoring(parent)
+        
+        # Setup global resize monitoring
+        QTimer.singleShot(100, self.setup_global_resize_monitoring)
+
+    def set_ecg_test_page(self, ecg_test_page):
+        """Attach the active ECG test page so menu actions can interact with it."""
+        self.ecg_test_page = ecg_test_page
+
+    def setup_parent_monitoring(self, parent):
+        """Setup monitoring for parent widget changes"""
+        if parent and hasattr(parent, 'resizeEvent'):
+            # Store original resize event
+            original_resize = parent.resizeEvent
+            
+            def enhanced_resize_event(event):
+                # Call original resize event
+                if hasattr(original_resize, '__call__'):
+                    original_resize(event)
+                
+                # Update sliding panel if it exists
+                if hasattr(self, 'sliding_panel') and self.sliding_panel:
+                    self.sliding_panel.update_responsive_sizing()
+                    if self.sliding_panel.is_visible:
+                        self.sliding_panel.reposition_panel()
+                
+                event.accept()
+            
+            # Replace the resize event handler
+            parent.resizeEvent = enhanced_resize_event
+            
+    def create_resize_handler(self, original_resize_event):
+        def resize_handler(event):
+            # Call original resize event
+            if original_resize_event:
+                original_resize_event(event)
+            
+            # Update sliding panel if it exists
+            if self.sliding_panel and hasattr(self.sliding_panel, 'update_responsive_sizing'):
+                self.sliding_panel.update_responsive_sizing()
+                
+        return resize_handler
+
+    def setup_global_resize_monitoring(self):
+        app = QApplication.instance()
+        if app:
+            # Monitor all top-level windows
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'resizeEvent'):
+                    original_resize = widget.resizeEvent
+                    widget.resizeEvent = self.create_global_resize_handler(original_resize)
+    
+    def create_global_resize_handler(self, original_resize_event):
+        def global_resize_handler(event):
+            # Call original resize event
+            if original_resize_event:
+                original_resize_event(event)
+            
+            # Update sliding panel if it exists
+            if self.sliding_panel and hasattr(self.sliding_panel, 'update_responsive_sizing'):
+                self.sliding_panel.update_responsive_sizing()
+                
+        return global_resize_handler
 
     # Placeholder methods to be connected externally
     def on_save_ecg(self):
-        pass
+        self.show_save_ecg()
     def on_open_ecg(self):
-        pass
+        self.show_open_ecg()
     def on_working_mode(self):
-        pass
+        self.show_working_mode()
     def on_printer_setup(self):
-        pass
+        self.show_printer_setup()
     def on_set_filter(self):
-        pass
+        self.show_set_filter()
     def on_system_setup(self):
-        pass
+        self.show_system_setup()
     def on_load_default(self):
-        pass
+        self.show_load_default()
     def on_version_info(self):
-        pass
+        self.show_version_info()
     def on_factory_maintain(self):
+<<<<<<< HEAD
         pass
     def on_12to1(self):
         self.lead12_window = Lead12BlackPage(dashboard=self.dashboard)
         self.lead12_window.setWindowTitle("12:1 ECG Leads")
         self.lead12_window.resize(1600, 300)
         self.lead12_window.show()
+=======
+        self.show_factory_maintain()
+>>>>>>> main
     def on_exit(self):
-        pass
+        self.show_exit()
+
+    def create_scrollable_content(self, content_widget):
+        from PyQt5.QtWidgets import QScrollArea
+        
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(content_widget)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        # Responsive scroll area styling
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #f0f0f0;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c0c0c0;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #a0a0a0;
+            }
+            QScrollBar:horizontal {
+                background: #f0f0f0;
+                height: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #c0c0c0;
+                border-radius: 6px;
+                min-width: 20px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #a0a0a0;
+            }
+        """)
+        
+        return scroll_area
+
+    def show_sliding_panel(self, content_widget, title, button_name):
+        
+        if self.current_open_panel == button_name and self.sliding_panel and self.sliding_panel.is_visible:
+            self.hide_sliding_panel()
+            self.current_open_panel = None
+            return
+        
+        # If a different panel is open, close it first
+        if self.sliding_panel and self.sliding_panel.is_visible:
+            self.hide_sliding_panel()
+        
+        # Create sliding panel if it doesn't exist
+        if not self.sliding_panel:
+            # Find the parent widget (ECGTestPage)
+            parent = self.parent_widget
+            if not parent:
+                parent = self.parent()
+                while parent and not hasattr(parent, 'grid_widget'):
+                    parent = parent.parent()
+            
+            if parent:
+                self.sliding_panel = SlidingPanel(parent)
+                
+                # Setup parent monitoring for responsive updates
+                self.setup_parent_monitoring(parent)
+                
+                # Add sliding panel to the main layout
+                if hasattr(parent, 'grid_widget') and parent.grid_widget.layout():
+                    parent.grid_widget.layout().addWidget(self.sliding_panel)
+                    print("Added sliding panel to layout")  
+                else:
+                    print("Could not add sliding panel to layout")  
+            else:
+                print("Could not find parent widget")
+        
+        # Show the panel
+        if self.sliding_panel:
+            # Make content scrollable for smaller screens
+            if content_widget and self.sliding_panel.panel_height < 700:
+                scrollable_content = self.create_scrollable_content(content_widget)
+                self.sliding_panel.slide_in(scrollable_content, title)
+            else:
+                self.sliding_panel.slide_in(content_widget, title)
+            self.current_open_panel = button_name
+        else:
+            print("Sliding panel is None")  
+
+    def hide_sliding_panel(self):
+        if self.sliding_panel and self.sliding_panel.is_visible:
+            # Clean up serial connection if system setup is open
+            if hasattr(self, 'serial_connection') and self.serial_connection:
+                try:
+                    if self.serial_connection.is_open:
+                        self.disconnect_serial()
+                except:
+                    pass
+            
+            self.sliding_panel.slide_out()
+            self.current_open_panel = None
+
+    # ----------------------------- Save ECG -----------------------------
+
+    # Modified methods to use sliding panel
+    def show_save_ecg(self):
+        # Ensure we have access to the parent widget with ECG data
+        if not hasattr(self, 'parent_widget') or not self.parent_widget:
+            # Try to find the parent widget
+            parent = self.parent()
+            while parent and not hasattr(parent, 'data'):
+                parent = parent.parent()
+            if parent:
+                self.parent_widget = parent
+        
+        content_widget = self.create_save_ecg_content()
+        self.show_sliding_panel(content_widget, "Save ECG Details", "Save ECG")
+
+    def create_save_ecg_content(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Responsive margins and spacing
+        margin_size = getattr(self.sliding_panel, 'margin_size', 30) if self.sliding_panel else 30
+        spacing_size = getattr(self.sliding_panel, 'spacing_size', 20) if self.sliding_panel else 20
+        
+        layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
+        layout.setSpacing(spacing_size)
+
+        # Responsive title with dynamic font size
+        title = QLabel("Save ECG Details")
+        title_font_size = max(16, min(24, int(margin_size * 0.8)))
+        title.setStyleSheet(f"""
+            QLabel {{
+                font: bold {title_font_size}pt 'Arial';
+                color: white;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #ff6600, stop:1 #ff8c42);
+                border: 3px solid #ff6600;
+                border-radius: 15px;
+                padding: {max(15, margin_size-10)}px;
+                margin: {max(5, margin_size-15)}px;
+            }}
+        """)
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # Main form container with responsive styling
+        form_frame = QFrame()
+        form_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
+                    stop:0 #ffffff, stop:1 #f8f9fa);
+                border: 2px solid #e0e0e0;
+                border-radius: 15px;
+                padding: 20px;
+                margin: 10px;
+            }
+        """)
+        form_layout = QGridLayout(form_frame)
+        form_layout.setSpacing(max(8, spacing_size-5))
+        
+        labels = ["Organisation", "Doctor", "Patient Name"]
+        entries = {}
+
+        # Responsive form fields
+        for i, label in enumerate(labels):
+            lbl = QLabel(label)
+            label_font_size = max(12, min(18, int(margin_size * 0.6)))
+            lbl.setStyleSheet(f"""
+                QLabel {{
+                    font: bold {label_font_size}pt Arial;
+                    color: #000000;
+                    background: #ffffff;
+                    padding: 6px;
+                    min-width: {max(100, int(margin_size * 3.5))}px;
+                    min-height: {max(30, int(margin_size * 1.0))}px;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 5px;
+                    margin: 2px;
+                }}
+            """)
+            form_layout.addWidget(lbl, i, 0)
+
+            entry = QLineEdit()
+            entry_font_size = max(10, min(13, int(margin_size * 0.4)))
+            entry.setStyleSheet(f"""
+                QLineEdit {{
+                    font: {entry_font_size}pt Arial;
+                    padding: {max(6, int(margin_size * 0.25))}px;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 8px;
+                    background: white;
+                    color: #2c3e50;
+                }}
+                QLineEdit:focus {{
+                    border: 2px solid #ff6600;
+                    background: #fff8f0;
+                }}
+                QLineEdit:hover {{
+                    border: 2px solid #ffb347;
+                    background: #fafafa;
+                }}
+            """)
+            
+            # Responsive entry field sizes
+            entry_width = max(150, int(margin_size * 5))
+            entry_height = max(30, int(margin_size * 1.0))
+            entry.setFixedSize(entry_width, entry_height)
+            form_layout.addWidget(entry, i, 1)
+            entries[label] = entry
+
+        # Age field with responsive sizing
+        lbl_age = QLabel("Age")
+        lbl_age.setStyleSheet(f"""
+            QLabel {{
+                font: bold {label_font_size}pt Arial;
+                color: #000000;
+                background: #ffffff;
+                padding: 6px;
+                min-width: {max(100, int(margin_size * 3.5))}px;
+                min-height: {max(30, int(margin_size * 1.0))}px;
+                border: 1px solid #e0e0e0;
+                border-radius: 5px;
+                margin: 2px;
+            }}
+        """)
+        form_layout.addWidget(lbl_age, 3, 0)
+
+        age_entry = QLineEdit()
+        age_entry.setStyleSheet(f"""
+            QLineEdit {{
+                font: {entry_font_size}pt Arial;
+                padding: {max(6, int(margin_size * 0.25))}px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                background: white;
+                color: #2c3e50;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid #ff6600;
+                background: #fff8f0;
+            }}
+            QLineEdit:hover {{
+                border: 2px solid #ffb347;
+                background: #fafafa;
+            }}
+        """)
+        
+        age_width = max(60, int(margin_size * 2))
+        age_height = max(30, int(margin_size * 1.0))
+        age_entry.setFixedSize(age_width, age_height)
+        form_layout.addWidget(age_entry, 3, 1)
+        entries["Age"] = age_entry
+
+        # Gender field with responsive sizing
+        lbl_gender = QLabel("Gender")
+        lbl_gender.setStyleSheet(f"""
+            QLabel {{
+                font: bold {label_font_size}pt Arial;
+                color: #000000;
+                background: #ffffff;
+                padding: 6px;
+                min-width: {max(100, int(margin_size * 3.5))}px;
+                min-height: {max(30, int(margin_size * 1.0))}px;
+                border: 1px solid #e0e0e0;
+                border-radius: 5px;
+                margin: 2px;
+            }}
+        """)
+        form_layout.addWidget(lbl_gender, 4, 0)
+
+        gender_menu = QComboBox()
+        gender_menu.addItems(["Select", "Male", "Female", "Other"])
+        gender_menu.setStyleSheet(f"""
+            QComboBox {{
+                font: {entry_font_size}pt Arial;
+                padding: {max(6, int(margin_size * 0.25))}px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                background: white;
+                color: #2c3e50;
+            }}
+            QComboBox:focus {{
+                border: 2px solid #ff6600;
+                background: #fff8f0;
+            }}
+            QComboBox:hover {{
+                border: 2px solid #ffb347;
+                background: #fafafa;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 4px solid #ff6600;
+                margin-right: 8px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: white;
+                border: 2px solid #ff6600;
+                border-radius: 8px;
+                selection-background-color: #ff6600;
+                selection-color: white;
+                outline: none;
+                font: {entry_font_size}pt Arial;
+                padding: 6px;
+                margin-left: -15px;
+                margin-right: -15px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                padding: 6px 10px;
+                border-radius: 5px;
+                margin: 2px;
+                min-height: 20px;
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background: #fff0e0;
+                color: #ff6600;
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background: #ff6600;
+                color: white;
+                font-weight: bold;
+            }}
+        """)
+        
+        gender_width = max(80, int(margin_size * 2.5))
+        gender_height = max(30, int(margin_size * 1.0))
+        gender_menu.setFixedSize(gender_width, gender_height)
+        form_layout.addWidget(gender_menu, 4, 1)
+
+        layout.addWidget(form_frame)
+
+        # Add ECG Graphs Section
+        graphs_title = QLabel("ECG Lead Graphs")
+        graphs_title.setStyleSheet(f"""
+            QLabel {{
+                font: bold {max(14, int(margin_size * 0.5))}pt Arial;
+                color: #ff6600;
+                background: transparent;
+                padding: 10px;
+                margin: 5px 0;
+                border-bottom: 2px solid #ff6600;
+            }}
+        """)
+        layout.addWidget(graphs_title)
+
+        # Create ECG graphs container
+        graphs_frame = QFrame()
+        graphs_frame.setStyleSheet("""
+            QFrame {
+                background: #f8f9fa;
+                border: 2px solid #e0e0e0;
+                border-radius: 10px;
+                padding: 10px;
+                margin: 5px;
+            }
+        """)
+        
+        # Create a scrollable area for the graphs
+        from PyQt5.QtWidgets import QScrollArea
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setMaximumHeight(400)  # Limit height for smaller screens
+        
+        graphs_widget = QWidget()
+        graphs_layout = QGridLayout(graphs_widget)
+        graphs_layout.setSpacing(8)
+        
+        # Get ECG data from parent if available
+        ecg_data = {}
+        if hasattr(self, 'parent_widget') and self.parent_widget:
+            if hasattr(self.parent_widget, 'data'):
+                ecg_data = self.parent_widget.data
+        else:
+            # Try to find ECG data from the current parent
+            current_parent = self.parent()
+            while current_parent:
+                if hasattr(current_parent, 'data') and current_parent.data:
+                    ecg_data = current_parent.data
+                    break
+                current_parent = current_parent.parent()
+        
+        # Create compact ECG graphs (3x4 grid)
+        lead_names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+        lead_colors = ["#00ff00", "#ff69b4", "#87ceeb", "#ffa500", "#800080", "#ffff00", 
+                      "#ff4500", "#32cd32", "#ff6347", "#9370db", "#00bfff", "#ff1493"]
+        
+        # Store references to graphs for potential updates
+        self.ecg_graphs = {}
+        
+        for idx, (lead, color) in enumerate(zip(lead_names, lead_colors)):
+            row, col = divmod(idx, 4)
+            
+            # Create graph container
+            graph_container = QFrame()
+            graph_container.setStyleSheet(f"""
+                QFrame {{
+                    background: white;
+                    border: 1px solid #ddd;
+                    border-radius: 8px;
+                    padding: 5px;
+                    margin: 2px;
+                }}
+            """)
+            
+            graph_layout = QVBoxLayout(graph_container)
+            graph_layout.setContentsMargins(5, 5, 5, 5)
+            graph_layout.setSpacing(2)
+            
+            # Lead label
+            lead_label = QLabel(lead)
+            lead_label.setStyleSheet(f"""
+                QLabel {{
+                    font: bold {max(10, int(margin_size * 0.3))}pt Arial;
+                    color: {color};
+                background: transparent;
+                    text-align: center;
+                    padding: 2px;
+                }}
+            """)
+            lead_label.setAlignment(Qt.AlignCenter)
+            graph_layout.addWidget(lead_label)
+            
+            # Create matplotlib figure for ECG
+            try:
+                from matplotlib.figure import Figure
+                from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+                
+                # Responsive figure size
+                fig_width = max(2.5, min(4.0, margin_size * 0.08))
+                fig_height = max(1.5, min(2.5, margin_size * 0.05))
+                
+                fig = Figure(figsize=(fig_width, fig_height), facecolor='white')
+                ax = fig.add_subplot(111)
+                ax.set_facecolor('white')
+                
+                # Remove spines and ticks for cleaner look
+                for spine in ax.spines.values():
+                    spine.set_visible(False)
+                ax.set_xticks([])
+                ax.set_yticks([])
+                
+                # Set y-axis limits
+                ax.set_ylim(-50, 50)
+                
+                # Plot ECG data if available, otherwise show baseline
+                if lead in ecg_data and len(ecg_data[lead]) > 0:
+                    # Use last 500 samples for display
+                    data = ecg_data[lead][-500:] if len(ecg_data[lead]) > 500 else ecg_data[lead]
+                    x = np.arange(len(data))
+                    line, = ax.plot(x, data, color=color, linewidth=1, alpha=0.8)
+                    
+                    # Store reference for updates
+                    self.ecg_graphs[lead] = {
+                        'ax': ax,
+                        'line': line,
+                        'canvas': None
+                    }
+                else:
+                    # Show baseline
+                    x = np.arange(100)
+                    baseline = np.zeros(100)
+                    line, = ax.plot(x, baseline, color=color, linewidth=1, alpha=0.5)
+                    
+                    # Store reference for updates
+                    self.ecg_graphs[lead] = {
+                        'ax': ax,
+                        'line': line,
+                        'canvas': None
+                    }
+                
+                # Add grid
+                ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+                
+                # Create canvas and add to layout
+                canvas = FigureCanvas(fig)
+                canvas.setMaximumSize(200, 120)  # Limit size for responsiveness
+                graph_layout.addWidget(canvas)
+                
+                # Store canvas reference
+                self.ecg_graphs[lead]['canvas'] = canvas
+                
+            except ImportError:
+                # Fallback if matplotlib is not available
+                placeholder = QLabel("Graph")
+                placeholder.setStyleSheet(f"""
+                    QLabel {{
+                        background: #f0f0f0;
+                        border: 1px solid #ccc;
+                        border-radius: 5px;
+                        padding: 20px;
+                        text-align: center;
+                        color: #666;
+                        font-size: 10pt;
+                    }}
+                """)
+                placeholder.setAlignment(Qt.AlignCenter)
+                placeholder.setMinimumSize(150, 80)
+                graph_layout.addWidget(placeholder)
+            
+            graphs_layout.addWidget(graph_container, row, col)
+        
+        scroll_area.setWidget(graphs_widget)
+        graphs_frame_layout = QVBoxLayout(graphs_frame)
+        graphs_frame_layout.addWidget(scroll_area)
+        
+        layout.addWidget(graphs_frame)
+        
+        # Add refresh button for ECG graphs
+        refresh_btn = QPushButton("Refresh Graphs")
+        refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #17a2b8, stop:1 #138496);
+                color: white;
+                border: 2px solid #17a2b8;
+                border-radius: 8px;
+                padding: {max(8, int(margin_size * 0.3))}px;
+                font: bold {max(10, int(margin_size * 0.35))}pt Arial;
+                min-height: {max(30, int(margin_size * 1.0))}px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #138496, stop:1 #17a2b8);
+                border: 2px solid #138496;
+            }}
+        """)
+        refresh_btn.clicked.connect(self.refresh_ecg_graphs)
+        layout.addWidget(refresh_btn, alignment=Qt.AlignCenter)
+
+        # Submit button
+        submit_btn = QPushButton("Save ECG")
+        submit_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #28a745, stop:1 #20c997);
+                color: white;
+                border: 2px solid #28a745;
+                border-radius: 10px;
+                padding: {max(10, int(margin_size * 0.4))}px;
+                font: bold {max(12, int(margin_size * 0.4))}pt Arial;
+                min-height: {max(35, int(margin_size * 1.2))}px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #20c997, stop:1 #28a745);
+                border: 2px solid #20c997;
+            }}
+            QPushButton:pressed {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #1e7e34, stop:1 #1c7430);
+                border: 2px solid #1e7e34;
+            }}
+        """)
+        submit_btn.clicked.connect(lambda: self.submit_ecg_details(entries, gender_menu))
+        layout.addWidget(submit_btn, alignment=Qt.AlignCenter)
+
+        return widget
+
+    def submit_ecg_details(self, entries, gender_menu):
+        values = {label: entries[label].text().strip() for label in ["Organisation", "Doctor", "Patient Name", "Age"]}
+        values["Gender"] = gender_menu.currentText()
+
+        if any(v == "" for v in values.values()) or values["Gender"] == "Select":
+            QMessageBox.warning(self.parent(), "Missing Data", "Please fill all the fields and select gender.")
+            return
+
+        try:
+            with open("ecg_data.txt", "a") as file:
+                file.write(f"{values['Organisation']}, {values['Doctor']}, {values['Patient Name']}, {values['Age']}, {values['Gender']}\n")
+            QMessageBox.information(self.parent(), "Saved", "ECG details saved successfully!")
+        except Exception as e:
+            QMessageBox.critical(self.parent(), "Error", f"Failed to save: {e}")
+
+    # ----------------------------- Open ECG -----------------------------
+
+    def show_open_ecg(self):
+        """Show open ECG file dialog"""
+        content_widget = self.create_open_ecg_content()
+        self.show_sliding_panel(content_widget, "Open ECG File", "Open ECG")
+
+    def create_open_ecg_content(self):
+        # Create a simple open ECG interface
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Responsive margins and spacing
+        margin_size = getattr(self.sliding_panel, 'margin_size', 20) if self.sliding_panel else 20
+        spacing_size = getattr(self.sliding_panel, 'spacing_size', 15) if self.sliding_panel else 15
+        
+        layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
+        layout.setSpacing(spacing_size)
+
+        # Professional title
+        title = QLabel("Open ECG File")
+        title_font_size = max(16, min(22, int(margin_size * 0.8)))
+        title.setStyleSheet(f"""
+            QLabel {{
+                font: bold {title_font_size}pt Arial;
+                color: white;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #ff6600, stop:1 #ff8c42);
+                border: 2px solid #ff6600;
+                border-radius: 12px;
+                padding: {max(12, int(margin_size * 0.6))}px;
+                margin: {max(8, int(margin_size * 0.4))}px;
+                min-height: {max(30, int(margin_size * 1.5))}px;
+            }}
+        """)
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # File selection container
+        file_frame = QFrame()
+        file_frame.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 10px;
+                padding: 20px;
+                margin: 10px;
+            }
+        """)
+        file_layout = QVBoxLayout(file_frame)
+        file_layout.setSpacing(15)
+
+        # File path display
+        path_label = QLabel("Selected File:")
+        path_label.setStyleSheet(f"""
+            QLabel {{
+                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                color: #2c3e50;
+                background: transparent;
+                padding: 5px;
+            }}
+        """)
+        file_layout.addWidget(path_label)
+        
+        self.file_path_display = QLabel("No file selected")
+        self.file_path_display.setStyleSheet(f"""
+            QLabel {{
+                font: {max(10, int(margin_size * 0.5))}pt Arial;
+                color: #666;
+                background: #f8f9fa;
+                padding: 10px;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 6px;
+                min-height: {max(25, int(margin_size * 1.2))}px;
+            }}
+        """)
+        file_layout.addWidget(self.file_path_display)
+
+        # File format selection
+        format_label = QLabel("File Format:")
+        format_label.setStyleSheet(f"""
+            QLabel {{
+                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                color: #2c3e50;
+                background: transparent;
+                            padding: 5px;
+            }}
+        """)
+        file_layout.addWidget(format_label)
+        
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["Auto-detect", "CSV", "TXT", "JSON", "XML", "DICOM"])
+        self.format_combo.setStyleSheet(f"""
+            QComboBox {{
+                font: {max(10, int(margin_size * 0.5))}pt Arial;
+                    color: #2c3e50;
+                    background: white;
+                        border: 2px solid #e0e0e0;
+                        border-radius: 6px;
+                padding: 8px;
+                min-height: {max(30, int(margin_size * 1.5))}px;
+            }}
+            QComboBox:hover {{
+                        border: 2px solid #ffb347;
+            }}
+            QComboBox:focus {{
+                        border: 2px solid #ff6600;
+            }}
+        """)
+        file_layout.addWidget(self.format_combo)
+
+        layout.addWidget(file_frame)
+
+        # Buttons
+        btn_frame = QFrame()
+        btn_frame.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                margin: 10px;
+            }
+        """)
+        btn_layout = QHBoxLayout(btn_frame)
+        btn_layout.setSpacing(max(10, int(margin_size * 0.5)))
+
+        # Responsive button sizing
+        button_width = max(100, min(140, int(margin_size * 5)))
+        button_height = max(35, min(45, int(margin_size * 1.8)))
+
+        # Browse button
+        browse_btn = QPushButton("Browse")
+        browse_btn.setFixedSize(button_width, button_height)
+        browse_btn.setStyleSheet(f"""
+            QPushButton {{
+                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #17a2b8, stop:0.5 #138496, stop:1 #17a2b8);
+                color: white;
+                border: 2px solid #17a2b8;
+                border-radius: 8px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #138496, stop:0.5 #17a2b8, stop:1 #138496);
+                border: 2px solid #138496;
+            }}
+        """)
+        browse_btn.clicked.connect(self.browse_ecg_file)
+        btn_layout.addWidget(browse_btn)
+
+        # Open button
+        open_btn = QPushButton("Open")
+        open_btn.setFixedSize(button_width, button_height)
+        open_btn.setStyleSheet(f"""
+            QPushButton {{
+                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #4CAF50, stop:0.5 #45a049, stop:1 #4CAF50);
+                color: white;
+                border: 2px solid #4CAF50;
+                border-radius: 8px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #45a049, stop:0.5 #4CAF50, stop:1 #45a049);
+                border: 2px solid #45a049;
+            }}
+        """)
+        open_btn.clicked.connect(self.open_ecg_file)
+        btn_layout.addWidget(open_btn)
+
+        # Cancel button
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedSize(button_width, button_height)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #f44336, stop:0.5 #d32f2f, stop:1 #f44336);
+                color: white;
+                border: 2px solid #f44336;
+                border-radius: 8px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #d32f2f, stop:0.5 #f44336, stop:1 #d32f2f);
+                border: 2px solid #d32f2f;
+            }}
+        """)
+        cancel_btn.clicked.connect(self.hide_sliding_panel)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addWidget(btn_frame)
+        
+        return widget
+
+    def browse_ecg_file(self):
+        """Browse for ECG file"""
+        from PyQt5.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self.parent(),
+            "Select ECG File",
+            "",
+            "ECG Files (*.csv *.txt *.json *.xml *.dcm);;All Files (*.*)"
+        )
+        if file_path:
+            self.file_path_display.setText(file_path)
+            self.file_path_display.setStyleSheet(f"""
+                QLabel {{
+                    font: {max(10, int(getattr(self.sliding_panel, 'margin_size', 20) * 0.5))}pt Arial;
+                    color: #2c3e50;
+                    background: #e8f5e8;
+                    padding: 10px;
+                    border: 1px solid #4CAF50;
+                    border-radius: 6px;
+                    min-height: {max(25, int(getattr(self.sliding_panel, 'margin_size', 20) * 1.2))}px;
+                }}
+            """)
+
+    def open_ecg_file(self):
+        """Open the selected ECG file"""
+        file_path = self.file_path_display.text()
+        if file_path == "No file selected":
+            QMessageBox.warning(self.parent(), "No File", "Please select a file first!")
+            return
+        
+        try:
+            # Here you would implement the actual file opening logic
+            QMessageBox.information(self.parent(), "Success", f"ECG file opened successfully!\nFile: {file_path}")
+            self.hide_sliding_panel()
+        except Exception as e:
+            QMessageBox.critical(self.parent(), "Error", f"Failed to open file: {str(e)}")
+
+    # ----------------------------- Working Mode -----------------------------
+
+    def show_working_mode(self):
+        content_widget = self.create_working_mode_content()
+        self.show_sliding_panel(content_widget, "Working Mode Settings", "Working Mode")
+
+    def create_working_mode_content(self):
+        # Get current settings from settings manager
+        self.settings_manager = SettingsManager()
+        
+        # Define sections for working mode
+        sections = [
+            {
+                'title': 'Wave Speed',
+                'options': [("12.5mm/s", "12.5"), ("25.0mm/s", "25"), ("50.0mm/s", "50")],
+                'setting_key': 'wave_speed'
+            },
+            {
+                'title': 'Wave Gain',
+                'options': [("2.5mm/mV", "2.5"), ("5mm/mV", "5"), ("10mm/mV", "10"), ("20mm/mV", "20")],
+                'setting_key': 'wave_gain'
+            },
+            {
+                'title': 'Lead Sequence',
+                'options': [("Standard", "Standard"), ("Cabrera", "Cabrera")],
+                'setting_key': 'lead_sequence'
+            },
+            {
+                'title': 'Sampling Mode',
+                'options': [("Simultaneous", "Simultaneous"), ("Sequence", "Sequence")],
+                'setting_key': 'sampling_mode'
+            },
+            {
+                'title': 'Demo Function',
+                'options': [("Off", "Off"), ("On", "On")],
+                'setting_key': 'demo_function'
+            },
+            {
+                'title': 'Priority Storage',
+                'options': [("U Disk", "U"), ("SD Card", "SD")],
+                'setting_key': 'storage'
+            }
+        ]
+        
+        # Define buttons
+        buttons = [
+            {
+                'text': 'OK',
+                'action': self.save_working_mode_settings,
+                'style': 'primary'
+            },
+            {
+                'text': 'Exit',
+                'action': self.hide_sliding_panel,
+                'style': 'danger'
+            }
+        ]
+        
+        return self.create_unified_control_panel("Working Mode Settings", sections, buttons)
+
+    def on_setting_changed(self, key, value):
+    
+        print(f"ECG Menu: Setting {key} changed to {value}")
+    
+        # Save to settings manager
+        self.settings_manager.set_setting(key, value)
+        
+        if hasattr(self, 'settings_changed_callback') and self.settings_changed_callback:
+            print(f"Calling settings callback for {key}={value}")
+            self.settings_changed_callback(key, value)
+        else:
+            print("No settings callback found!")
+        
+        # Also notify parent ECG test page if available
+        if hasattr(self.parent(), 'on_settings_changed'):
+            print(f"Calling parent on_settings_changed for {key}={value}")
+            self.parent().on_settings_changed(key, value)
+        else:
+            print("No parent on_settings_changed found!")
+        
+        # For wave speed and gain, apply immediate visual feedback
+        if key in ["wave_speed", "wave_gain"]:
+            print(f"Applied {key}: {value}")
+
+    def save_working_mode_settings(self):
+        
+        QMessageBox.information(self.parent(), "Saved", "Working mode settings saved and applied to ECG display")
+        self.hide_sliding_panel()
+
+    # ----------------------------- Printer Setup -----------------------------
+
+    def show_printer_setup(self):
+        content_widget = self.create_printer_setup_content()
+        self.show_sliding_panel(content_widget, "Printer Setup", "Printer Setup")
+
+    def create_printer_setup_content(self):
+        # Define sections for printer setup
+        sections = [
+            {
+                'title': 'Auto Format',
+                'options': [("3x4", "3x4"), ("6x2", "6x2"), ("12x1", "12x1")],
+                'variable': {"value": "3x4"}
+            },
+            {
+                'title': 'Analysis Result',
+                'options': [("On", "on"), ("Off", "off")],
+                'variable': {"value": "on"}
+            },
+            {
+                'title': 'Average Wave',
+                'options': [("On", "on"), ("Off", "off")],
+                'variable': {"value": "on"}
+            },
+            {
+                'title': 'Selected Rhythm Lead',
+                'options': [("On", "on"), ("Off", "off")],
+                'variable': {"value": "off"}
+            },
+            {
+                'title': 'Sensitivity',
+                'options': [("High", "High"), ("Medium", "Medium"), ("Low", "Low")],
+                'variable': {"value": "High"}
+            }
+        ]
+        
+        # Define buttons
+        buttons = [
+            {
+                'text': 'Save',
+                'action': self.save_printer_settings,
+                'style': 'primary'
+            },
+            {
+                'text': 'Exit',
+                'action': self.hide_sliding_panel,
+                'style': 'danger'
+            }
+        ]
+        
+        return self.create_unified_control_panel("Printer Setup", sections, buttons)
+
+    def on_printer_setting_changed(self, value):
+        print(f"Printer setting changed to: {value}")
+
+    def save_printer_settings(self):
+        QMessageBox.information(self.parent(), "Saved", "Printer settings saved successfully!")
+        self.hide_sliding_panel()
+
+    # ----------------------------- Set Filter -----------------------------
+
+    def show_set_filter(self):
+        """Show filter settings panel"""
+        content_widget = self.create_filter_content()
+        self.show_sliding_panel(content_widget, "Filter Settings", "Set Filter")
+
+    def create_filter_content(self):
+        # Define sections for filter settings
+        sections = [
+            {
+                'title': 'Low Pass Filter',
+                'options': [("Off", "off"), ("25Hz", "25"), ("50Hz", "50"), ("100Hz", "100")],
+                'variable': {"value": "50"}
+            },
+            {
+                'title': 'High Pass Filter',
+                'options': [("Off", "off"), ("0.05Hz", "0.05"), ("0.5Hz", "0.5"), ("1Hz", "1")],
+                'variable': {"value": "0.5"}
+            },
+            {
+                'title': 'Notch Filter',
+                'options': [("Off", "off"), ("50Hz", "50"), ("60Hz", "60")],
+                'variable': {"value": "60"}
+            },
+            {
+                'title': 'Smoothing',
+                'options': [("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high")],
+                'variable': {"value": "medium"}
+            }
+        ]
+        
+        # Define buttons
+        buttons = [
+            {
+                'text': 'Apply',
+                'action': self.apply_filter_settings,
+                'style': 'primary'
+            },
+            {
+                'text': 'Cancel',
+                'action': self.hide_sliding_panel,
+                'style': 'danger'
+            }
+        ]
+        
+        return self.create_unified_control_panel("Filter Settings", sections, buttons)
+
+    def apply_filter_settings(self):
+        QMessageBox.information(self.parent(), "Applied", "Filter settings applied successfully!")
+        self.hide_sliding_panel()
+
+    def show_system_setup(self):
+        
+        content_widget = self.create_system_setup_content()
+        self.show_sliding_panel(content_widget, "System Setup", "System Setup")
+
+    def show_load_default(self):
+        
+        content_widget = self.create_load_default_content()
+        self.show_sliding_panel(content_widget, "Load Default Settings", "Load Default")
+
+    def show_version_info(self):
+        
+        content_widget = self.create_version_info_content()
+        self.show_sliding_panel(content_widget, "Version Information", "Version")
+
+    def show_factory_maintain(self):
+        
+        content_widget = self.create_factory_maintain_content()
+        self.show_sliding_panel(content_widget, "Factory Maintenance", "Factory Maintain")
+
+    # ----------------------------- System Setup -----------------------------
+
+    def create_system_setup_content(self):
+        # Create main widget
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title_label = QLabel("System Setup")
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                color: #2c3e50;
+                padding: 10px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #3498db, stop:1 #2980b9);
+                color: white;
+                border-radius: 8px;
+                margin-bottom: 15px;
+            }
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Serial Communication Section
+        serial_group = QGroupBox("Serial Communication")
+        serial_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                    color: #2c3e50;
+                border: 2px solid #bdc3c7;
+                    border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+            }
+        """)
+        serial_layout = QFormLayout(serial_group)
+        serial_layout.setSpacing(10)
+        
+        # COM Port Selection
+        self.com_port_combo = QComboBox()
+        self.com_port_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                background: white;
+                font-size: 12px;
+                min-width: 120px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #2c3e50;
+                margin-right: 5px;
+            }
+        """)
+        serial_layout.addRow("COM Port:", self.com_port_combo)
+        
+        # Refresh COM Ports Button
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #3498db;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #2980b9;
+            }
+            QPushButton:pressed {
+                background: #21618c;
+            }
+        """)
+        refresh_btn.clicked.connect(self.refresh_com_ports)
+        serial_layout.addRow("", refresh_btn)
+        
+        # Baud Rate Selection
+        self.baud_rate_combo = QComboBox()
+        self.baud_rate_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                background: white;
+                font-size: 12px;
+                min-width: 120px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #2c3e50;
+                margin-right: 5px;
+            }
+        """)
+        baud_rates = ["9600", "19200", "38400", "57600", "115200"]
+        self.baud_rate_combo.addItems(baud_rates)
+        self.baud_rate_combo.setCurrentText("115200")
+        serial_layout.addRow("Baud Rate:", self.baud_rate_combo)
+        
+        # Connection Controls
+        connection_layout = QHBoxLayout()
+        
+        self.connect_btn = QPushButton("🔌 Connect")
+        self.connect_btn.setStyleSheet("""
+            QPushButton {
+                background: #27ae60;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: #229954;
+            }
+            QPushButton:pressed {
+                background: #1e8449;
+            }
+            QPushButton:disabled {
+                background: #95a5a6;
+            }
+        """)
+        self.connect_btn.clicked.connect(self.toggle_serial_connection)
+        connection_layout.addWidget(self.connect_btn)
+        
+        self.disconnect_btn = QPushButton("🔌 Disconnect")
+        self.disconnect_btn.setStyleSheet("""
+            QPushButton {
+                background: #e74c3c;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: #c0392b;
+            }
+            QPushButton:pressed {
+                background: #a93226;
+            }
+            QPushButton:disabled {
+                background: #95a5a6;
+            }
+        """)
+        self.disconnect_btn.clicked.connect(self.disconnect_serial)
+        self.disconnect_btn.setEnabled(False)
+        connection_layout.addWidget(self.disconnect_btn)
+        
+        serial_layout.addRow("", connection_layout)
+        layout.addWidget(serial_group)
+        
+        # Real-time ECG Data Display Section
+        ecg_data_group = QGroupBox("Real-time ECG Data")
+        ecg_data_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                    color: #2c3e50;
+                border: 2px solid #bdc3c7;
+                    border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+                }
+            """)
+        ecg_layout = QVBoxLayout(ecg_data_group)
+        
+        # Status Display
+        self.status_display = QLabel("Waiting for connection...")
+        self.status_display.setStyleSheet("""
+            QLabel {
+                background: #2c3e50;
+                color: #00ff00;
+                font-family: 'Arial', sans-serif;
+                font-size: 12px;
+                padding: 10px;
+                border-radius: 6px;
+                border: 2px solid #34495e;
+                    min-height: 40px;
+                }
+        """)
+        self.status_display.setAlignment(Qt.AlignCenter)
+        ecg_layout.addWidget(self.status_display)
+        
+        # Data Controls
+        data_controls = QHBoxLayout()
+        
+        self.clear_data_btn = QPushButton("🗑️ Clear Data")
+        self.clear_data_btn.setStyleSheet("""
+            QPushButton {
+                background: #f39c12;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #e67e22;
+            }
+            QPushButton:pressed {
+                background: #d35400;
+            }
+        """)
+        self.clear_data_btn.clicked.connect(self.clear_ecg_data)
+        data_controls.addWidget(self.clear_data_btn)
+        
+        self.save_data_btn = QPushButton("💾 Save Data")
+        self.save_data_btn.setStyleSheet("""
+            QPushButton {
+                background: #9b59b6;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #8e44ad;
+            }
+            QPushButton:pressed {
+                background: #7d3c98;
+            }
+        """)
+        self.save_data_btn.clicked.connect(self.save_wave_data)
+        data_controls.addWidget(self.save_data_btn)
+        
+        # Test Data Button
+        self.test_data_btn = QPushButton("🧪 Test Data")
+        self.test_data_btn.setStyleSheet("""
+            QPushButton {
+                background: #e74c3c;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #c0392b;
+            }
+            QPushButton:pressed {
+                background: #a93226;
+            }
+        """)
+        self.test_data_btn.clicked.connect(self.generate_test_ecg_data)
+        data_controls.addWidget(self.test_data_btn)
+        
+        ecg_layout.addLayout(data_controls)
+        layout.addWidget(ecg_data_group)
+        
+        # System Settings Section
+        system_group = QGroupBox("System Settings")
+        system_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                color: #2c3e50;
+                border: 2px solid #bdc3c7;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+            }
+        """)
+        system_layout = QFormLayout(system_group)
+        system_layout.setSpacing(10)
+        
+        # System settings options
+        self.beat_vol_combo = QComboBox()
+        self.beat_vol_combo.addItems(["On", "Off"])
+        self.beat_vol_combo.setCurrentText("On")
+        self.beat_vol_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background: white;
+                font-size: 11px;
+                min-width: 80px;
+            }
+        """)
+        system_layout.addRow("Beat Volume:", self.beat_vol_combo)
+        
+        self.alarm_vol_combo = QComboBox()
+        self.alarm_vol_combo.addItems(["On", "Off"])
+        self.alarm_vol_combo.setCurrentText("On")
+        self.alarm_vol_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background: white;
+                font-size: 11px;
+                min-width: 80px;
+            }
+        """)
+        system_layout.addRow("Alarm Volume:", self.alarm_vol_combo)
+        
+        self.auto_power_combo = QComboBox()
+        self.auto_power_combo.addItems(["5min", "10min", "15min", "Off"])
+        self.auto_power_combo.setCurrentText("10min")
+        self.auto_power_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background: white;
+                font-size: 11px;
+                min-width: 80px;
+            }
+        """)
+        system_layout.addRow("Auto Power Off:", self.auto_power_combo)
+
+        layout.addWidget(system_group)
+
+        # Action Buttons
+        button_layout = QHBoxLayout()
+
+        save_btn = QPushButton("💾 Save Settings")
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background: #27ae60;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background: #229954;
+            }
+            QPushButton:pressed {
+                background: #1e8449;
+            }
+        """)
+        save_btn.clicked.connect(self.save_system_settings)
+        button_layout.addWidget(save_btn)
+
+        exit_btn = QPushButton("❌ Exit")
+        exit_btn.setStyleSheet("""
+            QPushButton {
+                background: #e74c3c;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background: #c0392b;
+            }
+            QPushButton:pressed {
+                background: #a93226;
+            }
+        """)
+        exit_btn.clicked.connect(self.hide_sliding_panel)
+        button_layout.addWidget(exit_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Initialize serial connection
+        self.serial_connection = None
+        self.serial_data_buffer = []
+        self.ecg_data_buffer = [[] for _ in range(12)]  # 12 leads
+        self.ecg_update_timer = QTimer()
+        self.ecg_update_timer.timeout.connect(self.update_ecg_graphs)
+        
+        # Initialize COM ports after UI is created
+        self.refresh_com_ports()
+        
+        return content_widget
+
+    def save_system_settings(self):
+        QMessageBox.information(self.parent(), "Saved", "System settings saved successfully!")
+        self.hide_sliding_panel()
+
+    # ----------------------------- Serial Communication Methods -----------------------------
+    
+    def refresh_com_ports(self):
+        """Refresh the list of available COM ports"""
+        try:
+            print(f"🔍 Refreshing available COM ports...")
+            import serial.tools.list_ports
+            ports = serial.tools.list_ports.comports()
+            self.com_port_combo.clear()
+            
+            if ports:
+                print(f"✅ Found {len(ports)} COM port(s):")
+                for i, port in enumerate(ports):
+                    port_info = f"{port.device} - {port.description}"
+                    print(f"   {i+1}. {port_info}")
+                    self.com_port_combo.addItem(port_info)
+                
+                self.com_port_combo.setCurrentIndex(0)
+                selected_port = self.com_port_combo.currentText()
+                print(f"📌 Selected port: {selected_port}")
+                self.status_display.setText(f"Found {len(ports)} COM port(s)")
+            else:
+                print(f"⚠️  No COM ports detected")
+                self.com_port_combo.addItem("No COM ports found")
+                self.status_display.setText("No COM ports detected")
+                
+        except ImportError:
+            error_msg = "pyserial library not available"
+            print(f"❌ {error_msg}")
+            self.com_port_combo.addItem("pyserial not installed")
+            self.status_display.setText(f"Error: {error_msg}")
+        except Exception as e:
+            error_msg = f"Error detecting ports: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.com_port_combo.addItem("Error detecting ports")
+            self.status_display.setText(error_msg)
+
+    def toggle_serial_connection(self):
+        """Toggle serial connection on/off"""
+        if self.serial_connection and self.serial_connection.is_open:
+            self.disconnect_serial()
+        else:
+            self.connect_serial()
+
+    def connect_serial(self):
+        """Establish serial connection"""
+        try:
+            if not self.com_port_combo.currentText() or "No COM ports" in self.com_port_combo.currentText():
+                QMessageBox.warning(self.parent(), "Connection Error", "Please select a valid COM port first!")
+                return
+            
+            port = self.com_port_combo.currentText().split(" - ")[0]
+            baud_rate = int(self.baud_rate_combo.currentText())
+            
+            print(f"🔌 Attempting to connect to {port} at {baud_rate} baud...")
+            
+            import serial
+            self.serial_connection = serial.Serial(
+                port=port,
+                baudrate=baud_rate,
+                timeout=1,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE
+            )
+            
+            if self.serial_connection.is_open:
+                print(f"✅ Successfully connected to {port} at {baud_rate} baud")
+                print(f"📡 Serial port details: {self.serial_connection}")
+                
+                self.connect_btn.setText("🔌 Connected")
+                self.connect_btn.setEnabled(False)
+                self.disconnect_btn.setEnabled(True)
+                self.status_display.setText(f"Connected to {port} at {baud_rate} baud - Receiving ECG data...")
+                
+                # Start reading data
+                self.start_serial_reading()
+                
+        except Exception as e:
+            error_msg = f"Failed to connect: {str(e)}"
+            print(f"❌ Connection error: {error_msg}")
+            QMessageBox.critical(self.parent(), "Connection Error", error_msg)
+            self.status_display.setText(f"Connection failed: {str(e)}")
+
+    def disconnect_serial(self):
+        """Disconnect serial connection"""
+        try:
+            if self.serial_connection and self.serial_connection.is_open:
+                print(f"🔌 Disconnecting from serial port...")
+                self.serial_connection.close()
+                print(f"✅ Serial connection closed successfully")
+            else:
+                print(f"ℹ️  No active serial connection to disconnect")
+            
+            self.serial_connection = None
+            self.connect_btn.setText("🔌 Connect")
+            self.connect_btn.setEnabled(True)
+            self.disconnect_btn.setEnabled(False)
+            self.status_display.setText("Disconnected from serial port")
+            
+            # Stop reading data
+            self.stop_serial_reading()
+            
+        except Exception as e:
+            error_msg = f"Error disconnecting: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.status_display.setText(error_msg)
+
+    def start_serial_reading(self):
+        """Start reading data from serial port"""
+        try:
+            if self.serial_connection and self.serial_connection.is_open:
+                print(f"📡 Starting serial data reading (50ms intervals)...")
+                # Start timer to read data periodically
+                self.ecg_update_timer.start(50)  # Read every 50ms for real-time ECG
+                print(f"✅ Data reading timer started successfully")
+                
+        except Exception as e:
+            error_msg = f"Error starting data reading: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.status_display.setText(error_msg)
+
+    def stop_serial_reading(self):
+        """Stop reading data from serial port"""
+        try:
+            print(f"📡 Stopping serial data reading...")
+            self.ecg_update_timer.stop()
+            print(f"✅ Data reading timer stopped successfully")
+        except Exception as e:
+            print(f"❌ Error stopping data reading: {str(e)}")
+
+    def update_ecg_graphs(self):
+        """Update ECG graphs with incoming serial data"""
+        try:
+            if self.serial_connection and self.serial_connection.is_open and self.serial_connection.in_waiting:
+                # Read available data
+                data = self.serial_connection.read(self.serial_connection.in_waiting)
+                
+                if data:
+                    print(f"📡 Received {len(data)} bytes of data from serial port")
+                    print(f"🔍 Raw data: {data}")
+                    
+                    # Parse ECG data and update graphs
+                    self.parse_and_update_ecg_data(data)
+                    
+        except Exception as e:
+            error_msg = f"Error reading ECG data: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.status_display.setText(error_msg)
+            self.stop_serial_reading()
+
+    def parse_and_update_ecg_data(self, data):
+        """Parse incoming data and update ECG graphs"""
+        try:
+            print(f"🔄 Processing {len(data)} bytes of incoming data...")
+            
+            # Try to decode as text first
+            try:
+                data_str = data.decode('utf-8', errors='ignore').strip()
+                print(f"📝 Decoded as text: '{data_str}'")
+                
+                lines = data_str.split('\n')
+                print(f"📊 Found {len(lines)} data lines")
+                
+                processed_count = 0
+                for line_num, line in enumerate(lines):
+                    if line.strip():
+                        print(f"📋 Processing line {line_num + 1}: '{line}'")
+                        
+                        # Parse ECG data line - handle multiple formats
+                        # Format 1: "lead,value" (e.g., "1,234")
+                        # Format 2: tab-separated values (e.g., "86 4083 65 2179 0 4085 4085")
+                        if ',' in line:
+                            # Format 1: lead,value
+                            parts = line.split(',')
+                            if len(parts) == 2:
+                                lead_str = parts[0].strip()
+                                value_str = parts[1].strip()
+                                
+                                print(f"   🏷️  Lead: '{lead_str}', Value: '{value_str}'")
+                                
+                                # Convert lead identifier to index (0-11)
+                                lead_index = self.get_lead_index(lead_str)
+                                
+                                if lead_index is not None and value_str.replace('.', '').replace('-', '').isdigit():
+                                    value = float(value_str)
+                                    print(f"   ✅ Valid data: Lead {lead_str} (index {lead_index}) = {value:.2f} mV")
+                                    
+                                    # Add to ECG data buffer
+                                    self.ecg_data_buffer[lead_index].append(value)
+                                    
+                                    # Keep only last 1000 samples per lead
+                                    if len(self.ecg_data_buffer[lead_index]) > 1000:
+                                        self.ecg_data_buffer[lead_index] = self.ecg_data_buffer[lead_index][-1000:]
+                                    
+                                    processed_count += 1
+                                else:
+                                    if lead_index is None:
+                                        print(f"   ❌ Invalid lead identifier: '{lead_str}'")
+                                    else:
+                                        print(f"   ❌ Invalid value format: '{value_str}'")
+                            else:
+                                print(f"   ❌ Invalid comma format: expected 'lead,value', got '{line}'")
+                        else:
+                            # Format 2: tab-separated or space-separated values (your machine's format)
+                            # Try tab first, then space as fallback
+                            if '\t' in line:
+                                values = line.split('\t')
+                                separator = 'tab'
+                            else:
+                                values = line.split()
+                                separator = 'space'
+                            
+                            if len(values) >= 8:  # Expecting 8 values per line
+                                print(f"   🔢 {separator.capitalize()}-separated values: {len(values)} values detected")
+                                
+                                # Map the 8 values to 8 leads (assuming first 8 leads)
+                                for i, value_str in enumerate(values[:8]):
+                                    if value_str.strip() and value_str.strip().replace('.', '').replace('-', '').isdigit():
+                                        value = float(value_str.strip())
+                                        lead_index = i  # Map directly to lead index 0-7
+                                        
+                                        print(f"   📊 Lead {lead_index}: {value:.1f} mV")
+                                        
+                                        # Add to ECG data buffer
+                                        self.ecg_data_buffer[lead_index].append(value)
+                                        
+                                        # Keep only last 1000 samples per lead
+                                        if len(self.ecg_data_buffer[lead_index]) > 1000:
+                                            self.ecg_data_buffer[lead_index] = self.ecg_data_buffer[lead_index][-1000:]
+                                        
+                                        processed_count += 1
+                                    else:
+                                        print(f"   ⚠️  Skipping invalid value: '{value_str}'")
+                            else:
+                                print(f"   ❌ Insufficient values: expected 8, got {len(values)}")
+                
+                if processed_count > 0:
+                    print(f"✅ Successfully processed {processed_count} valid data points")
+                    # Update status
+                    self.status_display.setText(f"Processed {processed_count} values - Receiving data...")
+                    # Send data to parent for plotting
+                    self.send_ecg_data_to_parent()
+                else:
+                    print(f"⚠️  No valid data points processed from this batch")
+                
+            except UnicodeDecodeError:
+                print(f"🔢 Data is binary format, processing as raw bytes...")
+                
+                # Handle binary data - assume it's raw ECG values
+                # Convert bytes to integer values
+                for i, byte_val in enumerate(data):
+                    # Distribute bytes across leads (simple approach)
+                    lead_index = i % 12
+                    value = (byte_val - 128) * 2  # Convert 0-255 to -256 to 256 range
+                    
+                    if i < 5:  # Print first 5 bytes for debugging
+                        print(f"   📊 Byte {i}: {byte_val} -> Lead {lead_index}: {value:.1f} mV")
+                    
+                    self.ecg_data_buffer[lead_index].append(value)
+                    
+                    # Keep only last 1000 samples per lead
+                    if len(self.ecg_data_buffer[lead_index]) > 1000:
+                        self.ecg_data_buffer[lead_index] = self.ecg_data_buffer[lead_index][-1000:]
+                
+                print(f"✅ Processed {len(data)} binary bytes across 12 leads")
+                self.status_display.setText(f"Binary data received - {len(data)} bytes processed")
+                
+                # Send data to parent for plotting
+                self.send_ecg_data_to_parent()
+                
+        except Exception as e:
+            error_msg = f"Error parsing ECG data: {str(e)}"
+            print(f"❌ {error_msg}")
+            print(f"🔍 Data that caused error: {data}")
+
+    def get_lead_index(self, lead_str):
+        """Convert lead string to index (0-11)"""
+        lead_mapping = {
+            'I': 0, 'II': 1, 'III': 2,
+            'aVR': 3, 'aVL': 4, 'aVF': 5,
+            'V1': 6, 'V2': 7, 'V3': 8, 'V4': 9, 'V5': 10, 'V6': 11,
+            '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5,
+            '7': 6, '8': 7, '9': 8, '10': 9, '11': 10, '12': 11
+        }
+        return lead_mapping.get(lead_str, None)
+
+    def send_ecg_data_to_parent(self):
+        """Send ECG data to parent widget for plotting"""
+        try:
+            print(f"📤 Attempting to send ECG data to parent widget...")
+            
+            # First try to use the direct reference to ECG test page
+            if hasattr(self, 'ecg_test_page') and self.ecg_test_page and hasattr(self.ecg_test_page, 'update_ecg_lead'):
+                print(f"✅ Using direct reference to ECG test page")
+                
+                # Send data for each lead directly to ECG test page
+                sent_count = 0
+                for lead_index, lead_data in enumerate(self.ecg_data_buffer):
+                    if lead_data:
+                        # Convert to numpy array and send to parent
+                        data_array = np.array(lead_data)
+                        self.ecg_test_page.update_ecg_lead(lead_index, data_array)
+                        print(f"   📊 Sent {len(data_array)} samples to lead {lead_index} via direct reference")
+                        sent_count += 1
+                
+                print(f"✅ Successfully sent data to {sent_count} leads via direct reference")
+                return
+            
+            # Fallback: Find the parent widget that has ECG graphs
+            print(f"🔍 Direct reference not available, searching for parent widget...")
+            parent = self.parent()
+            max_depth = 10  # Prevent infinite loop
+            depth = 0
+            
+            while parent and depth < max_depth and not hasattr(parent, 'update_ecg_lead'):
+                parent = parent.parent()
+                depth += 1
+            
+            if parent and hasattr(parent, 'update_ecg_lead'):
+                print(f"✅ Found parent widget with update_ecg_lead method at depth {depth}")
+                
+                # Send data for each lead
+                sent_count = 0
+                for lead_index, lead_data in enumerate(self.ecg_data_buffer):
+                    if lead_data:
+                        # Convert to numpy array and send to parent
+                        data_array = np.array(lead_data)
+                        parent.update_ecg_lead(lead_index, data_array)
+                        print(f"   📊 Sent {len(data_array)} samples to lead {lead_index}")
+                        sent_count += 1
+                
+                print(f"✅ Successfully sent data to {sent_count} leads via parent search")
+            else:
+                print(f"❌ Could not find parent widget with update_ecg_lead method")
+                # Try to find the main ECG test page
+                main_parent = self.parent()
+                while main_parent and depth < max_depth:
+                    if hasattr(main_parent, 'lines') and hasattr(main_parent, 'canvases'):
+                        print(f"🔍 Found ECG widget at depth {depth}")
+                        break
+                    main_parent = main_parent.parent()
+                    depth += 1
+                        
+        except Exception as e:
+            error_msg = f"Error sending ECG data to parent: {str(e)}"
+            print(f"❌ {error_msg}")
+
+    def generate_test_ecg_data(self):
+        """Generate test ECG data to demonstrate wave plotting"""
+        try:
+            import numpy as np
+            
+            # Generate realistic ECG-like data for each lead
+            sample_count = 500
+            time = np.linspace(0, 2*np.pi, sample_count)
+            
+            for lead_index in range(12):
+                # Create different ECG patterns for each lead
+                if lead_index == 0:  # Lead I - Normal sinus rhythm
+                    data = 100 * np.sin(2 * time) + 50 * np.sin(6 * time) + np.random.normal(0, 5, sample_count)
+                elif lead_index == 1:  # Lead II - Strong R wave
+                    data = 150 * np.sin(2 * time) + 30 * np.sin(6 * time) + np.random.normal(0, 3, sample_count)
+                elif lead_index == 2:  # Lead III - Inverted
+                    data = -100 * np.sin(2 * time) + 40 * np.sin(6 * time) + np.random.normal(0, 4, sample_count)
+                elif lead_index == 3:  # aVR - Usually inverted
+                    data = -80 * np.sin(2 * time) + 20 * np.sin(6 * time) + np.random.normal(0, 6, sample_count)
+                elif lead_index == 4:  # aVL - Small amplitude
+                    data = 60 * np.sin(2 * time) + 15 * np.sin(6 * time) + np.random.normal(0, 5, sample_count)
+                elif lead_index == 5:  # aVF - Moderate amplitude
+                    data = 90 * np.sin(2 * time) + 25 * np.sin(6 * time) + np.random.normal(0, 4, sample_count)
+                else:  # V1-V6 - Precordial leads with varying patterns
+                    v_factor = (lead_index - 5) * 0.3
+                    data = (80 + v_factor * 20) * np.sin(2 * time) + (20 + v_factor * 10) * np.sin(6 * time) + np.random.normal(0, 5, sample_count)
+                
+                # Add to ECG data buffer
+                self.ecg_data_buffer[lead_index] = data.tolist()
+            
+            # Update status
+            self.status_display.setText(f"Generated test data for all 12 leads - {sample_count} samples each")
+            
+            # Send data to parent for plotting
+            self.send_ecg_data_to_parent()
+            
+            QMessageBox.information(self.parent(), "Test Data", f"Generated {sample_count} test samples for all 12 ECG leads!")
+            
+        except Exception as e:
+            QMessageBox.critical(self.parent(), "Error", f"Failed to generate test data: {str(e)}")
+            print(f"Error generating test data: {str(e)}")
+
+    def clear_ecg_data(self):
+        """Clear the ECG data buffers"""
+        self.ecg_data_buffer = [[] for _ in range(12)]
+        self.status_display.setText("ECG data cleared")
+
+    def save_wave_data(self):
+        """Save the received ECG wave data to a file"""
+        try:
+            # Check if we have any ECG data
+            total_samples = sum(len(lead_data) for lead_data in self.ecg_data_buffer)
+            if total_samples == 0:
+                QMessageBox.information(self.parent(), "No Data", "No ECG data to save!")
+                return
+            
+            from PyQt5.QtWidgets import QFileDialog
+            filename, _ = QFileDialog.getSaveFileName(
+                self.parent(),
+                "Save ECG Wave Data",
+                "",
+                "CSV Files (*.csv);;Text Files (*.txt);;All Files (*.*)"
+            )
+            
+            if filename:
+                if filename.endswith('.csv'):
+                    # Save as CSV
+                    import csv
+                    with open(filename, 'w', newline='') as csvfile:
+                        writer = csv.writer(csvfile)
+                        # Write header
+                        lead_names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+                        writer.writerow(['Sample'] + lead_names)
+                        
+                        # Find max length
+                        max_length = max(len(lead_data) for lead_data in self.ecg_data_buffer)
+                        
+                        # Write data rows
+                        for i in range(max_length):
+                            row = [i]
+                            for lead_data in self.ecg_data_buffer:
+                                if i < len(lead_data):
+                                    row.append(lead_data[i])
+                                else:
+                                    row.append('')
+                            writer.writerow(row)
+                else:
+                    # Save as text
+                    with open(filename, 'w') as f:
+                        f.write("ECG Wave Data\n")
+                        f.write("=" * 50 + "\n")
+                        f.write(f"Timestamp: {QTimer().remainingTime()}\n")
+                        f.write(f"COM Port: {self.com_port_combo.currentText()}\n")
+                        f.write(f"Baud Rate: {self.baud_rate_combo.currentText()}\n")
+                        f.write("=" * 50 + "\n\n")
+                        
+                        lead_names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+                        for i, lead_name in enumerate(lead_names):
+                            f.write(f"Lead {lead_name}: {len(self.ecg_data_buffer[i])} samples\n")
+                            if self.ecg_data_buffer[i]:
+                                f.write(f"Values: {', '.join(map(str, self.ecg_data_buffer[i][:100]))}...\n")
+                            f.write("\n")
+                
+                QMessageBox.information(self.parent(), "Success", f"ECG data saved to {filename}")
+                
+        except Exception as e:
+            QMessageBox.critical(self.parent(), "Error", f"Failed to save ECG data: {str(e)}")
+
+    # ----------------------------- Load Default -----------------------------
+
+    def create_load_default_content(self):
+        # Define sections for load default
+        sections = [
+            {
+                'title': 'ECG Settings',
+                'options': [("Load Defaults", "ecg"), ("Keep Current", "keep")],
+                'variable': {"value": "ecg"}
+            },
+            {
+                'title': 'Display Settings',
+                'options': [("Load Defaults", "display"), ("Keep Current", "keep")],
+                'variable': {"value": "display"}
+            },
+            {
+                'title': 'System Settings',
+                'options': [("Load Defaults", "system"), ("Keep Current", "keep")],
+                'variable': {"value": "system"}
+            },
+            {
+                'title': 'All Settings',
+                'options': [("Load All Defaults", "all"), ("Keep All Current", "keep")],
+                'variable': {"value": "keep"}
+            }
+        ]
+        
+        # Define buttons
+        buttons = [
+            {
+                'text': 'Load Selected',
+                'action': self.load_default_settings,
+                'style': 'primary'
+            },
+            {
+                'text': 'Cancel',
+                'action': self.hide_sliding_panel,
+                'style': 'danger'
+            }
+        ]
+        
+        return self.create_unified_control_panel("Load Default Settings", sections, buttons)
+
+    def load_default_settings(self):
+        QMessageBox.information(self.parent(), "Loaded", "Default settings loaded successfully!")
+        self.hide_sliding_panel()
+
+    # ----------------------------- Version Info -----------------------------
+
+    def create_version_info_content(self):
+        # Create a simple version info display
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Responsive margins and spacing
+        margin_size = getattr(self.sliding_panel, 'margin_size', 20) if self.sliding_panel else 20
+        spacing_size = getattr(self.sliding_panel, 'spacing_size', 15) if self.sliding_panel else 15
+        
+        layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
+        layout.setSpacing(spacing_size)
+
+        # Professional title
+        title = QLabel("Version Information")
+        title_font_size = max(16, min(22, int(margin_size * 0.8)))
+        title.setStyleSheet(f"""
+            QLabel {{
+                font: bold {title_font_size}pt Arial;
+                color: white;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #ff6600, stop:1 #ff8c42);
+                border: 2px solid #ff6600;
+                border-radius: 12px;
+                padding: {max(12, int(margin_size * 0.6))}px;
+                margin: {max(8, int(margin_size * 0.4))}px;
+                min-height: {max(30, int(margin_size * 1.5))}px;
+            }}
+        """)
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # Version info container
+        info_frame = QFrame()
+        info_frame.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 10px;
+                padding: 20px;
+                margin: 10px;
+            }
+        """)
+        info_layout = QVBoxLayout(info_frame)
+        info_layout.setSpacing(15)
+
+        # Version details
+        version_info = [
+            ("Software Version", "v2.1.0"),
+            ("Hardware Version", "v1.5.2"),
+            ("Firmware Version", "v3.0.1"),
+            ("Build Date", "2024-08-26"),
+            ("Manufacturer", "ModularECG Systems"),
+            ("Model", "ECG-12L Pro"),
+            ("Serial Number", "ME-2024-001"),
+            ("License", "Professional Edition")
+        ]
+
+        for label, value in version_info:
+            row = QHBoxLayout()
+            
+            # Label
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"""
+                QLabel {{
+                    font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                    color: #2c3e50;
+                    background: #f8f9fa;
+                    padding: {max(8, int(margin_size * 0.4))}px;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 6px;
+                    min-width: {max(120, int(margin_size * 6))}px;
+                }}
+            """)
+            
+            # Value
+            val = QLabel(value)
+            val.setStyleSheet(f"""
+                QLabel {{
+                    font: {max(10, int(margin_size * 0.5))}pt Arial;
+                    color: #ff6600;
+                    background: white;
+                    padding: {max(8, int(margin_size * 0.4))}px;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 6px;
+                    min-width: {max(100, int(margin_size * 5))}px;
+                }}
+            """)
+            
+            row.addWidget(lbl)
+            row.addWidget(val)
+            row.addStretch()
+            info_layout.addLayout(row)
+
+        layout.addWidget(info_frame)
+
+        # Exit button
+        exit_btn = QPushButton("Close")
+        exit_btn.setStyleSheet(f"""
+            QPushButton {{
+                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #6c757d, stop:0.5 #495057, stop:1 #6c757d);
+                color: white;
+                border: 2px solid #6c757d;
+                border-radius: 8px;
+                padding: {max(10, int(margin_size * 0.5))}px;
+                min-height: {max(35, int(margin_size * 1.8))}px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #495057, stop:0.5 #6c757d, stop:1 #495057);
+                border: 2px solid #495057;
+            }}
+        """)
+        exit_btn.clicked.connect(self.hide_sliding_panel)
+        layout.addWidget(exit_btn, alignment=Qt.AlignCenter)
+        
+        return widget
+    
+    # ----------------------------- Factory Maintain -----------------------------
+
+    def create_factory_maintain_content(self):
+        # Define sections for factory maintenance
+        sections = [
+            {
+                'title': 'Calibration',
+                'options': [("Calibrate Now", "calibrate"), ("Skip", "skip")],
+                'variable': {"value": "skip"}
+            },
+            {
+                'title': 'Self Test',
+                'options': [("Run Test", "test"), ("Skip", "skip")],
+                'variable': {"value": "skip"}
+            },
+            {
+                'title': 'Memory Reset',
+                'options': [("Reset All", "reset"), ("Keep Data", "keep")],
+                'variable': {"value": "keep"}
+            },
+            {
+                'title': 'Factory Reset',
+                'options': [("Reset to Factory", "factory"), ("Cancel", "cancel")],
+                'variable': {"value": "cancel"}
+            }
+        ]
+        
+        # Define buttons
+        buttons = [
+            {
+                'text': 'Execute Selected',
+                'action': self.execute_factory_maintenance,
+                'style': 'primary'
+            },
+            {
+                'text': 'Cancel',
+                'action': self.hide_sliding_panel,
+                'style': 'danger'
+            }
+        ]
+        
+        return self.create_unified_control_panel("Factory Maintenance", sections, buttons)
+
+    def execute_factory_maintenance(self):
+        QMessageBox.information(self.parent(), "Maintenance", "Factory maintenance completed successfully!")
+        self.hide_sliding_panel()
+
+    # ----------------------------- Exit -----------------------------
+
+    def show_exit(self):
+        """Show exit confirmation dialog"""
+        content_widget = self.create_exit_content()
+        self.show_sliding_panel(content_widget, "Exit Application", "Exit")
+
+    def create_exit_content(self):
+        # Create a simple exit confirmation
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Responsive margins and spacing
+        margin_size = getattr(self.sliding_panel, 'margin_size', 20) if self.sliding_panel else 20
+        spacing_size = getattr(self.sliding_panel, 'spacing_size', 15) if self.sliding_panel else 15
+        
+        layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
+        layout.setSpacing(spacing_size)
+
+        # Professional title
+        title = QLabel("Exit Application")
+        title_font_size = max(16, min(22, int(margin_size * 0.8)))
+        title.setStyleSheet(f"""
+            QLabel {{
+                font: bold {title_font_size}pt Arial;
+                color: white;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #ff6600, stop:1 #ff8c42);
+                border: 2px solid #ff6600;
+                border-radius: 12px;
+                padding: {max(12, int(margin_size * 0.6))}px;
+                margin: {max(8, int(margin_size * 0.4))}px;
+                min-height: {max(30, int(margin_size * 1.5))}px;
+            }}
+        """)
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # Confirmation message
+        msg_frame = QFrame()
+        msg_frame.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 10px;
+                padding: 20px;
+                margin: 10px;
+            }
+        """)
+        msg_layout = QVBoxLayout(msg_frame)
+        
+        confirm_msg = QLabel("Are you sure you want to exit the application?")
+        confirm_msg.setStyleSheet(f"""
+            QLabel {{
+                font: bold {max(12, int(margin_size * 0.6))}pt Arial;
+                        color: #2c3e50;
+                background: transparent;
+                padding: 10px;
+                text-align: center;
+            }}
+        """)
+        confirm_msg.setAlignment(Qt.AlignCenter)
+        msg_layout.addWidget(confirm_msg)
+        
+        warning_msg = QLabel("⚠️ Any unsaved data will be lost!")
+        warning_msg.setStyleSheet(f"""
+            QLabel {{
+                font: {max(10, int(margin_size * 0.5))}pt Arial;
+                color: #e74c3c;
+                background: #fdf2f2;
+                padding: 8px;
+                border: 1px solid #f5c6cb;
+                border-radius: 6px;
+                text-align: center;
+            }}
+        """)
+        warning_msg.setAlignment(Qt.AlignCenter)
+        msg_layout.addWidget(warning_msg)
+        
+        layout.addWidget(msg_frame)
+
+        # Buttons
+        btn_frame = QFrame()
+        btn_frame.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                        margin: 10px;
+                    }
+                """)
+        btn_layout = QHBoxLayout(btn_frame)
+        btn_layout.setSpacing(max(10, int(margin_size * 0.5)))
+
+        # Responsive button sizing
+        button_width = max(100, min(140, int(margin_size * 5)))
+        button_height = max(35, min(45, int(margin_size * 1.8)))
+
+        # Cancel button
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedSize(button_width, button_height)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #6c757d, stop:0.5 #495057, stop:1 #6c757d);
+                color: white;
+                border: 2px solid #6c757d;
+                border-radius: 8px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #495057, stop:0.5 #6c757d, stop:1 #495057);
+                border: 2px solid #495057;
+            }}
+        """)
+        cancel_btn.clicked.connect(self.hide_sliding_panel)
+        btn_layout.addWidget(cancel_btn)
+
+        # Exit button
+        exit_btn = QPushButton("Exit")
+        exit_btn.setFixedSize(button_width, button_height)
+        exit_btn.setStyleSheet(f"""
+            QPushButton {{
+                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #f44336, stop:0.5 #d32f2f, stop:1 #f44336);
+                color: white;
+                border: 2px solid #f44336;
+                border-radius: 8px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #d32f2f, stop:0.5 #f44336, stop:1 #d32f2f);
+                border: 2px solid #d32f2f;
+            }}
+        """)
+        exit_btn.clicked.connect(self.confirm_exit)
+        btn_layout.addWidget(exit_btn)
+
+        layout.addWidget(btn_frame)
+        
+        return widget
+
+    def confirm_exit(self):
+        """Confirm and exit the application"""
+        reply = QMessageBox.question(
+            self.parent(), 
+            'Exit Application', 
+            'Are you absolutely sure you want to exit?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            QApplication.quit()
+        else:
+            self.hide_sliding_panel()
+
+    def refresh_ecg_graphs(self):
+        """Refresh ECG graphs with latest data"""
+        if not hasattr(self, 'ecg_graphs'):
+            return
+            
+        # Get latest ECG data
+        ecg_data = {}
+        if hasattr(self, 'parent_widget') and self.parent_widget:
+            if hasattr(self.parent_widget, 'data'):
+                ecg_data = self.parent_widget.data
+        else:
+            # Try to find ECG data from the current parent
+            current_parent = self.parent()
+            while current_parent:
+                if hasattr(current_parent, 'data') and current_parent.data:
+                    ecg_data = current_parent.data
+                    break
+                current_parent = current_parent.parent()
+        
+        # Update each graph
+        for lead, graph_info in self.ecg_graphs.items():
+            if lead in ecg_data and len(ecg_data[lead]) > 0:
+                # Get latest data
+                data = ecg_data[lead][-500:] if len(ecg_data[lead]) > 500 else ecg_data[lead]
+                x = np.arange(len(data))
+                
+                # Update the line data
+                graph_info['line'].set_xdata(x)
+                graph_info['line'].set_ydata(data)
+                
+                # Update canvas if available
+                if graph_info['canvas']:
+                    graph_info['canvas'].draw_idle()
+        
+        QMessageBox.information(self.parent(), "Updated", "ECG graphs refreshed with latest data!")
+
+    def create_unified_control_panel(self, title, sections, buttons=None):
+        """
+        Create a unified, responsive control panel with consistent design
+        sections: list of dicts with 'title', 'options', 'variable', 'setting_key'
+        buttons: list of dicts with 'text', 'action', 'style' (optional)
+        """
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Responsive margins and spacing
+        margin_size = getattr(self.sliding_panel, 'margin_size', 20) if self.sliding_panel else 20
+        spacing_size = getattr(self.sliding_panel, 'spacing_size', 15) if self.sliding_panel else 15
+        
+        layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
+        layout.setSpacing(spacing_size)
+
+        # Professional title
+        title_label = QLabel(title)
+        title_font_size = max(16, min(22, int(margin_size * 0.8)))
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                font: bold {title_font_size}pt Arial;
+                color: white;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #ff6600, stop:1 #ff8c42);
+                border: 2px solid #ff6600;
+                border-radius: 12px;
+                padding: {max(12, int(margin_size * 0.6))}px;
+                margin: {max(8, int(margin_size * 0.4))}px;
+                min-height: {max(30, int(margin_size * 1.5))}px;
+            }}
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
+
+        # Create scrollable area for content
+        from PyQt5.QtWidgets import QScrollArea
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setMaximumHeight(500)  # Limit height for smaller screens
+        
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(spacing_size)
+        content_layout.setContentsMargins(5, 5, 5, 5)
+
+        def add_section(section_data):
+            group_box = QGroupBox(section_data['title'])
+            group_box.setStyleSheet(f"""
+                QGroupBox {{
+                    font: bold {max(12, int(margin_size * 0.6))}pt Arial;
+                    color: #2c3e50;
+                    background: white;
+                    border: 2px solid #ff6600;
+                    border-radius: 10px;
+                    padding: {max(8, int(margin_size * 0.4))}px;
+                    margin: {max(5, int(margin_size * 0.25))}px;
+                }}
+                QGroupBox:title {{
+                    subcontrol-origin: margin;
+                    left: 12px;
+                    top: 6px;
+                    padding: 0 8px 0 8px;
+                    color: #ff6600;
+                    font-weight: bold;
+                    background: white;
+                    font-size: {max(11, int(margin_size * 0.55))}pt;
+                }}
+            """)
+            
+            # Use grid layout for better organization
+            grid_layout = QGridLayout(group_box)
+            grid_layout.setSpacing(8)
+            grid_layout.setContentsMargins(8, 8, 8, 8)
+            
+            # Calculate optimal button size
+            button_width = max(70, min(120, int(margin_size * 3.5)))
+            button_height = max(25, min(35, int(margin_size * 1.3)))
+            
+            for i, (text, val) in enumerate(section_data['options']):
+                btn = QRadioButton(text)
+                btn.setStyleSheet(f"""
+                    QRadioButton {{
+                        font: bold {max(9, int(margin_size * 0.45))}pt Arial;
+                        color: #2c3e50;
+                        background: white;
+                        padding: {max(4, int(margin_size * 0.2))}px;
+                        border: 2px solid #e0e0e0;
+                        border-radius: 6px;
+                        min-width: {button_width}px;
+                        min-height: {button_height}px;
+                    }}
+                    QRadioButton:hover {{
+                        border: 2px solid #ffb347;
+                        background: #fff8f0;
+                    }}
+                    QRadioButton:checked {{
+                        border: 2px solid #ff6600;
+                        background: #fff0e0;
+                        color: #ff6600;
+                        font-weight: bold;
+                    }}
+                    QRadioButton::indicator {{
+                        width: {max(10, int(margin_size * 0.5))}px;
+                        height: {max(10, int(margin_size * 0.5))}px;
+                        border: 2px solid #e0e0e0;
+                        border-radius: {max(5, int(margin_size * 0.25))}px;
+                        background: white;
+                        margin: 1px;
+                    }}
+                    QRadioButton::indicator:checked {{
+                        border: 2px solid #ff6600;
+                        background: #ff6600;
+                    }}
+                """)
+                
+                # Set checked state if variable exists
+                if 'variable' in section_data and section_data['variable']:
+                    btn.setChecked(section_data['variable'].get('value') == val)
+                
+                # Connect to appropriate handler
+                if 'setting_key' in section_data:
+                    btn.toggled.connect(lambda checked, v=val, key=section_data['setting_key']: 
+                                     self.on_setting_changed(key, v) if checked else None)
+                elif 'variable' in section_data:
+                    btn.toggled.connect(lambda checked, v=val, var=section_data['variable']: 
+                                     var.update({'value': v}) if checked else None)
+                
+                # Arrange in grid (2 columns for better space usage)
+                row, col = divmod(i, 2)
+                grid_layout.addWidget(btn, row, col)
+            
+            content_layout.addWidget(group_box)
+
+        # Add all sections
+        for section in sections:
+            add_section(section)
+
+        scroll_area.setWidget(content_widget)
+        layout.addWidget(scroll_area)
+
+        # Add buttons if provided
+        if buttons:
+            btn_frame = QFrame()
+            btn_frame.setStyleSheet("""
+                QFrame {
+                    background: transparent;
+                    margin: 10px;
+                }
+            """)
+            btn_layout = QHBoxLayout(btn_frame)
+            btn_layout.setSpacing(max(10, int(margin_size * 0.5)))
+
+            # Responsive button sizing
+            button_width = max(100, min(140, int(margin_size * 5)))
+            button_height = max(35, min(45, int(margin_size * 1.8)))
+
+            for btn_data in buttons:
+                btn = QPushButton(btn_data['text'])
+                btn.setFixedSize(button_width, button_height)
+                
+                # Default style if not specified
+                style = btn_data.get('style', 'primary')
+                if style == 'primary':
+                    btn.setStyleSheet(f"""
+                        QPushButton {{
+                            font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                                stop:0 #4CAF50, stop:0.5 #45a049, stop:1 #4CAF50);
+                            color: white;
+                            border: 2px solid #4CAF50;
+                            border-radius: 8px;
+                            padding: 8px;
+                        }}
+                        QPushButton:hover {{
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                                stop:0 #45a049, stop:0.5 #4CAF50, stop:1 #45a049);
+                            border: 2px solid #45a049;
+                        }}
+                    """)
+                elif style == 'danger':
+                    btn.setStyleSheet(f"""
+                        QPushButton {{
+                            font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                                stop:0 #f44336, stop:0.5 #d32f2f, stop:1 #f44336);
+                            color: white;
+                            border: 2px solid #f44336;
+                            border-radius: 8px;
+                            padding: 8px;
+                        }}
+                        QPushButton:hover {{
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                                stop:0 #d32f2f, stop:0.5 #f44336, stop:1 #d32f2f);
+                            border: 2px solid #d32f2f;
+                        }}
+                    """)
+                elif style == 'info':
+                    btn.setStyleSheet(f"""
+                        QPushButton {{
+                            font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                                stop:0 #17a2b8, stop:0.5 #138496, stop:1 #17a2b8);
+                            color: white;
+                            border: 2px solid #17a2b8;
+                            border-radius: 8px;
+                            padding: 8px;
+                        }}
+                        QPushButton:hover {{
+                            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                                stop:0 #138496, stop:0.5 #17a2b8, stop:1 #138496);
+                            border: 2px solid #138496;
+                        }}
+                    """)
+                
+                btn.clicked.connect(btn_data['action'])
+                btn_layout.addWidget(btn)
+
+            layout.addWidget(btn_frame)
+        
+        return widget
+    
+    def show_dummy(self):
+        import threading
+        import time
+        
+        base_dir = os.path.dirname(__file__)
+        csv_path = os.path.join(base_dir, "dummydata.csv")
+        
+        leads = ["I", "II", "III", "aVR", "aVL", "aVF",
+                 "V1", "V2", "V3", "V4", "V5", "V6"]
+
+        # --- Start dummy data writer in background ---
+        
+        # --- Create dialog with matplotlib canvas ---
+        dialog = QDialog(self.dashboard if self.dashboard else self)
+        dialog.setWindowTitle("Live Dummy ECG")
+        layout = QVBoxLayout(dialog)
+        
+        # Create matplotlib figure
+        fig, axes = plt.subplots(3, 4, figsize=(16, 10), sharex=True)
+        axes = axes.flatten()
+        
+        # Create canvas and add to layout
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        
+        # Load the existing CSV data once
+        if os.path.exists(csv_path):
+            df = pd.read_csv(csv_path, sep='\t')  # Tab-separated file ke liye
+            print(f"Loaded {len(df)} rows of data")
+            print(f"Columns: {list(df.columns)}")
+        else:
+            print(f"CSV file {csv_path} not found!")
+            return
+        
+        # Get the number of samples
+        num_samples = len(df)
+        window_size = 120  
+        current_index = 0
+        
+        # Set up plots with compact styling
+        for idx, lead in enumerate(leads):
+            axes[idx].set_ylabel(lead, fontsize=9, fontweight='bold') 
+            axes[idx].grid(True, alpha=0.2) 
+            axes[idx].set_ylim(df[lead].min() - 50, df[lead].max() + 50)  
+            
+            # Remove unnecessary elements for cleaner look
+            axes[idx].spines['top'].set_visible(False)
+            axes[idx].spines['right'].set_visible(False)
+            axes[idx].set_xticks([])
+            axes[idx].set_yticks([])  
+        
+        # Compact title
+        fig.suptitle('12-Lead ECG Monitor', fontsize=14, fontweight='bold', y=0.95)
+        
+        def update_plot():
+            nonlocal current_index
+            
+            # Calculate start and end indices for sliding window
+            start_idx = max(0, current_index - window_size)
+            end_idx = current_index + 1
+            
+            # Update each lead plot
+            for idx, lead in enumerate(leads):
+                axes[idx].cla()
+                
+                # Plot the data in sliding window
+                x_data = range(start_idx, end_idx)
+                y_data = df[lead].iloc[start_idx:end_idx]
+                axes[idx].plot(x_data, y_data, linewidth=1.2, color='#1f77b4') 
+                
+                # Add current position indicator
+                if current_index < len(df):
+                    current_value = df[lead].iloc[current_index]
+                    axes[idx].plot(current_index, current_value, 'ro', markersize=4, alpha=0.8) 
+                    axes[idx].axvline(x=current_index, color='red', linestyle='--', alpha=0.6, linewidth=0.8)  
+                
+                # Compact styling
+                axes[idx].set_ylabel(lead, fontsize=9, fontweight='bold')
+                axes[idx].grid(True, alpha=0.2)
+                axes[idx].set_ylim(df[lead].min() - 50, df[lead].max() + 50)
+                
+                # Remove all unnecessary elements
+                axes[idx].set_xticks([])
+                axes[idx].set_yticks([])
+                axes[idx].spines['top'].set_visible(False)
+                axes[idx].spines['right'].set_visible(False)
+            
+            # Compact title with sample info
+            fig.suptitle(f'ECG Monitor - Sample: {current_index}/{num_samples-1}', 
+                         fontsize=12, fontweight='bold', y=0.95)
+            
+            # Tighter layout - less wasted space
+            fig.tight_layout(pad=0.5)
+            canvas.draw()
+            
+            # Move to next sample (loop back to start)
+            current_index = (current_index + 1) % num_samples
+
+        # --- Timer for live update ---
+        timer = QTimer(dialog)
+        timer.timeout.connect(update_plot)
+        timer.start(100)  # 10 FPS for smooth animation
+
+        dialog.setMinimumSize(1600, 1000)
+        dialog.showMaximized() 
+        dialog.exec_()

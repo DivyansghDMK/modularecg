@@ -6,14 +6,47 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap
+<<<<<<< HEAD
 from auth.sign_in import SignIn
 from auth.sign_out import SignOut
 from dashboard.dashboard import Dashboard
 from splash_screen import SplashScreen
 from ecg.pan_tompkins import pan_tompkins
+=======
+# Import modules with fallback handling
+try:
+    from auth.sign_in import SignIn
+    from auth.sign_out import SignOut
+    from dashboard.dashboard import Dashboard
+    from splash_screen import SplashScreen
+    print("✅ Core modules imported successfully")
+except ImportError as e:
+    print(f"❌ Core module import error: {e}")
+    print("💡 Make sure you're running from the src directory")
+    print("💡 Try: cd src && python main.py")
+    sys.exit(1)
+
+# Import ECG modules with fallback
+try:
+    from ecg.pan_tompkins import pan_tompkins
+    print("✅ ECG modules imported successfully")
+except ImportError as e:
+    print(f"⚠️ ECG module import warning: {e}")
+    print("💡 ECG analysis features may be limited")
+    # Create a dummy function to prevent errors
+    def pan_tompkins(ecg, fs=500):
+        return []
+>>>>>>> main
 
 
-USER_DATA_FILE = "users.json"
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+
+USER_DATA_FILE = resource_path("users.json")
 
 
 def load_users():
@@ -32,6 +65,7 @@ def save_users(users):
 class LoginRegisterDialog(QDialog):
     def __init__(self):
         super().__init__()
+<<<<<<< HEAD
         self.setWindowTitle("CardioX by Deckmount - Sign In / Sign Up")
         self.setMinimumSize(800, 500)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
@@ -50,13 +84,30 @@ class LoginRegisterDialog(QDialog):
             QPushButton#SocialBtn { background: none; color: #2453ff; border: none; font-size: 13px; text-decoration: underline; }
             QPushButton#SocialBtn:hover { color: #1a3bb3; }
         """)
+=======
+        
+        # Set responsive size policy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(800, 600)  # Minimum size for usability
+        
+        # Set window 
+        # properties for better responsiveness
+        self.setWindowTitle("CardioX by Deckmount - Sign In / Sign Up")
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
+        
+        # Initialize sign-in logic
+>>>>>>> main
         from auth.sign_in import SignIn
         self.sign_in_logic = SignIn()
+        
+        # Center the window on screen
+        self.center_on_screen()
+        
         self.init_ui()
         self.result = False
         self.username = None
         self.user_details = {}
-        self.center_on_screen()
+        self.center_on_screen( )
 
     def center_on_screen(self):
         qr = self.frameGeometry()
@@ -69,26 +120,65 @@ class LoginRegisterDialog(QDialog):
         self.bg_label = QLabel(self)
         self.bg_label.setGeometry(0, 0, self.width(), self.height())
         self.bg_label.lower()
-        gif_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../assets/v.gif'))
-        if os.path.exists(gif_path):
-            from PyQt5.QtGui import QMovie
-            movie = QMovie(gif_path)
-            self.bg_label.setMovie(movie)
-            movie.start()
+        
+        # Try multiple possible paths for the v.gif file
+        possible_gif_paths = [
+            resource_path('assets/v.gif'),
+            resource_path('../assets/v.gif'),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'assets', 'v.gif'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', 'v.gif')
+        ]
+        
+        gif_path = None
+        for path in possible_gif_paths:
+            if os.path.exists(path):
+                gif_path = path
+                print(f"✅ Found v.gif at: {gif_path}")
+                break
+        
+        if gif_path and os.path.exists(gif_path):
+            try:
+                from PyQt5.QtGui import QMovie
+                movie = QMovie(gif_path)
+                if movie.isValid():
+                    self.bg_label.setMovie(movie)
+                    movie.start()
+                    print("✅ v.gif background started successfully")
+                else:
+                    print("❌ Invalid GIF file")
+                    # Set fallback background
+                    self.bg_label.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a1a2e, stop:1 #16213e);")
+            except Exception as e:
+                print(f"❌ Error loading v.gif: {e}")
+                # Set fallback background
+                self.bg_label.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a1a2e, stop:1 #16213e);")
+        else:
+            print("❌ v.gif not found in any expected location")
+            print(f"Tried paths: {possible_gif_paths}")
+            # Set fallback background
+            self.bg_label.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a1a2e, stop:1 #16213e);")
+        
         self.bg_label.setScaledContents(True)
         # --- Title and tagline above glass ---
         main_layout = QVBoxLayout(self)
         main_layout.addStretch(1)
         # Title (outside glass) - logo style
         title = QLabel("CardioX by Deckmount")
+<<<<<<< HEAD
         title.setFont(QFont("Segoe Script, Pacifico, Segoe UI", 52, QFont.Black))
+=======
+        title.setFont(QFont("Arial", 52, QFont.Black))
+>>>>>>> main
         title.setStyleSheet("""
             color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #ff6600, stop:1 #ffb347);
             letter-spacing: 4px;
             margin-bottom: 0px;        
             padding-top: 0px;
             padding-bottom: 0px;
+<<<<<<< HEAD
             text-shadow: 0 4px 24px #ff660088, 0 1px 0 #fff, 0 0px 2px #ff6600;
+=======
+>>>>>>> main
             font-weight: 900;
             border-radius: 18px;
         """)
@@ -96,8 +186,13 @@ class LoginRegisterDialog(QDialog):
         main_layout.addWidget(title)
         # Tagline (outside glass)
         tagline = QLabel("Built to Detect. Designed to Last.")
+<<<<<<< HEAD
         tagline.setFont(QFont("Segoe UI", 18, QFont.Bold))
         tagline.setStyleSheet("color: #ff6600; margin-bottom: 18px; margin-top: 0px; text-shadow: 0 2px 12px #fff2;")
+=======
+        tagline.setFont(QFont("Arial", 18, QFont.Bold))
+        tagline.setStyleSheet("color: #ff6600; margin-bottom: 18px; margin-top: 0px; background: rgba(255,255,255,0.1);")
+>>>>>>> main
         tagline.setAlignment(Qt.AlignHCenter)
         main_layout.addWidget(tagline)
         # --- Glass effect container in center ---
@@ -109,7 +204,7 @@ class LoginRegisterDialog(QDialog):
             QWidget#Glass {
                 background: rgba(255,255,255,0.18);
                 border-radius: 24px;
-                border: 2px solid rgba(255,255,255,0.35);
+                border: 2px solid rgba(255,255,255,0.35);zx
             }
         """)
         glass.setMinimumSize(600, 520)
@@ -123,12 +218,20 @@ class LoginRegisterDialog(QDialog):
         glass_layout.setContentsMargins(32, 32, 32, 32)
         # ECG image inside glass, left side (larger)
         ecg_img = QLabel()
+<<<<<<< HEAD
         ecg_pix = QPixmap(os.path.abspath(os.path.join(os.path.dirname(__file__), '../assets/v1.png')))
+=======
+        ecg_pix = QPixmap(resource_path('assets/v1.png'))
+>>>>>>> main
         if not ecg_pix.isNull():
             ecg_img.setPixmap(ecg_pix.scaled(400, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             ecg_img.setAlignment(Qt.AlignVCenter | Qt.AlignHCenter)
             ecg_img.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+<<<<<<< HEAD
             ecg_img.setStyleSheet("margin: 0px 32px 0px 0px; border-radius: 24px; box-shadow: 0 0 32px #ff6600; background: transparent;")
+=======
+            ecg_img.setStyleSheet("margin: 0px 32px 0px 0px; border-radius: 24px; background: transparent;")
+>>>>>>> main
         # Wrap image in a layout to center vertically
         img_col = QVBoxLayout()
         img_col.addStretch(1)
@@ -154,6 +257,10 @@ class LoginRegisterDialog(QDialog):
         stacked_col.addLayout(signup_row)
         # Add login prompt to register widget
         login_row = QHBoxLayout()
+<<<<<<< HEAD
+=======
+        
+>>>>>>> main
         login_row.addStretch(1)
         login_lbl = QLabel("Already have an account?")
         login_lbl.setStyleSheet("color: #fff; font-size: 15px;")
@@ -179,10 +286,27 @@ class LoginRegisterDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # Resize background with window
         self.resizeEvent = self._resize_bg
+        
+        # Ensure background is always visible
+        self.ensure_background_visible()
+
 
     def _resize_bg(self, event):
+        """Handle window resize to maintain background coverage"""
         self.bg_label.setGeometry(0, 0, self.width(), self.height())
+        # Ensure the background stays behind all other widgets
+        self.bg_label.lower()
         event.accept()
+    
+    def ensure_background_visible(self):
+        """Ensure the background is always visible and properly positioned"""
+        # Make sure the background label is at the bottom of the widget stack
+        self.bg_label.lower()
+        # Ensure it covers the entire window
+        self.bg_label.setGeometry(0, 0, self.width(), self.height())
+        # Make sure it's visible
+        self.bg_label.setVisible(True)
+        print("✅ Background visibility ensured")
 
     def create_login_widget(self):
         widget = QWidget()
@@ -210,10 +334,14 @@ class LoginRegisterDialog(QDialog):
         layout.addWidget(phone_btn)
         # Add nav links under phone_btn
         nav_row = QHBoxLayout()
-        from nav_home import NavHome
-        from nav_about import NavAbout
-        from nav_blog import NavBlog
-        from nav_pricing import NavPricing
+        try:
+            from nav_home import NavHome
+            from nav_about import NavAbout
+            from nav_blog import NavBlog
+            from nav_pricing import NavPricing
+        except ImportError as e:
+            print(f"❌ Navigation import error: {e}")
+            return
         nav_links = [
             ("Home", NavHome),
             ("About us", NavAbout),
@@ -232,7 +360,11 @@ class LoginRegisterDialog(QDialog):
             self.nav_stack.addWidget(page)
             self.nav_pages[text] = page
             if text == "Pricing":
-                from nav_pricing import show_pricing_dialog
+                try:
+                    from nav_pricing import show_pricing_dialog
+                except ImportError as e:
+                    print(f"❌ Pricing dialog import error: {e}")
+                    return
                 nav_btn.clicked.connect(lambda checked, p=self: show_pricing_dialog(p))
             else:
                 nav_btn.clicked.connect(lambda checked, t=text: show_nav_page(t))
@@ -266,7 +398,7 @@ class LoginRegisterDialog(QDialog):
         register_btn = QPushButton("Sign Up")
         register_btn.setObjectName("SignUpBtn")
         register_btn.clicked.connect(self.handle_register)
-        for w in [self.reg_name, self.reg_age, self.reg_gender, self.reg_address, self.reg_phone, self.reg_password, self.reg_confirm, register_btn]:
+        for w in [self.reg_name, self.reg_age, self.reg_gender, self.reg_address, self.reg_phone, self.reg_password, self.reg_confirm]:
             w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         # Apply dashboard color coding
         for w in [self.reg_name, self.reg_age, self.reg_gender, self.reg_address, self.reg_phone, self.reg_password, self.reg_confirm]:
@@ -372,6 +504,7 @@ def plot_ecg_with_peaks(ax, ecg_signal, sampling_rate=500, arrhythmia_result=Non
     ecg_signal = np.array(ecg_with_gaps)
     x = np.arange(len(ecg_signal))
     ax.clear()
+<<<<<<< HEAD
     ax.plot(x, ecg_signal, color='black', lw=1)  # Black line for white background
 
     # --- R peak detection (highest, most prominent) ---
@@ -423,6 +556,10 @@ def plot_ecg_with_peaks(ax, ecg_signal, sampling_rate=500, arrhythmia_result=Non
     # Only show the most recent peak for each label (if any)
     peak_dict = {'P': p_peaks, 'Q': q_peaks, 'R': r_peaks, 'S': s_peaks, 'T': t_peaks}
     ax.lines.clear()
+=======
+    ax.plot(x, ecg_signal, color='#ff3380', lw=2)  # Pink line for ECG
+
+>>>>>>> main
     # --- Heart rate, PR, QRS, QTc, QRS axis, ST segment calculation ---
     heart_rate = None
     pr_interval = None
@@ -435,6 +572,7 @@ def plot_ecg_with_peaks(ax, ecg_signal, sampling_rate=500, arrhythmia_result=Non
         rr_intervals = np.diff(r_peaks) / sampling_rate  # in seconds
         mean_rr = np.mean(rr_intervals)
         if mean_rr > 0:
+<<<<<<< HEAD
             heart_rate = 60.0 / mean_rr
     if len(p_peaks) > 0 and len(r_peaks) > 0:
         pr_interval = (r_peaks[-1] - p_peaks[-1]) * 1000 / sampling_rate  # ms
@@ -485,14 +623,41 @@ def plot_ecg_with_peaks(ax, ecg_signal, sampling_rate=500, arrhythmia_result=Non
                 ax.text(idx, ecg_signal[idx]+y_offset, label, color='green', fontsize=10, fontweight='bold', ha='center', va='bottom', zorder=11, bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, boxstyle='round,pad=0.1'))
             else:
                 ax.text(idx, ecg_signal[idx]-y_offset, label, color='green', fontsize=10, fontweight='bold', ha='center', va='top', zorder=11, bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, boxstyle='round,pad=0.1'))
+=======
+            heart_rate = 60 / mean_rr
+    # Optionally calculate intervals (not shown on plot)
+    if len(r_peaks) > 0:
+        pr_interval = '--'
+        qrs_duration = '--'
+        qt_interval = '--'
+        qtc_interval = '--'
+    # --- End metrics ---
+    # --- Display metrics and clinical info on the plot ---
+    info_lines = [
+        f"PR : {pr_interval if pr_interval else '--'}",
+        f"QRS : {qrs_duration if qrs_duration else '--'}",
+        f"QTc : {qtc_interval if qtc_interval else '--'}",
+        f"QRS : {qrs_axis}",
+        f"ST : {st_segment}",
+        f"Heart Rate: {heart_rate} bpm" if heart_rate else "Heart Rate: --"
+    ]
+    # Modern, clean info box
+    y0 = np.min(ecg_signal) + 0.05 * (np.max(ecg_signal) - np.min(ecg_signal))
+    ax.text(0.99, 0.01, '\n'.join(info_lines), color='#222', fontsize=12, fontweight='bold', ha='right', va='bottom', zorder=20,
+            bbox=dict(facecolor='#f7f7f7', edgecolor='#ff3380', alpha=0.95, boxstyle='round,pad=0.4'), transform=ax.transAxes)
+    # --- End display ---
+>>>>>>> main
     # No legend, no grid, no ticks for a clean look
     ax.set_facecolor('white')
     ax.figure.patch.set_facecolor('white')
     ax.set_xticks([])
     ax.set_yticks([])
     ax.grid(False)
+<<<<<<< HEAD
     # Optionally print or return metrics for display elsewhere
     # print(f"HR: {heart_rate}, PR: {pr_interval}, QRS: {qrs_duration}, QTc: {qtc_interval}, Axis: {qrs_axis}, ST: {st_segment}")
+=======
+>>>>>>> main
 
 
 def main():

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QDialog
+=======
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QDialog, QFrame
+>>>>>>> main
 from PyQt5.QtCore import Qt, QTimer
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -39,6 +43,14 @@ class LorenzDialog(QDialog):
 class LeadSequentialView(QWidget):
     def __init__(self, leads, data, buffer_size=500, parent=None):
         super().__init__(parent)
+<<<<<<< HEAD
+=======
+
+        # Initialize settings manager
+        from utils.settings_manager import SettingsManager
+        self.settings_manager = SettingsManager()
+
+>>>>>>> main
         self.setWindowTitle("ECG Lead Viewer - Sequential")
         self.setStyleSheet("background: #000;")
         self.resize(1000, 400)
@@ -98,22 +110,75 @@ class LeadSequentialView(QWidget):
             self.mini_lines.append(mini_line)
             self.mini_canvases.append(mini_canvas)
         layout.addLayout(mini_layout)
+<<<<<<< HEAD
+=======
+        # --- Card-style metrics row (only for 2-lead view) ---
+        if len(self.leads) == 2:
+            metrics_layout = QHBoxLayout()
+            metrics_layout.setSpacing(32)
+            metrics_layout.setContentsMargins(32, 20, 32, 20)
+            self.metric_cards = []
+            metric_names = ["PR Int", "QRS D", "QTc In", "Arrhy"]
+            for name in metric_names:
+                card = QWidget()
+                card.setStyleSheet("""
+                    background: #fff;
+                    border: 2.5px solid #ff6600;
+                    border-radius: 20px;
+                    min-width: 170px;
+                    min-height: 110px;
+                    max-height: 130px;
+                """)
+                card_layout = QVBoxLayout(card)
+                card_layout.setContentsMargins(12, 12, 12, 12)
+                label = QLabel(name)
+                label.setAlignment(Qt.AlignHCenter)
+                label.setStyleSheet("color: #ff6600; font-size: 22px; font-weight: bold;")
+                value = QLabel("--")
+                value.setAlignment(Qt.AlignHCenter)
+                value.setStyleSheet("color: #222; font-size: 38px; font-weight: bold;")
+                card_layout.addWidget(label)
+                card_layout.addWidget(value)
+                metrics_layout.addWidget(card)
+                self.metric_cards.append((label, value))
+            metrics_row = QWidget()
+            metrics_row.setLayout(metrics_layout)
+            metrics_row.setFixedHeight(150)
+            layout.addWidget(metrics_row)
+>>>>>>> main
         # ...existing code...
 
     def update_plot(self):
         lead = self.leads[self.current_idx]
         self.lead_label.setText(f"Lead: {lead}")
         data = self.data.get(lead, [])
+<<<<<<< HEAD
+=======
+
+        # Apply gain setting to the displayed data
+        gain_factor = self.settings_manager.get_wave_gain() / 10.0
+
+>>>>>>> main
         # Main plot (scrolling window)
         if data:
             x = np.arange(len(data))
             centered = np.array(data) - np.mean(data)
             self.line.set_data(x, centered)
+<<<<<<< HEAD
             self.ax.set_xlim(0, max(len(data)-1, 1))
             ymin = np.min(centered) - 100
             ymax = np.max(centered) + 100
             if ymin == ymax:
                 ymin, ymax = -500, 500
+=======
+
+            ylim = 500 * gain_factor
+            self.ax.set_xlim(0, max(len(data)-1, 1))
+            ymin = np.min(centered) - ylim * 0.2
+            ymax = np.max(centered) + ylim * 0.2
+            if ymin == ymax:
+                ymin, ymax = -ylim, ylim
+>>>>>>> main
             self.ax.set_ylim(ymin, ymax)
         else:
             self.line.set_data([], [])
@@ -127,6 +192,10 @@ class LeadSequentialView(QWidget):
             mini_ax = self.mini_axes[i]
             if d:
                 d = np.array(d) - np.mean(d)
+<<<<<<< HEAD
+=======
+                d = d * gain_factor 
+>>>>>>> main
                 if len(d) > n_points:
                     idxs = np.linspace(0, len(d)-1, n_points).astype(int)
                     d_lorez = d[idxs]
@@ -136,10 +205,18 @@ class LeadSequentialView(QWidget):
                     x_lorez = np.arange(len(d))
                 mini_line.set_data(x_lorez, d_lorez)
                 mini_ax.set_xlim(0, max(len(d)-1, 1))
+<<<<<<< HEAD
                 ymin = np.min(d_lorez) - 100
                 ymax = np.max(d_lorez) + 100
                 if ymin == ymax:
                     ymin, ymax = -500, 500
+=======
+                ylim = 500 * gain_factor
+                ymin = np.min(d_lorez) - ylim * 0.2
+                ymax = np.max(d_lorez) + ylim * 0.2
+                if ymin == ymax:
+                    ymin, ymax = -ylim, ylim
+>>>>>>> main
                 mini_ax.set_ylim(ymin, ymax)
             else:
                 mini_line.set_data([], [])
@@ -155,6 +232,7 @@ class LeadSequentialView(QWidget):
     def next_lead(self):
         self.current_idx = (self.current_idx + 1) % len(self.leads)
         self.update_plot()
+<<<<<<< HEAD
 
     @staticmethod
     def show_all_leads(leads, data, buffer_size=500, parent=None):
@@ -225,3 +303,5 @@ class LeadSequentialView(QWidget):
         win.destroyed.connect(stop_timer)
         win.show()
         return win
+=======
+>>>>>>> main
