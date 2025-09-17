@@ -3108,7 +3108,7 @@ class ECGTestPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Export ECG Data as CSV", "", "CSV Files (*.csv)")
         if path:
             try:
-            with open(path, 'w', newline='') as f:
+                with open(path, 'w', newline='') as f:
                     writer = csv.writer(f, delimiter='\t')  # Use tab delimiter like dummydata.csv
                     
                     # Write header exactly like dummydata.csv
@@ -3161,14 +3161,14 @@ class ECGTestPage(QWidget):
                                         # Only include non-zero values (actual data)
                                         if value != 0:
                                             row.append(int(value))
-                        else:
-                            row.append("")
+                                        else:
+                                            row.append("")
                                     else:
                                         row.append("")
                                 else:
                                     row.append("")
                             
-                    writer.writerow(row)
+                            writer.writerow(row)
 
                 print(f"✅ CSV export completed: {path}")
                 QMessageBox.information(

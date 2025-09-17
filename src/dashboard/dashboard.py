@@ -865,8 +865,8 @@ class Dashboard(QWidget):
                                 ax = fig.axes[0]
                                 
                                 # REMOVE ALL NUMBERS AND LABELS
-                ax.set_xticks([])
-                ax.set_yticks([])
+                                ax.set_xticks([])
+                                ax.set_yticks([])
                                 ax.set_xlabel('')         
                                 ax.set_ylabel('')          
                                 ax.set_title('')           
@@ -913,7 +913,7 @@ class Dashboard(QWidget):
                                       edgecolor='none',
                                       transparent=True)
                             
-                lead_img_paths[lead] = img_path
+                            lead_img_paths[lead] = img_path
                             print(f"Saved clean Lead {lead}")
                             
                         except Exception as e:
