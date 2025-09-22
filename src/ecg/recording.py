@@ -645,6 +645,12 @@ class ECGMenu(QGroupBox):
         """)
         form_layout = QGridLayout(form_frame)
         form_layout.setSpacing(max(8, spacing_size-5))
+        # Make right column grow with window size
+        try:
+            form_layout.setColumnStretch(0, 1)
+            form_layout.setColumnStretch(1, 3)
+        except Exception:
+            pass
         
         labels = ["Organisation", "Doctor", "Patient Name"]
         entries = {}
@@ -689,10 +695,10 @@ class ECGMenu(QGroupBox):
                 }}
             """)
             
-            # Responsive entry field sizes
-            entry_width = max(150, int(margin_size * 5))
+            # Responsive entry field sizes (expand horizontally)
             entry_height = max(30, int(margin_size * 1.0))
-            entry.setFixedSize(entry_width, entry_height)
+            entry.setMinimumHeight(entry_height)
+            entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             form_layout.addWidget(entry, i, 1)
             entries[label] = entry
 
@@ -733,9 +739,9 @@ class ECGMenu(QGroupBox):
             }}
         """)
         
-        age_width = max(60, int(margin_size * 2))
         age_height = max(30, int(margin_size * 1.0))
-        age_entry.setFixedSize(age_width, age_height)
+        age_entry.setMinimumHeight(age_height)
+        age_entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addWidget(age_entry, 3, 1)
         entries["Age"] = age_entry
 
@@ -815,212 +821,12 @@ class ECGMenu(QGroupBox):
             }}
         """)
         
-        gender_width = max(80, int(margin_size * 2.5))
         gender_height = max(30, int(margin_size * 1.0))
-        gender_menu.setFixedSize(gender_width, gender_height)
+        gender_menu.setMinimumHeight(gender_height)
+        gender_menu.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addWidget(gender_menu, 4, 1)
 
         layout.addWidget(form_frame)
-
-        # Add ECG Graphs Section
-        graphs_title = QLabel("ECG Lead Graphs")
-        graphs_title.setStyleSheet(f"""
-            QLabel {{
-                font: bold {max(14, int(margin_size * 0.5))}pt Arial;
-                color: #ff6600;
-                background: transparent;
-                padding: 10px;
-                margin: 5px 0;
-                border-bottom: 2px solid #ff6600;
-            }}
-        """)
-        layout.addWidget(graphs_title)
-
-        # Create ECG graphs container
-        graphs_frame = QFrame()
-        graphs_frame.setStyleSheet("""
-            QFrame {
-                background: #f8f9fa;
-                border: 2px solid #e0e0e0;
-                border-radius: 10px;
-                padding: 10px;
-                margin: 5px;
-            }
-        """)
-        
-        # Create a scrollable area for the graphs
-        from PyQt5.QtWidgets import QScrollArea
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setMaximumHeight(400)  # Limit height for smaller screens
-        
-        graphs_widget = QWidget()
-        graphs_layout = QGridLayout(graphs_widget)
-        graphs_layout.setSpacing(8)
-        
-        # Get ECG data from parent if available
-        ecg_data = {}
-        if hasattr(self, 'parent_widget') and self.parent_widget:
-            if hasattr(self.parent_widget, 'data'):
-                ecg_data = self.parent_widget.data
-        else:
-            # Try to find ECG data from the current parent
-            current_parent = self.parent()
-            while current_parent:
-                if hasattr(current_parent, 'data') and current_parent.data:
-                    ecg_data = current_parent.data
-                    break
-                current_parent = current_parent.parent()
-        
-        # Create compact ECG graphs (3x4 grid)
-        lead_names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
-        lead_colors = ["#00ff00", "#ff69b4", "#87ceeb", "#ffa500", "#800080", "#ffff00", 
-                      "#ff4500", "#32cd32", "#ff6347", "#9370db", "#00bfff", "#ff1493"]
-        
-        # Store references to graphs for potential updates
-        self.ecg_graphs = {}
-        
-        for idx, (lead, color) in enumerate(zip(lead_names, lead_colors)):
-            row, col = divmod(idx, 4)
-            
-            # Create graph container
-            graph_container = QFrame()
-            graph_container.setStyleSheet(f"""
-                QFrame {{
-                    background: white;
-                    border: 1px solid #ddd;
-                    border-radius: 8px;
-                    padding: 5px;
-                    margin: 2px;
-                }}
-            """)
-            
-            graph_layout = QVBoxLayout(graph_container)
-            graph_layout.setContentsMargins(5, 5, 5, 5)
-            graph_layout.setSpacing(2)
-            
-            # Lead label
-            lead_label = QLabel(lead)
-            lead_label.setStyleSheet(f"""
-                QLabel {{
-                    font: bold {max(10, int(margin_size * 0.3))}pt Arial;
-                    color: {color};
-                    background: transparent;
-                    text-align: center;
-                    padding: 2px;
-                }}
-            """)
-            lead_label.setAlignment(Qt.AlignCenter)
-            graph_layout.addWidget(lead_label)
-            
-            # Create matplotlib figure for ECG
-            try:
-                from matplotlib.figure import Figure
-                from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-                
-                # Responsive figure size
-                fig_width = max(2.5, min(4.0, margin_size * 0.08))
-                fig_height = max(1.5, min(2.5, margin_size * 0.05))
-                
-                fig = Figure(figsize=(fig_width, fig_height), facecolor='white')
-                ax = fig.add_subplot(111)
-                ax.set_facecolor('white')
-                
-                # Remove spines and ticks for cleaner look
-                for spine in ax.spines.values():
-                    spine.set_visible(False)
-                ax.set_xticks([])
-                ax.set_yticks([])
-                
-                # Set y-axis limits
-                ax.set_ylim(-50, 50)
-                
-                # Plot ECG data if available, otherwise show baseline
-                if lead in ecg_data and len(ecg_data[lead]) > 0:
-                    # Use last 500 samples for display
-                    data = ecg_data[lead][-500:] if len(ecg_data[lead]) > 500 else ecg_data[lead]
-                    x = np.arange(len(data))
-                    line, = ax.plot(x, data, color=color, linewidth=1, alpha=0.8)
-                    
-                    # Store reference for updates
-                    self.ecg_graphs[lead] = {
-                        'ax': ax,
-                        'line': line,
-                        'canvas': None
-                    }
-                else:
-                    # Show baseline
-                    x = np.arange(100)
-                    baseline = np.zeros(100)
-                    line, = ax.plot(x, baseline, color=color, linewidth=1, alpha=0.5)
-                    
-                    # Store reference for updates
-                    self.ecg_graphs[lead] = {
-                        'ax': ax,
-                        'line': line,
-                        'canvas': None
-                    }
-                
-                # Add grid
-                ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-                
-                # Create canvas and add to layout
-                canvas = FigureCanvas(fig)
-                canvas.setMaximumSize(200, 120)  # Limit size for responsiveness
-                graph_layout.addWidget(canvas)
-                
-                # Store canvas reference
-                self.ecg_graphs[lead]['canvas'] = canvas
-                
-            except ImportError:
-                # Fallback if matplotlib is not available
-                placeholder = QLabel("Graph")
-                placeholder.setStyleSheet(f"""
-                    QLabel {{
-                        background: #f0f0f0;
-                        border: 1px solid #ccc;
-                        border-radius: 5px;
-                        padding: 20px;
-                        text-align: center;
-                        color: #666;
-                        font-size: 10pt;
-                    }}
-                """)
-                placeholder.setAlignment(Qt.AlignCenter)
-                placeholder.setMinimumSize(150, 80)
-                graph_layout.addWidget(placeholder)
-            
-            graphs_layout.addWidget(graph_container, row, col)
-        
-        scroll_area.setWidget(graphs_widget)
-        graphs_frame_layout = QVBoxLayout(graphs_frame)
-        graphs_frame_layout.addWidget(scroll_area)
-        
-        layout.addWidget(graphs_frame)
-        
-        # Add refresh button for ECG graphs
-        refresh_btn = QPushButton("Refresh Graphs")
-        refresh_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #17a2b8, stop:1 #138496);
-                color: white;
-                border: 2px solid #17a2b8;
-                border-radius: 8px;
-                padding: {max(8, int(margin_size * 0.3))}px;
-                font: bold {max(10, int(margin_size * 0.35))}pt Arial;
-                min-height: {max(30, int(margin_size * 1.0))}px;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #138496, stop:1 #17a2b8);
-                border: 2px solid #138496;
-            }}
-        """)
-        refresh_btn.clicked.connect(self.refresh_ecg_graphs)
-        layout.addWidget(refresh_btn, alignment=Qt.AlignCenter)
 
         # Submit button
         submit_btn = QPushButton("Save ECG")
@@ -1047,7 +853,8 @@ class ECGMenu(QGroupBox):
             }}
         """)
         submit_btn.clicked.connect(lambda: self.submit_ecg_details(entries, gender_menu))
-        layout.addWidget(submit_btn, alignment=Qt.AlignCenter)
+        submit_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(submit_btn)
 
         return widget
 

@@ -70,7 +70,7 @@ class DemoManager:
 
             # Get current wave speed and print it
             current_speed = self.ecg_test_page.settings_manager.get_wave_speed()
-            current_gain = self.ecg_test_page.settings_manager.get_wave_gain()
+            # current_gain removed from recent changes
 
             print("🟢 Demo mode ON - Starting demo data...")
             
@@ -90,8 +90,31 @@ class DemoManager:
     
     def start_demo_data(self):
         """Start reading real ECG data from dummycsv.csv file with wave speed control"""
-        # Path to dummy.csv file - fix the path
-        csv_path = os.path.join(os.path.dirname(__file__), 'dummycsv.csv')
+        # Resolve dummycsv.csv from common locations
+        ecg_dir = os.path.dirname(__file__)
+        src_dir = os.path.abspath(os.path.join(ecg_dir, '..'))
+        project_root = os.path.abspath(os.path.join(src_dir, '..'))
+        candidates = [
+            os.path.join(ecg_dir, 'dummycsv.csv'),                    # src/ecg/dummycsv.csv
+            os.path.join(project_root, 'dummycsv.csv'),               # project_root/dummycsv.csv
+            os.path.abspath('dummycsv.csv')                           # cwd/dummycsv.csv
+        ]
+        csv_path = None
+        for p in candidates:
+            if os.path.exists(p):
+                csv_path = p
+                break
+        if not csv_path:
+            msg = (
+                "dummycsv.csv not found. Place it in one of these locations:\n"
+                f"- {os.path.join(ecg_dir, 'dummycsv.csv')}\n"
+                f"- {os.path.join(project_root, 'dummycsv.csv')}\n"
+                f"- {os.path.abspath('dummycsv.csv')}"
+            )
+            QMessageBox.warning(self.ecg_test_page, "Demo file missing", msg)
+            # Don't start demo if CSV is missing
+            self.ecg_test_page.demo_toggle.setChecked(False)
+            return
         
         try:
             # Read the CSV file
@@ -161,7 +184,7 @@ class DemoManager:
             
         except Exception as e:
             print(f"❌ Error reading dummycsv.csv: {e}")
-            QMessageBox.warning(self.ecg_test_page, "Error", f"Failed to load dummycsv.csv: {str(e)}") 
+            QMessageBox.warning(self.ecg_test_page, "Error", f"Failed to load dummycsv.csv: {str(e)}")
             # Don't start demo if CSV reading fails
             self.ecg_test_page.demo_toggle.setChecked(False)
 
@@ -179,11 +202,12 @@ class DemoManager:
             if i < len(self.ecg_test_page.data_lines) and i < len(self.ecg_test_page.data):
                 lead_data = self.ecg_test_page.data[i]
 
-                # Center baseline
+                # Center baseline and apply gain 5/10/20
                 centered = lead_data - np.mean(lead_data)
-
-                # Apply gain
-                gain = self.ecg_test_page.settings_manager.get_wave_gain() / 10.0
+                try:
+                    gain = float(self.ecg_test_page.settings_manager.get_wave_gain()) / 10.0
+                except Exception:
+                    gain = 1.0
                 centered *= gain
 
                 # Wave speed → horizontal time scaling
@@ -213,6 +237,69 @@ class DemoManager:
         # Calculate intervals for dashboard in demo mode
         if hasattr(self.ecg_test_page, 'dashboard_callback') and self.ecg_test_page.dashboard_callback:
             self._calculate_demo_intervals()
+
+    def start_synthetic_demo(self):
+        """Stream synthetic ECG-like waves when CSV is unavailable."""
+        # Initialize buffers
+        for i in range(len(self.ecg_test_page.data)):
+            self.ecg_test_page.data[i] = np.zeros(self.ecg_test_page.buffer_size)
+
+        # Parameters
+        try:
+            fs = 250.0
+            hr_bpm = 72.0
+            rr = 60.0 / hr_bpm
+            two_pi = 2.0 * np.pi
+            gain = 1.0
+            # Update speed settings
+            self._update_wave_speed_settings()
+        except Exception:
+            fs = 250.0
+            rr = 0.8
+            gain = 1.0
+
+        # Background thread to stream samples
+        running_flag = True
+
+        def stream():
+            t = 0.0
+            dt = 1.0 / fs
+            while self.ecg_test_page.demo_toggle.isChecked():
+                # Simple synthetic lead II heartbeat shape using summed gaussians
+                # Base heartbeat
+                phase = (t % rr) / rr
+                # Construct a crude P-QRS-T morphology
+                p = 0.1 * np.exp(-((phase - 0.2) ** 2) / 0.0008)
+                q = -0.25 * np.exp(-((phase - 0.35) ** 2) / 0.0002)
+                r = 1.0 * np.exp(-((phase - 0.375) ** 2) / 0.00005)
+                s = -0.35 * np.exp(-((phase - 0.40) ** 2) / 0.0001)
+                t_w = 0.3 * np.exp(-((phase - 0.6) ** 2) / 0.003)
+                sample = (p + q + r + s + t_w) * 1000.0 * gain
+
+                # Add a tiny noise
+                sample += np.random.normal(0, 5)
+
+                # Update all leads with simple variations
+                for li in range(len(self.ecg_test_page.data)):
+                    val = sample * (0.8 + 0.4 * np.sin(two_pi * (li + 1) * 0.03 * t))
+                    self.ecg_test_page.data[li] = np.roll(self.ecg_test_page.data[li], -1)
+                    self.ecg_test_page.data[li][-1] = val
+
+                # Respect wave speed for visual pacing
+                delay = (1.0 / fs) / max(0.5, self.speed_multiplier)
+                time.sleep(delay)
+                t += dt
+
+        self.demo_thread = threading.Thread(target=stream, daemon=True)
+        self.demo_thread.start()
+
+        # Timer to draw plots
+        self.demo_timer = QTimer()
+        self.demo_timer.timeout.connect(self.update_demo_plots)
+        base_interval = 20  # ms
+        timer_interval = int(base_interval / max(0.5, self.speed_multiplier))
+        self.demo_timer.start(max(10, timer_interval))
+        print("🚀 Synthetic demo started (CSV missing)")
     
     def _calculate_demo_intervals(self):
         """Calculate ECG intervals for dashboard display in demo mode"""

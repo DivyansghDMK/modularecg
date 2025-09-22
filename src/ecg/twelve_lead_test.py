@@ -2038,10 +2038,19 @@ class ECGTestPage(QWidget):
         port_combo = QComboBox()
         port_combo.addItem("Select Port")
         
-        # Get available ports
-        ports = serial.tools.list_ports.comports()
-        for port in ports:
-            port_combo.addItem(port.device)
+        # Get available ports with better detection
+        try:
+            ports = serial.tools.list_ports.comports()
+            if not ports:
+                port_combo.addItem("No ports found")
+                print("⚠️ No serial ports detected")
+            else:
+                for port in ports:
+                    port_combo.addItem(port.device)
+                print(f"🔍 Found {len(ports)} serial ports for selection")
+        except Exception as e:
+            port_combo.addItem("Error detecting ports")
+            print(f"❌ Error detecting ports: {e}")
         
         # Set current port if available
         current_port = self.settings_manager.get_serial_port()
@@ -2071,6 +2080,11 @@ class ECGTestPage(QWidget):
         
         baud_layout.addWidget(baud_combo)
         layout.addLayout(baud_layout)
+        
+        # Refresh ports button
+        refresh_btn = QPushButton("🔄 Refresh Ports")
+        refresh_btn.clicked.connect(lambda: self.refresh_port_combo(port_combo))
+        layout.addWidget(refresh_btn)
         
         # Test connection button
         test_btn = QPushButton("Test Connection")
@@ -2102,6 +2116,26 @@ class ECGTestPage(QWidget):
                     f"Port configuration saved:\nPort: {selected_port}\nBaud Rate: {selected_baud}")
             else:
                 QMessageBox.warning(self, "Invalid Selection", "Please select a valid COM port.")
+
+    def refresh_port_combo(self, port_combo):
+        """Refresh the port combo box with currently available ports"""
+        port_combo.clear()
+        port_combo.addItem("Select Port")
+        
+        try:
+            ports = serial.tools.list_ports.comports()
+            if not ports:
+                port_combo.addItem("No ports found")
+                QMessageBox.information(self, "Port Refresh", "No serial ports detected.")
+            else:
+                for port in ports:
+                    port_combo.addItem(port.device)
+                QMessageBox.information(self, "Port Refresh", 
+                    f"Found {len(ports)} serial ports:\n" + 
+                    "\n".join([port.device for port in ports]))
+        except Exception as e:
+            port_combo.addItem("Error detecting ports")
+            QMessageBox.warning(self, "Port Refresh Error", f"Error detecting ports: {str(e)}")
 
     def test_serial_connection(self, port, baud_rate):
         """Test the serial connection with the specified port and baud rate"""
@@ -2350,9 +2384,9 @@ class ECGTestPage(QWidget):
         canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(canvas)
         # Create metric labels for cards
-        pr_label = QLabel("-- ms")
-        qrs_label = QLabel("-- ms")
-        qtc_label = QLabel("-- ms")
+        pr_label = QLabel("0 ms")
+        qrs_label = QLabel("0 ms")
+        qtc_label = QLabel("0 ms")
         arrhythmia_label = QLabel("--")
         # Add metrics card row below the plot (card style)
         metrics_row = QHBoxLayout()
@@ -2514,17 +2548,17 @@ class ECGTestPage(QWidget):
                     if isinstance(pr_interval, (int, float)):
                         pr_label.setText(f"{int(round(pr_interval))} ms")
                     else:
-                        pr_label.setText("-- ms")
+                        pr_label.setText("0 ms")
 
                     if isinstance(qrs_duration, (int, float)):
                         qrs_label.setText(f"{int(round(qrs_duration))} ms")
                     else:
-                        qrs_label.setText("-- ms")
+                        qrs_label.setText("0 ms")
 
                     if isinstance(qtc_interval, (int, float)) and qtc_interval >= 0:
                         qtc_label.setText(f"{int(round(qtc_interval))} ms")
                     else:
-                        qtc_label.setText("-- ms")
+                        qtc_label.setText("0 ms")
                     
                     # Calculate QRS axis using Lead I and aVF
                     lead_I = self.data[0] if len(self.data) > 0 else []  # Lead I (index 0)
@@ -2552,14 +2586,14 @@ class ECGTestPage(QWidget):
                     pr_label.setText("-- ms")
                     qrs_label.setText("-- ms")
                     qtc_label.setText("-- ms")
-                    arrhythmia_label.setText("--")
+                    arrhythmia_label.setText("0")
             else:
                 line.set_data([], [])
                 ax.set_xlim(0, 1)
                 ax.set_ylim(-500, 500)
-                pr_label.setText("-- ms")
-                qrs_label.setText("-- ms")
-                qtc_label.setText("-- ms")
+                pr_label.setText("0 ms")
+                qrs_label.setText("0 ms")
+                qtc_label.setText("0 ms")
             canvas.draw_idle()
         self._detailed_timer.timeout.connect(update_detailed_plot)
         self._detailed_timer.start(100)
@@ -2568,9 +2602,19 @@ class ECGTestPage(QWidget):
     def refresh_ports(self):
         self.port_combo.clear()
         self.port_combo.addItem("Select Port")
-        ports = serial.tools.list_ports.comports()
-        for port in ports:
-            self.port_combo.addItem(port.device)
+        
+        try:
+            ports = serial.tools.list_ports.comports()
+            if not ports:
+                self.port_combo.addItem("No ports found")
+                print("⚠️ No serial ports detected during refresh")
+            else:
+                for port in ports:
+                    self.port_combo.addItem(port.device)
+                print(f"🔄 Refreshed: Found {len(ports)} serial ports")
+        except Exception as e:
+            self.port_combo.addItem("Error detecting ports")
+            print(f"❌ Error refreshing ports: {e}")
 
     def update_lead_layout(self):
         old_layout = self.plot_area.layout()
@@ -2852,6 +2896,49 @@ class ECGTestPage(QWidget):
             print(f"Real-time smoothing error: {e}")
             return new_value
 
+    # ---------------------- Serial Port Auto-Detection ----------------------
+
+    def get_available_serial_ports(self):
+        """Get list of available serial ports"""
+        if not SERIAL_AVAILABLE:
+            return []
+        
+        ports = []
+        try:
+            # Get all available ports
+            available_ports = serial.tools.list_ports.comports()
+            for port_info in available_ports:
+                ports.append(port_info.device)
+            print(f"🔍 Found {len(ports)} available serial ports: {ports}")
+        except Exception as e:
+            print(f"❌ Error detecting serial ports: {e}")
+        
+        return ports
+
+    def auto_detect_serial_port(self):
+        """Automatically detect and set the best available serial port"""
+        available_ports = self.get_available_serial_ports()
+        
+        if not available_ports:
+            return None, "No serial ports found"
+        
+        # Look for common ECG device patterns
+        preferred_patterns = ['usbserial', 'usbmodem', 'ttyUSB', 'ttyACM']
+        
+        for pattern in preferred_patterns:
+            for port in available_ports:
+                if pattern in port.lower():
+                    print(f"🎯 Auto-detected ECG device port: {port}")
+                    return port, f"Auto-detected: {port}"
+        
+        # If no preferred pattern found, use the first available port
+        if available_ports:
+            port = available_ports[0]
+            print(f"🎯 Using first available port: {port}")
+            return port, f"Using first available: {port}"
+        
+        return None, "No suitable ports found"
+
     # ---------------------- Start Button Functionality ----------------------
 
     def start_acquisition(self):
@@ -2886,8 +2973,52 @@ class ECGTestPage(QWidget):
                 self.serial_reader.close()
             
             print(f"Connecting to {port} at {baud_int} baud...")
-            self.serial_reader = SerialECGReader(port, baud_int)
-            self.serial_reader.start()
+
+            # Reset visible metrics to zero before starting to avoid stale values
+            try:
+                if hasattr(self, 'metric_labels'):
+                    if 'heart_rate' in self.metric_labels: self.metric_labels['heart_rate'].setText("00")
+                    if 'pr_interval' in self.metric_labels: self.metric_labels['pr_interval'].setText("0")
+                    if 'qrs_duration' in self.metric_labels: self.metric_labels['qrs_duration'].setText("0")
+                    if 'qrs_axis' in self.metric_labels: self.metric_labels['qrs_axis'].setText("0°")
+                    if 'st_interval' in self.metric_labels: self.metric_labels['st_interval'].setText("0")
+                    if 'time_elapsed' in self.metric_labels: self.metric_labels['time_elapsed'].setText("00:00")
+                    if 'sampling_rate' in self.metric_labels: self.metric_labels['sampling_rate'].setText("0 Hz")
+            except Exception as _:
+                pass
+            
+            try:
+                self.serial_reader = SerialECGReader(port, baud_int)
+                self.serial_reader.start()
+                print("✅ Serial connection established successfully!")
+                
+            except Exception as e:
+                print(f"❌ Failed to connect to configured port {port}: {e}")
+                
+                # Try auto-detection
+                auto_port, auto_msg = self.auto_detect_serial_port()
+                if auto_port:
+                    print(f"🔄 Trying auto-detected port: {auto_port}")
+                    try:
+                        self.serial_reader = SerialECGReader(auto_port, baud_int)
+                        self.serial_reader.start()
+                        
+                        # Update settings with the working port
+                        self.settings_manager.set_serial_port(auto_port)
+                        print(f"✅ Connected to auto-detected port: {auto_port}")
+                        
+                        # Show info to user
+                        QMessageBox.information(self, "Port Auto-Detected", 
+                            f"Could not connect to configured port {port}.\n\n"
+                            f"Successfully connected to: {auto_port}\n"
+                            f"This port has been saved to your settings.")
+                        
+                    except Exception as e2:
+                        print(f"❌ Auto-detection also failed: {e2}")
+                        raise e2
+                else:
+                    raise e
+            
             print(f"[DEBUG] ECGTestPage - Starting timer with 50ms interval")
             self.timer.start(50)
             if hasattr(self, '_12to1_timer'):
@@ -2901,11 +3032,9 @@ class ECGTestPage(QWidget):
             # Start elapsed time tracking
             self.start_time = time.time()
             self.elapsed_timer.start(1000)
-                
-            print("Serial connection established successfully!")
             
         except Exception as e:
-            error_msg = f"Failed to connect to {port} at {baud} baud: {str(e)}"
+            error_msg = f"Failed to connect to any serial port: {str(e)}"
             print(error_msg)
             self.show_connection_warning(error_msg)
 
@@ -4244,30 +4373,49 @@ class ECGTestPage(QWidget):
     def update_plots(self):
         """Update all ECG plots with current data using PyQtGraph (GitHub version)"""
         if not self.serial_reader or not self.serial_reader.running:
-            # For demo mode, just update the plots
-            if i < len(self.data_lines):
-                raw = np.asarray(self.data[i])
-
-                # Center and gain (keep your existing logic if already applied elsewhere)
-                centered = raw - np.nanmean(raw)
-                gain = self.settings_manager.get_wave_gain() / 10.0
-                centered = centered * gain
-
-                # Wave speed → horizontal time scaling
+            # For demo mode, just update the plots based on wave speed setting
+            try:
                 wave_speed = float(self.settings_manager.get_wave_speed())
-                display_len = 1000
-                scale = max(0.4, min(2.5, 25.0 / max(1e-6, wave_speed)))
-                window_len = max(10, int(display_len * scale))
-                src = centered[-window_len:]
-                if src.size < 2:
-                    resampled = np.zeros(display_len)
-                else:
-                    x_src = np.linspace(0, 1, src.size)
-                    x_dst = np.linspace(0, 1, display_len)
-                    resampled = np.interp(x_dst, x_src, src)
+            except Exception:
+                wave_speed = 25.0
 
-                self.data_lines[i].setData(resampled)
-                self.update_plot_y_range(i)
+            # Base time window at 25 mm/s (e.g., 10 seconds) for display
+            baseline_seconds = 10.0
+            seconds_scale = (25.0 / max(1e-6, wave_speed))
+            seconds_to_show = baseline_seconds * seconds_scale  # 12.5 => 20s, 50 => 5s
+
+            for i in range(len(self.data_lines)):
+                if i < len(self.data):
+                    raw = np.asarray(self.data[i])
+                    # Apply wave gain scaling: 5/10/20 mm/mV
+                    gain = 1.0
+                    try:
+                        gain = float(self.settings_manager.get_wave_gain()) / 10.0  # 10=>1x, 20=>2x, 5=>0.5x
+                    except Exception:
+                        pass
+                    raw = (raw - np.nanmean(raw)) * gain
+
+                    # Determine window in samples using sampler if available
+                    fs = 500
+                    if hasattr(self, 'sampler') and getattr(self.sampler, 'sampling_rate', None):
+                        try:
+                            fs = float(self.sampler.sampling_rate)
+                        except Exception:
+                            fs = 500
+                    window_len = int(max(50, min(len(raw), seconds_to_show * fs)))
+                    src = raw[-window_len:]
+
+                    # Resample to fixed display length preserving visible time scaling
+                    display_len = self.buffer_size if hasattr(self, 'buffer_size') else 1000
+                    if src.size < 2:
+                        resampled = np.zeros(display_len)
+                    else:
+                        x_src = np.linspace(0.0, 1.0, src.size)
+                        x_dst = np.linspace(0.0, 1.0, display_len)
+                        resampled = np.interp(x_dst, x_src, src)
+
+                    self.data_lines[i].setData(resampled)
+                    self.update_plot_y_range(i)
             return
 
         # Read a batch of data to keep up (from GitHub version)

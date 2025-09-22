@@ -6,7 +6,7 @@ class SettingsManager:
     def __init__(self):
         self.settings_file = "ecg_settings.json"
         self.default_settings = {
-            "wave_speed": "50",  # mm/s
+            "wave_speed": "25",  # mm/s (default)
             "wave_gain": "10",   # mm/mV
             "lead_sequence": "Standard",
             "sampling_mode": "Simultaneous",

@@ -19,6 +19,7 @@ import os
 import json
 import matplotlib.image as mpimg
 from dashboard.chatbot_dialog import ChatbotDialog
+from utils.settings_manager import SettingsManager
 
 # Try to import configuration, fallback to defaults if not available
 try:
@@ -141,6 +142,8 @@ class DashboardHomeWidget(QWidget):
 class Dashboard(QWidget):
     def __init__(self, username=None, role=None):
         super().__init__()
+        # Settings for wave speed/gain
+        self.settings_manager = SettingsManager()
         
         # Set responsive size policy
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -538,13 +541,13 @@ class Dashboard(QWidget):
         # Store metric labels for live update
         self.metric_labels = {}
         metric_info = [
-            ("Heart Rate", "--", "BPM", "heart_rate"),
-            ("PR Intervals", "--", "ms", "pr_interval"),
-            ("QRS Complex", "--", "ms", "qrs_duration"),
-            ("QRS Axis", "--", "", "qrs_axis"),
-            ("ST Interval", "--", "ms", "st_interval"),
-            ("Time Elapsed", "--", "", "time_elapsed"),
-            ("Sampling Rate", "--", "Hz", "sampling_rate"),
+            ("Heart Rate", "00", "BPM", "heart_rate"),
+            ("PR Intervals", "0", "ms", "pr_interval"),
+            ("QRS Complex", "0", "ms", "qrs_duration"),
+            ("QRS Axis", "0°", "", "qrs_axis"),
+            ("ST Interval", "0", "ms", "st_interval"),
+            ("Time Elapsed", "00:00", "", "time_elapsed"),
+            ("Sampling Rate", "0", "Hz", "sampling_rate"),
         ]
         
         for title, value, unit, key in metric_info:
@@ -638,6 +641,21 @@ class Dashboard(QWidget):
     def open_chatbot_dialog(self):
         dlg = ChatbotDialog(self)
         dlg.exec_()
+
+    def is_ecg_active(self):
+        """Return True if demo is ON or serial acquisition is running."""
+        try:
+            if hasattr(self, 'ecg_test_page') and self.ecg_test_page:
+                # Demo mode active?
+                if hasattr(self.ecg_test_page, 'demo_toggle') and self.ecg_test_page.demo_toggle.isChecked():
+                    return True
+                # Serial acquisition running?
+                reader = getattr(self.ecg_test_page, 'serial_reader', None)
+                if reader and getattr(reader, 'running', False):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def calculate_live_ecg_metrics(self, ecg_signal, sampling_rate=500):
         """Calculate live ECG metrics from Lead 2 data - Use EXACT same method as ECG test page"""
@@ -798,6 +816,9 @@ class Dashboard(QWidget):
     def update_dashboard_metrics_live(self, ecg_metrics):
         """Update dashboard metrics with live calculated values"""
         try:
+            # Do not update metrics for first-time users until acquisition/demo starts
+            if not self.is_ecg_active():
+                return
             # Update Heart Rate
             if 'heart_rate' in ecg_metrics:
                 self.metric_labels['heart_rate'].setText(f"{ecg_metrics['heart_rate']} BPM")
@@ -840,21 +861,37 @@ class Dashboard(QWidget):
                 if hasattr(self.ecg_test_page, 'data') and len(self.ecg_test_page.data) > 1:
                     lead_ii_data = self.ecg_test_page.data[1]  # Lead II is at index 1
                     if len(lead_ii_data) > 10:
-                        arr = np.array(lead_ii_data)
-                        # Store original data for calculations
-                        original_data = arr.copy()
-                        
-                        # Process data for display
-                        arr = arr - np.mean(arr)
-                        arr = arr + 1000  # Center vertically
-                        if len(arr) < len(self.ecg_x):
-                            arr = np.pad(arr, (len(self.ecg_x)-len(arr), 0), 'constant', constant_values=(1000,))
-                        self.ecg_line.set_ydata(arr[-len(self.ecg_x):])
+                        original_data = np.array(lead_ii_data)
                         
                         # Get actual sampling rate from ECG test page
                         actual_sampling_rate = 500  # Default
                         if hasattr(self.ecg_test_page, 'sampler') and hasattr(self.ecg_test_page.sampler, 'sampling_rate') and self.ecg_test_page.sampler.sampling_rate:
                             actual_sampling_rate = float(self.ecg_test_page.sampler.sampling_rate)
+
+                        # Determine visible window based on wave speed (display feature only)
+                        try:
+                            wave_speed = float(self.settings_manager.get_wave_speed())  # 12.5 / 25 / 50
+                        except Exception:
+                            wave_speed = 25.0
+                        # Baseline seconds at 25 mm/s
+                        baseline_seconds = 10.0
+                        # Scale time window: 12.5 => 20s, 25 => 10s, 50 => 5s
+                        seconds_to_show = baseline_seconds * (25.0 / max(1e-6, wave_speed))
+                        window_samples = int(max(50, min(len(original_data), seconds_to_show * actual_sampling_rate)))
+
+                        # Slice last window and resample horizontally to fixed display length (no wave gain applied)
+                        src = original_data[-window_samples:]
+                        # Detrend/center for display only
+                        src_centered = src - np.mean(src)
+                        src_centered = src_centered + 1000  # center vertically for this Matplotlib axis
+                        display_len = len(self.ecg_x)
+                        if src_centered.size <= 1:
+                            display_y = np.full(display_len, 1000.0)
+                        else:
+                            x_src = np.linspace(0.0, 1.0, src_centered.size)
+                            x_dst = np.linspace(0.0, 1.0, display_len)
+                            display_y = np.interp(x_dst, x_src, src_centered)
+                        self.ecg_line.set_ydata(display_y)
                         
                         # Calculate and update live ECG metrics using ORIGINAL data with SAME sampling rate
                         ecg_metrics = self.calculate_live_ecg_metrics(original_data, sampling_rate=actual_sampling_rate)
@@ -868,13 +905,7 @@ class Dashboard(QWidget):
         self.ecg_y = np.roll(self.ecg_y, -1)
         self.ecg_y[-1] = 1000 + 200 * np.sin(2 * np.pi * 2 * self.ecg_x[-1] + frame/10) + 50 * np.random.randn()
         self.ecg_line.set_ydata(self.ecg_y)
-        
-        # Create original mock data for calculations (without the +1000 offset)
-        original_mock_data = self.ecg_y - 1000  # Remove the display offset
-        
-        # Calculate and update live ECG metrics for mock data too (use 500 Hz like ECG test page)
-        ecg_metrics = self.calculate_live_ecg_metrics(original_mock_data, sampling_rate=500)
-        self.update_dashboard_metrics_live(ecg_metrics)
+        # Do not compute/update metrics from mock wave; keep zeros until user starts
         
         return [self.ecg_line]
     
@@ -910,6 +941,9 @@ class Dashboard(QWidget):
     def update_dashboard_metrics_from_ecg(self):
         """Update dashboard metrics from ECG test page data"""
         try:
+            # Block updates for first-time users until acquisition/demo starts
+            if not self.is_ecg_active():
+                return
             if hasattr(self, 'ecg_test_page') and self.ecg_test_page:
                 # Get current metrics from ECG test page
                 if hasattr(self.ecg_test_page, 'get_current_metrics'):
