@@ -94,11 +94,21 @@ The application calculates and displays the following metrics in real-time:
 
 ## File Organization
 
-- **Essential Files**: Only the necessary files for the application to run are kept in the root directory
-- **Clutter Folder**: All test files, backups, and temporary files are moved to the `clutter/` folder for organization
-- **Clean Structure**: The codebase is organized with clear separation of concerns
+- **Modular Architecture**: Clean separation of concerns with dedicated modules for core functionality, configuration, and utilities
+- **Core Modules**: Centralized error handling, logging, validation, and configuration management
+- **Clutter Folder**: All unused files, test scripts, and deprecated code moved to `clutter/` directory
+- **Clean Structure**: Organized directory structure with proper Python package hierarchy
+- **Documentation**: Comprehensive documentation including technical specs and project structure
 
 ## Recent Updates
+
+### Codebase Refactoring and Modularization
+- **Modular Architecture**: Complete restructuring with dedicated modules for core functionality, configuration, and utilities
+- **Error Handling**: Comprehensive error handling with custom exception classes and graceful fallbacks
+- **Logging System**: Centralized logging with rotation, performance monitoring, and debug information
+- **Configuration Management**: Centralized configuration system with JSON file support and runtime updates
+- **Data Validation**: Input validation for ECG signals, range checking for metrics, and signal quality assessment
+- **Clean Organization**: Unused files moved to clutter directory, proper Python package structure
 
 ### Medical-Grade ECG Filtering System
 - **Advanced Filtering Pipeline**: Implemented 8-stage filtering system for professional medical device-quality signals

@@ -1,56 +1,114 @@
+"""
+ECG Monitor Application - Main Entry Point
+A comprehensive ECG monitoring application with real-time analysis and visualization.
+"""
+
 import sys
 import os
 import json
 from PyQt5.QtWidgets import (
-    QApplication, QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox, QStackedWidget, QWidget, QInputDialog, QSizePolicy
+    QApplication, QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, 
+    QMessageBox, QStackedWidget, QWidget, QInputDialog, QSizePolicy
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap
-# Import modules with fallback handling
+
+# Import core modules
+try:
+    from core.logging_config import get_logger, log_function_call
+    from core.exceptions import ECGError, ECGConfigError
+    from config.settings import get_config, resource_path
+    from core.constants import SUCCESS_MESSAGES, ERROR_MESSAGES
+    logger_available = True
+except ImportError as e:
+    print(f"⚠️ Core modules not available: {e}")
+    print("💡 Using fallback logging")
+    logger_available = False
+    
+    # Fallback logging
+    class FallbackLogger:
+        def info(self, msg): print(f"INFO: {msg}")
+        def error(self, msg): print(f"ERROR: {msg}")
+        def warning(self, msg): print(f"WARNING: {msg}")
+        def debug(self, msg): print(f"DEBUG: {msg}")
+    
+    def log_function_call(func):
+        return func
+    
+    def get_config():
+        return type('Config', (), {'get': lambda x, y=None: y})()
+    
+    def resource_path(relative_path):
+        if hasattr(sys, '_MEIPASS'):
+            return os.path.join(sys._MEIPASS, relative_path)
+        return os.path.join(os.path.abspath("."), relative_path)
+    
+    SUCCESS_MESSAGES = {"modules_loaded": "✅ Core modules imported successfully"}
+    ERROR_MESSAGES = {"import_error": "❌ Core module import error: {}"}
+
+# Initialize logger
+if logger_available:
+    logger = get_logger("MainApp")
+else:
+    logger = FallbackLogger()
+
+# Import application modules with proper error handling
 try:
     from auth.sign_in import SignIn
     from auth.sign_out import SignOut
     from dashboard.dashboard import Dashboard
     from splash_screen import SplashScreen
-    print("✅ Core modules imported successfully")
+    logger.info(SUCCESS_MESSAGES["modules_loaded"])
 except ImportError as e:
-    print(f"❌ Core module import error: {e}")
-    print("💡 Make sure you're running from the src directory")
-    print("💡 Try: cd src && python main.py")
+    logger.error(ERROR_MESSAGES["import_error"].format(e))
+    logger.error("💡 Make sure you're running from the src directory")
+    logger.error("💡 Try: cd src && python main.py")
     sys.exit(1)
 
 # Import ECG modules with fallback
 try:
     from ecg.pan_tompkins import pan_tompkins
-    print("✅ ECG modules imported successfully")
+    logger.info(SUCCESS_MESSAGES["ecg_modules_loaded"])
 except ImportError as e:
-    print(f"⚠️ ECG module import warning: {e}")
-    print("💡 ECG analysis features may be limited")
+    logger.warning(ERROR_MESSAGES["ecg_import_warning"].format(e))
+    logger.warning("💡 ECG analysis features may be limited")
     # Create a dummy function to prevent errors
     def pan_tompkins(ecg, fs=500):
         return []
 
-
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
-
-
+# Get configuration
+config = get_config()
 USER_DATA_FILE = resource_path("users.json")
 
 
+@log_function_call
 def load_users():
-    if os.path.exists(USER_DATA_FILE):
-        with open(USER_DATA_FILE, "r") as f:
-            return json.load(f)
-    return {}
+    """Load user data from file with error handling"""
+    try:
+        if os.path.exists(USER_DATA_FILE):
+            with open(USER_DATA_FILE, "r") as f:
+                users = json.load(f)
+                logger.info(f"Loaded {len(users)} users from {USER_DATA_FILE}")
+                return users
+        else:
+            logger.info(f"User file {USER_DATA_FILE} not found, creating empty user database")
+            return {}
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error(f"Error loading users: {e}")
+        logger.error("Creating empty user database")
+        return {}
 
 
+@log_function_call
 def save_users(users):
-    with open(USER_DATA_FILE, "w") as f:
-        json.dump(users, f)
+    """Save user data to file with error handling"""
+    try:
+        with open(USER_DATA_FILE, "w") as f:
+            json.dump(users, f, indent=2)
+        logger.info(f"Saved {len(users)} users to {USER_DATA_FILE}")
+    except IOError as e:
+        logger.error(f"Error saving users: {e}")
+        raise ECGError(f"Failed to save user data: {e}")
 
 
 # Login/Register Dialog
@@ -494,22 +552,58 @@ def plot_ecg_with_peaks(ax, ecg_signal, sampling_rate=500, arrhythmia_result=Non
     ax.grid(False)
 
 
+@log_function_call
 def main():
-    app = QApplication(sys.argv)
-    splash = SplashScreen()
-    splash.show()
-    app.processEvents()
-    login = LoginRegisterDialog()
-    splash.finish(login)
-    while True:
-        if login.exec_() == QDialog.Accepted and login.result:
-            dashboard = Dashboard(username=login.username, role=None)
-            dashboard.show()
-            app.exec_()
-            # After dashboard closes (sign out), show login again (reuse dialog)
-            login = LoginRegisterDialog()
-        else:
-            break
+    """Main application entry point with proper error handling"""
+    try:
+        logger.info("Starting ECG Monitor Application")
+        
+        app = QApplication(sys.argv)
+        app.setApplicationName("ECG Monitor")
+        app.setApplicationVersion("1.3")
+        
+        # Show splash screen
+        splash = SplashScreen()
+        splash.show()
+        app.processEvents()
+        
+        # Initialize login dialog
+        login = LoginRegisterDialog()
+        splash.finish(login)
+        
+        # Main application loop
+        while True:
+            try:
+                if login.exec_() == QDialog.Accepted and login.result:
+                    logger.info(f"User {login.username} logged in successfully")
+                    
+                    # Create and show dashboard
+                    dashboard = Dashboard(username=login.username, role=None)
+                    dashboard.show()
+                    
+                    # Run application
+                    app.exec_()
+                    
+                    logger.info(f"User {login.username} logged out")
+                    
+                    # After dashboard closes (sign out), show login again
+                    login = LoginRegisterDialog()
+                else:
+                    logger.info("Application closed by user")
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Error in main application loop: {e}")
+                QMessageBox.critical(None, "Application Error", 
+                                    f"An error occurred: {e}\nThe application will continue.")
+                # Continue with new login dialog
+                login = LoginRegisterDialog()
+                
+    except Exception as e:
+        logger.critical(f"Fatal error in main application: {e}")
+        QMessageBox.critical(None, "Fatal Error", 
+                           f"A fatal error occurred: {e}\nThe application will exit.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
