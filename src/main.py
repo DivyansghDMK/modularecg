@@ -304,13 +304,16 @@ class LoginRegisterDialog(QDialog):
     
     def ensure_background_visible(self):
         """Ensure the background is always visible and properly positioned"""
-        # Make sure the background label is at the bottom of the widget stack
-        self.bg_label.lower()
-        # Ensure it covers the entire window
-        self.bg_label.setGeometry(0, 0, self.width(), self.height())
-        # Make sure it's visible
-        self.bg_label.setVisible(True)
-        print("✅ Background visibility ensured")
+        try:
+            # Make sure the background label is at the bottom of the widget stack
+            self.bg_label.lower()
+            # Ensure it covers the entire window
+            self.bg_label.setGeometry(0, 0, self.width(), self.height())
+            # Make sure it's visible
+            self.bg_label.setVisible(True)
+            logger.info("✅ Background visibility ensured")
+        except Exception as e:
+            logger.warning(f"Background visibility issue: {e}")
 
     def create_login_widget(self):
         widget = QWidget()
@@ -338,14 +341,29 @@ class LoginRegisterDialog(QDialog):
         layout.addWidget(phone_btn)
         # Add nav links under phone_btn
         nav_row = QHBoxLayout()
+        # Navigation modules moved to clutter - using fallback
         try:
+            # Try to import from clutter directory
+            import sys
+            clutter_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'clutter')
+            if clutter_path not in sys.path:
+                sys.path.insert(0, clutter_path)
+            
             from nav_home import NavHome
             from nav_about import NavAbout
             from nav_blog import NavBlog
             from nav_pricing import NavPricing
         except ImportError as e:
-            print(f"❌ Navigation import error: {e}")
-            return
+            logger.warning(f"Navigation modules not available: {e}")
+            # Create fallback navigation classes
+            class NavHome(QWidget):
+                def __init__(self): super().__init__(); self.setWindowTitle("Home")
+            class NavAbout(QWidget):
+                def __init__(self): super().__init__(); self.setWindowTitle("About")
+            class NavBlog(QWidget):
+                def __init__(self): super().__init__(); self.setWindowTitle("Blog")
+            class NavPricing(QWidget):
+                def __init__(self): super().__init__(); self.setWindowTitle("Pricing")
         nav_links = [
             ("Home", NavHome),
             ("About us", NavAbout),
@@ -365,9 +383,13 @@ class LoginRegisterDialog(QDialog):
             self.nav_pages[text] = page
             if text == "Pricing":
                 try:
+                    # Try to import from clutter directory
                     from nav_pricing import show_pricing_dialog
                 except ImportError as e:
-                    print(f"❌ Pricing dialog import error: {e}")
+                    logger.warning(f"Pricing dialog not available: {e}")
+                    # Create fallback pricing dialog
+                    def show_pricing_dialog():
+                        QMessageBox.information(self, "Pricing", "Pricing information not available.")
                     return
                 nav_btn.clicked.connect(lambda checked, p=self: show_pricing_dialog(p))
             else:

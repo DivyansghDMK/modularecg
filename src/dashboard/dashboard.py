@@ -29,7 +29,10 @@ try:
         sys.path.insert(0, src_dir)
     
     try:
-        from dashboard_config import get_background_config
+        from config.settings import get_config
+        config = get_config()
+        def get_background_config():
+            return config.get('ui.background', {"background": "none", "gif": False})
         print("✓ Dashboard configuration loaded successfully")
     except ImportError as e:
         print(f"⚠️ Dashboard config import warning: {e}")
