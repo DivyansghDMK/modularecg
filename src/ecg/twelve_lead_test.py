@@ -2,8 +2,21 @@ import sys
 import time
 import numpy as np
 from pyparsing import line
-import serial
-import serial.tools.list_ports
+try:
+    import serial
+    import serial.tools.list_ports
+    SERIAL_AVAILABLE = True
+except ImportError:
+    print("⚠️ Serial module not available - ECG hardware features disabled")
+    SERIAL_AVAILABLE = False
+    # Create dummy serial classes
+    class Serial:
+        def __init__(self, *args, **kwargs): pass
+        def close(self): pass
+        def readline(self): return b''
+    class SerialException(Exception): pass
+    serial = type('Serial', (), {'Serial': Serial, 'SerialException': SerialException})()
+    serial.tools = type('Tools', (), {'list_ports': type('ListPorts', (), {'comports': lambda: []})()})()
 import csv
 import cv2
 from datetime import datetime
@@ -164,6 +177,8 @@ def generate_realistic_ecg_waveform(duration_seconds=10, sampling_rate=500, hear
 
 class SerialECGReader:
     def __init__(self, port, baudrate):
+        if not SERIAL_AVAILABLE:
+            raise ImportError("Serial module not available - cannot create ECG reader")
         self.ser = serial.Serial(port, baudrate, timeout=1)
         self.running = False
         self.data_count = 0
@@ -399,6 +414,8 @@ def detect_arrhythmia(heart_rate, qrs_duration, rr_intervals, pr_interval=None, 
 
 class SerialECGReader:
     def __init__(self, port, baudrate):
+        if not SERIAL_AVAILABLE:
+            raise ImportError("Serial module not available - cannot create ECG reader")
         self.ser = serial.Serial(port, baudrate, timeout=1)
         self.running = False
         self.data_count = 0
