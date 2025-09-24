@@ -623,8 +623,16 @@ class Dashboard(QWidget):
         # --- ECG Animation Setup ---
         self.ecg_x = np.linspace(0, 2, 500)
         self.ecg_y = 1000 + 200 * np.sin(2 * np.pi * 2 * self.ecg_x) + 50 * np.random.randn(500)
-        self.ecg_line, = self.ecg_canvas.axes.plot(self.ecg_x, self.ecg_y, color="#ff6600", linewidth=0.5)
-        self.anim = FuncAnimation(self.ecg_canvas.figure, self.update_ecg, interval=50, blit=True)
+        self.ecg_line, = self.ecg_canvas.axes.plot(self.ecg_x, self.ecg_y, color="#ff6600", linewidth=0.5, antialiased=False)
+        # Reduce CPU/GPU usage: lower refresh rate slightly and disable frame caching
+        self.anim = FuncAnimation(
+            self.ecg_canvas.figure,
+            self.update_ecg,
+            interval=85,              # ~12 FPS for smoothness without lag
+            blit=True,
+            cache_frame_data=False,   # prevent unbounded cache growth
+            save_count=100
+        )
         
         # --- Dashboard Metrics Update Timer ---
         self.metrics_timer = QTimer(self)
