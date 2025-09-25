@@ -11,30 +11,45 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QMessageBox, QProgressBar, QGroupBox
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QMessageBox, QProgressBar, QGroupBox, QLineEdit, QFormLayout
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 
 
 def _load_env_if_present():
-    """Lightweight .env loader: loads KEY=VALUE pairs into os.environ if .env exists."""
+    """Lightweight .env loader: loads KEY=VALUE pairs into os.environ if .env exists.
+    Searches multiple locations to support clones and packaged executables."""
     try:
-        # Look for .env in project root (two levels up from this file: src/utils/.. -> project root)
+        locations = []
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
-        env_path = os.path.join(project_root, ".env")
-        if os.path.exists(env_path):
-            with open(env_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    if '=' in line:
-                        key, value = line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip().strip('"').strip("'")
-                        if key and value and key not in os.environ:
-                            os.environ[key] = value
+        locations.append(os.path.join(project_root, ".env"))
+        # Current working directory
+        locations.append(os.path.join(os.getcwd(), ".env"))
+        # Frozen app directory (PyInstaller)
+        if getattr(sys, 'frozen', False):
+            app_dir = os.path.dirname(sys.executable)
+            locations.append(os.path.join(app_dir, ".env"))
+        # User config dir
+        home_env = os.path.join(os.path.expanduser("~"), ".ecg_monitor", ".env")
+        locations.append(home_env)
+
+        for env_path in locations:
+            if os.path.exists(env_path):
+                try:
+                    with open(env_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line or line.startswith('#'):
+                                continue
+                            if '=' in line:
+                                key, value = line.split('=', 1)
+                                key = key.strip()
+                                value = value.strip().strip('"').strip("'")
+                                if key and value and key not in os.environ:
+                                    os.environ[key] = value
+                except Exception:
+                    continue
     except Exception:
         # Silent fallback; environment variables may already be provided by OS
         pass
@@ -58,14 +73,7 @@ class CrashLogger:
         
         # Load .env if present, then read email configuration from environment
         _load_env_if_present()
-        self.email_config = {
-            'smtp_server': os.getenv('EMAIL_SMTP_SERVER', 'smtp.gmail.com'),
-            'smtp_port': int(os.getenv('EMAIL_SMTP_PORT', '587')),
-            'sender_email': os.getenv('EMAIL_SENDER', ''),
-            'sender_password': os.getenv('EMAIL_PASSWORD', ''),
-            'recipient_email': os.getenv('EMAIL_RECIPIENT', ''),
-            'subject_prefix': os.getenv('EMAIL_SUBJECT_PREFIX', f'[{app_name}] Crash Report')
-        }
+        self.email_config = self._load_email_config_from_env(app_name)
         
         # Validate email configuration
         self.email_configured = self._validate_email_config()
@@ -95,17 +103,58 @@ class CrashLogger:
             self.log_warning("To enable email reporting, create a .env file with email credentials. See email_config_template.txt for instructions.", "EMAIL_CONFIG")
             return False
         
-        # Check if .env file exists
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
-        env_path = os.path.join(project_root, ".env")
-        
-        if not os.path.exists(env_path):
-            self.log_warning("No .env file found. Email reporting disabled. Copy email_config_template.txt to .env and configure your email settings.", "EMAIL_CONFIG")
+        # Accept config from .env in multiple locations or from user config json
+        configured = any([
+            os.getenv('EMAIL_SENDER'),
+            self._get_user_email_config() is not None
+        ])
+        if not configured:
+            self.log_warning("No email configuration found. You can either create a .env or use the in-app Configure Email button.", "EMAIL_CONFIG")
             return False
         
         self.log_info("Email configuration validated successfully", "EMAIL_CONFIG")
         return True
+
+    def _get_user_config_dir(self):
+        base = os.path.join(os.path.expanduser('~'), '.ecg_monitor')
+        try:
+            os.makedirs(base, exist_ok=True)
+        except Exception:
+            pass
+        return base
+
+    def _get_user_email_config(self):
+        """Load per-user email config from ~/.ecg_monitor/email_config.json if present."""
+        try:
+            cfg_path = os.path.join(self._get_user_config_dir(), 'email_config.json')
+            if os.path.exists(cfg_path):
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            return None
+        return None
+
+    def _load_email_config_from_env(self, app_name):
+        """Load email config using environment variables first, then fall back to per-user json."""
+        cfg = {
+            'smtp_server': os.getenv('EMAIL_SMTP_SERVER', 'smtp.gmail.com'),
+            'smtp_port': int(os.getenv('EMAIL_SMTP_PORT', '587')),
+            'sender_email': os.getenv('EMAIL_SENDER', ''),
+            'sender_password': os.getenv('EMAIL_PASSWORD', ''),
+            'recipient_email': os.getenv('EMAIL_RECIPIENT', ''),
+            'subject_prefix': os.getenv('EMAIL_SUBJECT_PREFIX', f'[{app_name}] Crash Report')
+        }
+        # If missing, try user json
+        if not cfg['sender_email'] or not cfg['sender_password']:
+            user_cfg = self._get_user_email_config()
+            if isinstance(user_cfg, dict):
+                cfg['smtp_server'] = user_cfg.get('smtp_server', cfg['smtp_server'])
+                cfg['smtp_port'] = int(user_cfg.get('smtp_port', cfg['smtp_port']))
+                cfg['sender_email'] = user_cfg.get('sender_email', cfg['sender_email'])
+                cfg['sender_password'] = user_cfg.get('sender_password', cfg['sender_password'])
+                cfg['recipient_email'] = user_cfg.get('recipient_email', cfg['recipient_email'])
+                cfg['subject_prefix'] = user_cfg.get('subject_prefix', cfg['subject_prefix'])
+        return cfg
     
     def setup_logging(self):
         """Setup comprehensive logging"""
@@ -602,6 +651,12 @@ class CrashLogDialog(QDialog):
                 border-radius: 6px;
             }
         """)
+        
+        # Add quick configure button when not configured
+        if not self.crash_logger.email_configured:
+            self.configure_btn = QPushButton("⚙️ Configure Email…")
+            self.configure_btn.clicked.connect(self.open_email_config_dialog)
+            layout.addWidget(self.configure_btn)
     
     def update_stats(self):
         """Update session statistics"""
@@ -736,6 +791,59 @@ class CrashLogDialog(QDialog):
                 self.load_logs()
             else:
                 QMessageBox.critical(self, "Error", "Failed to clear logs.")
+
+    def open_email_config_dialog(self):
+        """Simple inline dialog to capture email settings and save to user config."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Configure Email Reporting")
+        form = QFormLayout()
+        sender = QLineEdit(self.crash_logger.email_config.get('sender_email', ''))
+        password = QLineEdit(self.crash_logger.email_config.get('sender_password', ''))
+        password.setEchoMode(QLineEdit.Password)
+        recipient = QLineEdit(self.crash_logger.email_config.get('recipient_email', ''))
+        smtp = QLineEdit(self.crash_logger.email_config.get('smtp_server', 'smtp.gmail.com'))
+        port = QLineEdit(str(self.crash_logger.email_config.get('smtp_port', 587)))
+        form.addRow("Sender Email", sender)
+        form.addRow("App Password", password)
+        form.addRow("Recipient Email", recipient)
+        form.addRow("SMTP Server", smtp)
+        form.addRow("SMTP Port", port)
+        btns = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        btns.addWidget(save_btn)
+        btns.addWidget(cancel_btn)
+        wrapper = QVBoxLayout()
+        wrapper.addLayout(form)
+        wrapper.addLayout(btns)
+        dlg.setLayout(wrapper)
+
+        def do_save():
+            try:
+                cfg_dir = self.crash_logger._get_user_config_dir()
+                path = os.path.join(cfg_dir, 'email_config.json')
+                data = {
+                    'smtp_server': smtp.text().strip() or 'smtp.gmail.com',
+                    'smtp_port': int(port.text().strip() or '587'),
+                    'sender_email': sender.text().strip(),
+                    'sender_password': password.text().strip(),
+                    'recipient_email': recipient.text().strip(),
+                    'subject_prefix': self.crash_logger.email_config.get('subject_prefix', '[ECG Monitor] Crash Report')
+                }
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
+                # Reload config
+                self.crash_logger.email_config = self.crash_logger._load_email_config_from_env(self.crash_logger.app_name if hasattr(self.crash_logger, 'app_name') else 'ECG Monitor')
+                self.crash_logger.email_configured = self.crash_logger._validate_email_config()
+                self.update_email_status()
+                QMessageBox.information(self, "Saved", "Email configuration saved for this user.")
+                dlg.accept()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save: {e}")
+
+        save_btn.clicked.connect(do_save)
+        cancel_btn.clicked.connect(dlg.reject)
+        dlg.exec_()
 
 
 # Global crash logger instance
