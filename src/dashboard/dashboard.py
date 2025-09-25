@@ -1640,7 +1640,7 @@ class Dashboard(QWidget):
     def toggle_medical_mode(self):
         self.medical_mode = not self.medical_mode
         if self.medical_mode:
-            # Medical color coding: blue/green/white
+            # Medical color coding: blue/green/white (previous behavior)
             self.setStyleSheet("QWidget { background: #e3f6fd; } QFrame { background: #f8fdff; border-radius: 16px; } QLabel { color: #006266; }")
             self.medical_btn.setText("Normal Mode")
             self.medical_btn.setStyleSheet("background: #0984e3; color: white; border-radius: 10px; padding: 4px 18px;")

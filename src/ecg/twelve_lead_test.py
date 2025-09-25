@@ -1844,11 +1844,11 @@ class ECGTestPage(QWidget):
         
         # Updated metric info to match the image design with consistent color coding
         metric_info = [
-            ("PR Intervals (ms)", "0", "pr_interval", "#4ecdc4"),  # Teal for PR
-            ("QRS Complex (ms)", "0", "qrs_duration", "#45b7d1"),  # Blue for QRS
-            ("QRS Axis", "0°", "qrs_axis", "#96ceb4"),  # Green for axis
-            ("ST Interval", "0", "st_interval", "#feca57"),  # Yellow for ST
-            ("Time Elapsed", "00:00", "time_elapsed", "#ffffff"),  # White for time
+            ("PR", "0", "pr_interval", "#4ecdc4"),
+            ("QRS", "0", "qrs_duration", "#45b7d1"),
+            ("Axis", "0°", "qrs_axis", "#96ceb4"),
+            ("ST", "0", "st_interval", "#feca57"),
+            ("Time", "00:00", "time_elapsed", "#ffffff"),
         ]
         
         for title, value, key, color in metric_info:
@@ -1870,13 +1870,13 @@ class ECGTestPage(QWidget):
             
             # Title label with consistent color coding - Make it smaller
             lbl = QLabel(title)
-            lbl.setFont(QFont("Arial", 10, QFont.Bold))  # Reduced from 12px
+            lbl.setFont(QFont("Arial", 10, QFont.Bold))
             lbl.setStyleSheet(f"color: {color}; margin-bottom: 3px; font-weight: bold;")  # Use same color as value
             lbl.setAlignment(Qt.AlignCenter)
             
             # Value label with specific colors - Make it smaller
             val = QLabel(value)
-            val.setFont(QFont("Arial", 12, QFont.Bold))  # Reduced from 14px
+            val.setFont(QFont("Arial", 18, QFont.Bold))
             val.setStyleSheet(f"color: {color}; background: transparent; padding: 2px 0px;")  # Reduced from 4px
             val.setAlignment(Qt.AlignCenter)
             
