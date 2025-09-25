@@ -14,6 +14,7 @@ A comprehensive ECG monitoring application with 12-lead ECG analysis, real-time 
 - **PDF Report Generation**: Generate comprehensive ECG reports
 - **Recent Reports Panel**: In-app list of the last 10 generated PDF reports with Open action
 - **Dual Save Reports**: When generating a report, it saves to your chosen location (e.g., Downloads) and a managed copy is stored in `reports/` for history
+- **Crash Logger & Email Reporting**: Hidden diagnostic system accessible via triple-click on heart rate metric
 - **Background GIF Support**: Animated background on sign-in screen
 - **Real-time Data Processing**: Live ECG data acquisition and processing from hardware
 
@@ -43,6 +44,42 @@ modularecg/
    ```bash
    pip install -r requirements.txt
    ```
+3. **Configure Email Reporting (Optional)**:
+   - Copy `email_config_template.txt` to `.env`
+   - Edit `.env` with your Gmail credentials
+   - Generate a Gmail App Password for security
+   - See `email_config_template.txt` for detailed instructions
+
+## Crash Logger & Email Reporting
+
+The application includes a hidden diagnostic system for troubleshooting and crash reporting:
+
+### Accessing the Crash Logger
+- **Triple-click** the heart rate metric on the dashboard
+- A diagnostic dialog will open showing:
+  - Session statistics (duration, errors, crashes, memory usage)
+  - Email configuration status
+  - Crash logs and error reports
+  - Options to send reports via email or clear logs
+
+### Email Configuration
+To enable email reporting on other computers:
+
+1. **Copy the template**: `cp email_config_template.txt .env`
+2. **Edit credentials**: Open `.env` and replace placeholder values
+3. **Gmail Setup**:
+   - Enable 2-Factor Authentication on your Google account
+   - Go to Google Account → Security → App passwords
+   - Generate a password for "Mail"
+   - Use this app password (not your regular Gmail password)
+4. **Restart** the application
+
+### Features
+- **Automatic crash detection** and logging
+- **System information** collection
+- **Session statistics** tracking
+- **Email reporting** with detailed diagnostics
+- **Log management** (view, clear, export)
 
 ## Running the Application
 

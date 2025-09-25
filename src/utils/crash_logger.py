@@ -67,6 +67,9 @@ class CrashLogger:
             'subject_prefix': os.getenv('EMAIL_SUBJECT_PREFIX', f'[{app_name}] Crash Report')
         }
         
+        # Validate email configuration
+        self.email_configured = self._validate_email_config()
+        
         # System info
         self.system_info = self._get_system_info()
         
@@ -77,6 +80,32 @@ class CrashLogger:
         
         # Log session start
         self.log_info("Application started", "SESSION_START")
+    
+    def _validate_email_config(self):
+        """Validate email configuration and provide helpful error messages"""
+        required_fields = ['sender_email', 'sender_password', 'recipient_email']
+        missing_fields = []
+        
+        for field in required_fields:
+            if not self.email_config[field]:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            self.log_warning(f"Email configuration incomplete. Missing: {', '.join(missing_fields)}", "EMAIL_CONFIG")
+            self.log_warning("To enable email reporting, create a .env file with email credentials. See email_config_template.txt for instructions.", "EMAIL_CONFIG")
+            return False
+        
+        # Check if .env file exists
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
+        env_path = os.path.join(project_root, ".env")
+        
+        if not os.path.exists(env_path):
+            self.log_warning("No .env file found. Email reporting disabled. Copy email_config_template.txt to .env and configure your email settings.", "EMAIL_CONFIG")
+            return False
+        
+        self.log_info("Email configuration validated successfully", "EMAIL_CONFIG")
+        return True
     
     def setup_logging(self):
         """Setup comprehensive logging"""
@@ -350,6 +379,11 @@ class EmailSenderThread(QThread):
     
     def run(self):
         try:
+            # Check email configuration first
+            if not self.crash_logger.email_configured:
+                self.finished.emit(False, "Email not configured. Please set up .env file with email credentials.")
+                return
+            
             self.progress.emit(10)
             
             # Create comprehensive email
@@ -463,11 +497,17 @@ class CrashLogDialog(QDialog):
         
         # Stats group
         stats_group = QGroupBox("Session Statistics")
-        stats_layout = QHBoxLayout()
+        stats_layout = QVBoxLayout()
         
         self.stats_label = QLabel()
         self.update_stats()
         stats_layout.addWidget(self.stats_label)
+        
+        # Email status
+        self.email_status_label = QLabel()
+        self.update_email_status()
+        stats_layout.addWidget(self.email_status_label)
+        
         stats_group.setLayout(stats_layout)
         layout.addWidget(stats_group)
         
@@ -574,6 +614,18 @@ class CrashLogDialog(QDialog):
         """
         self.stats_label.setText(stats_text)
     
+    def update_email_status(self):
+        """Update email configuration status"""
+        if self.crash_logger.email_configured:
+            status_text = "📧 Email Reporting: ✅ Configured"
+            status_color = "color: #27ae60;"  # Green
+        else:
+            status_text = "📧 Email Reporting: ❌ Not Configured\n(See email_config_template.txt for setup instructions)"
+            status_color = "color: #e74c3c;"  # Red
+        
+        self.email_status_label.setText(status_text)
+        self.email_status_label.setStyleSheet(status_color)
+    
     def load_logs(self):
         """Load and display crash logs"""
         try:
@@ -612,6 +664,21 @@ class CrashLogDialog(QDialog):
     
     def send_email_report(self):
         """Send email report with all logs"""
+        # Check if email is configured
+        if not self.crash_logger.email_configured:
+            QMessageBox.warning(
+                self,
+                "Email Not Configured",
+                "Email reporting is not configured on this computer.\n\n"
+                "To enable email reporting:\n"
+                "1. Copy 'email_config_template.txt' to '.env'\n"
+                "2. Edit .env with your Gmail credentials\n"
+                "3. Generate a Gmail App Password\n"
+                "4. Restart the application\n\n"
+                "See email_config_template.txt for detailed instructions."
+            )
+            return
+        
         logs = self.crash_logger.get_all_logs()
         
         # Allow sending diagnostics even if there are no logs
