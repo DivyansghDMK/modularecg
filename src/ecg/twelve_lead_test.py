@@ -1308,40 +1308,38 @@ class ECGTestPage(QWidget):
             V6_hw = float(channel_data[5]) if len(channel_data) > 5 else 0   # V6 from hardware
             V1 = float(channel_data[6]) if len(channel_data) > 6 else 0      # V1 from hardware
             V2 = float(channel_data[7]) if len(channel_data) > 7 else 0      # V2 from hardware
-            
+
             # Calculate derived leads using standard ECG formulas with error handling
             I = L1  # Lead I is directly from hardware
-            
+
             # Calculate Lead III from Lead I and Lead II
             try:
                 III = II - I
             except Exception:
                 III = 0
-            
+
             # Calculate augmented leads with safe division
             try:
                 aVR = -(I + II) / 2
             except Exception:
                 aVR = 0
-                
+
             try:
                 aVL = (I - II) / 2
             except Exception:
                 aVL = 0
-                
+
             try:
                 aVF = (II - I) / 2
             except Exception:
                 aVF = 0
-            
-            # Use hardware V leads directly
-            V1 = V1
-            V2 = V2
+
+            # Use hardware V leads directly (already named V1, V2; others from *_hw)
             V3 = V3_hw
             V4 = V4_hw
             V5 = V5_hw
             V6 = V6_hw
-            
+        
             # Return 12-lead ECG data in standard order
             result = [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
             
@@ -1391,19 +1389,19 @@ class ECGTestPage(QWidget):
             if not isinstance(lead_data, (list, np.ndarray)) or len(lead_data) < 200:
                 print("❌ Insufficient data for heart rate calculation")
                 return 60  # Default fallback
-            
+
             # Convert to numpy array for processing
             try:
                 lead_data = np.asarray(lead_data, dtype=float)
             except Exception as e:
                 print(f"❌ Error converting lead data to array: {e}")
                 return 60
-            
+
             # Check for invalid values
             if np.any(np.isnan(lead_data)) or np.any(np.isinf(lead_data)):
                 print("❌ Invalid values (NaN/Inf) in lead data")
                 return 60
-            
+
             # Use measured sampling rate if available; default to 250 Hz
             fs = 250
             try:
@@ -1414,118 +1412,88 @@ class ECGTestPage(QWidget):
             except Exception as e:
                 print(f"❌ Error getting sampling rate: {e}")
                 fs = 250
-            
+
             # Apply bandpass filter to enhance R-peaks (0.5-40 Hz)
             try:
                 from scipy.signal import butter, filtfilt
                 nyquist = fs / 2
-                low = max(0.001, 0.5 / nyquist)  # Prevent division by zero
-                high = min(0.999, 40 / nyquist)  # Prevent invalid filter
-                
+                low = max(0.001, 0.5 / nyquist)
+                high = min(0.999, 40 / nyquist)
                 if low >= high:
                     print("❌ Invalid filter parameters")
                     return 60
-                
                 b, a = butter(4, [low, high], btype='band')
                 filtered_signal = filtfilt(b, a, lead_data)
-                
-                # Validate filtered signal
                 if np.any(np.isnan(filtered_signal)) or np.any(np.isinf(filtered_signal)):
                     print("❌ Filter produced invalid values")
                     return 60
-                    
             except Exception as e:
                 print(f"❌ Error in signal filtering: {e}")
                 return 60
-            
+
             # Find R-peaks using scipy with robust parameters
             try:
                 from scipy.signal import find_peaks
-                
-                # Calculate robust thresholds
                 signal_mean = np.mean(filtered_signal)
                 signal_std = np.std(filtered_signal)
-                
                 if signal_std == 0:
                     print("❌ No signal variation detected")
                     return 60
-                
                 height_threshold = signal_mean + 0.5 * signal_std
                 prominence_threshold = signal_std * 0.3
-                min_distance = max(1, int(0.4 * fs))  # Minimum 0.4 seconds between peaks
-                
+                min_distance = max(1, int(0.4 * fs))
                 peaks, properties = find_peaks(
                     filtered_signal,
                     height=height_threshold,
                     distance=min_distance,
                     prominence=prominence_threshold
                 )
-                
             except Exception as e:
                 print(f"❌ Error in peak detection: {e}")
                 return 60
-            
+
             if len(peaks) < 2:
                 print(f"❌ Insufficient peaks detected: {len(peaks)}")
-                return 60  # Not enough peaks detected
-            
+                return 60
+
             # Calculate R-R intervals in milliseconds
             try:
                 rr_intervals_ms = np.diff(peaks) * (1000 / fs)
-                
-                # Validate intervals
                 if len(rr_intervals_ms) == 0:
                     print("❌ No R-R intervals calculated")
                     return 60
-                
             except Exception as e:
                 print(f"❌ Error calculating R-R intervals: {e}")
                 return 60
-            
+
             # Filter physiologically reasonable intervals (300-2000 ms)
             try:
                 valid_intervals = rr_intervals_ms[(rr_intervals_ms >= 300) & (rr_intervals_ms <= 2000)]
-                
                 if len(valid_intervals) == 0:
                     print("❌ No valid R-R intervals found")
-                    return 60  # No valid intervals
-                
+                    return 60
             except Exception as e:
                 print(f"❌ Error filtering intervals: {e}")
                 return 60
-            
+
             # Calculate heart rate from median R-R interval
             try:
                 median_rr = np.median(valid_intervals)
                 if median_rr <= 0:
                     print("❌ Invalid median R-R interval")
                     return 60
-                
-                heart_rate = 60000 / median_rr  # Convert to BPM
-                
-                # Ensure reasonable range (40-200 BPM)
+                heart_rate = 60000 / median_rr
                 heart_rate = max(40, min(200, heart_rate))
-                
-                # Validate final result
                 if np.isnan(heart_rate) or np.isinf(heart_rate):
                     print("❌ Invalid heart rate calculated")
                     return 60
-                
-                print(f"[DEBUG] Heart Rate Calculation:")
-                print(f"  Signal length: {len(lead_data)}")
-                print(f"  Peaks found: {len(peaks)}")
-                print(f"  Valid intervals: {len(valid_intervals)} out of {len(rr_intervals_ms)}")
-                print(f"  Calculated heart rate: {int(heart_rate)} BPM")
-                
                 return int(heart_rate)
-                
             except Exception as e:
                 print(f"❌ Error in final heart rate calculation: {e}")
                 return 60
-            
         except Exception as e:
             print(f"❌ Critical error in calculate_heart_rate: {e}")
-            return 60  # Fallback to 60 BPM
+            return 60
 
     def calculate_pr_interval(self, lead_data):
         """Calculate PR interval from P wave to QRS complex - LIVE"""
@@ -4768,31 +4736,29 @@ class ECGTestPage(QWidget):
             self.update_count += 1
             if self.update_count % self.memory_check_interval == 0:
                 self._manage_memory()
+
+            # DEMO branch
             if not self.serial_reader or not self.serial_reader.running:
-                # For demo mode, just update the plots based on wave speed setting
                 try:
                     wave_speed = float(self.settings_manager.get_wave_speed())
                 except Exception:
                     wave_speed = 25.0
 
-                # Base time window at 25 mm/s (e.g., 10 seconds) for display
                 baseline_seconds = 10.0
                 seconds_scale = (25.0 / max(1e-6, wave_speed))
-                seconds_to_show = baseline_seconds * seconds_scale  # 12.5 => 20s, 50 => 5s
+                seconds_to_show = baseline_seconds * seconds_scale
 
                 for i in range(len(self.data_lines)):
                     try:
                         if i < len(self.data):
                             raw = np.asarray(self.data[i])
-                            # Apply wave gain scaling: 5/10/20 mm/mV
                             gain = 1.0
                             try:
-                                gain = float(self.settings_manager.get_wave_gain()) / 10.0  # 10=>1x, 20=>2x, 5=>0.5x
+                                gain = float(self.settings_manager.get_wave_gain()) / 10.0
                             except Exception:
                                 pass
                             raw = (raw - np.nanmean(raw)) * gain
 
-                            # Determine window in samples using sampler if available
                             fs = 500
                             if hasattr(self, 'sampler') and getattr(self.sampler, 'sampling_rate', None):
                                 try:
@@ -4802,7 +4768,6 @@ class ECGTestPage(QWidget):
                             window_len = int(max(50, min(len(raw), seconds_to_show * fs)))
                             src = raw[-window_len:]
 
-                            # Resample to fixed display length preserving visible time scaling
                             display_len = self.buffer_size if hasattr(self, 'buffer_size') else 1000
                             if src.size < 2:
                                 resampled = np.zeros(display_len)
@@ -4818,30 +4783,23 @@ class ECGTestPage(QWidget):
                         continue
                 return
 
-            # Read a batch of data to keep up (from GitHub version)
+            # SERIAL branch
             lines_processed = 0
-            max_attempts = 20  # Prevent infinite loops
-            
+            max_attempts = 20
             while lines_processed < max_attempts:
                 try:
                     all_8_leads = self.serial_reader.read_value()
                     if all_8_leads:
-                        # Calculate 12-lead ECG from 8-channel data using standard formulas
                         all_12_leads = self.calculate_12_leads_from_8_channels(all_8_leads)
-                        
-                        # Update data buffers with filtering
                         for i in range(len(self.leads)):
                             try:
                                 if i < len(self.data) and i < len(all_12_leads):
                                     self.data[i] = np.roll(self.data[i], -1)
-                                    # Apply medical-grade real-time smoothing
                                     smoothed_value = self.apply_realtime_smoothing(all_12_leads[i], i)
                                     self.data[i][-1] = smoothed_value
                             except Exception as e:
                                 print(f"❌ Error updating data buffer {i}: {e}")
                                 continue
-                        
-                        # Update sampling rate
                         try:
                             if hasattr(self, 'sampler'):
                                 sampling_rate = self.sampler.add_sample()
@@ -4849,51 +4807,40 @@ class ECGTestPage(QWidget):
                                     self.metric_labels['sampling_rate'].setText(f"{sampling_rate:.1f} Hz")
                         except Exception as e:
                             print(f"❌ Error updating sampling rate: {e}")
-                        
                         lines_processed += 1
                     else:
-                        break # No more data in buffer
+                        break
                 except Exception as e:
                     print(f"❌ Error reading serial data: {e}")
                     break
 
-            # If we got any new data, update all plots at once
             if lines_processed > 0:
                 for i in range(len(self.leads)):
                     try:
                         if i < len(self.data_lines):
-                            # Update plot data
                             self.data_lines[i].setData(self.data[i])
-                            
-                            # Update Y-axis range based on actual data
                             self.update_plot_y_range(i)
                     except Exception as e:
                         print(f"❌ Error updating plot {i}: {e}")
                         continue
-                
-                # Calculate and update ECG metrics
                 try:
                     self.calculate_ecg_metrics()
                 except Exception as e:
                     print(f"❌ Error calculating ECG metrics: {e}")
-                
-                # Display heartbeat in terminal (every 10 updates for real-time feedback)
                 try:
                     if hasattr(self, 'heartbeat_counter'):
                         self.heartbeat_counter += 1
                     else:
                         self.heartbeat_counter = 0
-                        
-                    if self.heartbeat_counter % 10 == 0 and len(self.data) > 1:  # Lead II data available
+                    if self.heartbeat_counter % 10 == 0 and len(self.data) > 1:
                         heart_rate = self.calculate_heart_rate(self.data[1])
                         if heart_rate > 0:
                             print(f"💓 HEARTBEAT: {heart_rate} BPM")
                 except Exception as e:
                     print(f"❌ Error displaying heartbeat: {e}")
-                    
+
         except Exception as e:
             self.crash_logger.log_crash("Critical error in update_plots", e, "Real-time ECG plotting")
-            # Try to recover by resetting data
             try:
                 if hasattr(self, 'data') and self.data:
                     for i in range(len(self.data)):

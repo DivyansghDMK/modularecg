@@ -270,13 +270,7 @@ class Dashboard(QWidget):
         self.dark_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         header.addWidget(self.dark_btn)
         
-        # Background control button
-        bg_text = "BG: Clean"  # Default to clean background
-        self.bg_btn = QPushButton(bg_text)
-        self.bg_btn.setStyleSheet("background: #6c5ce7; color: white; border-radius: 10px; padding: 4px 18px;")
-        self.bg_btn.clicked.connect(self.cycle_background)
-        self.bg_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        header.addWidget(self.bg_btn)
+        # Removed background control button per request
         
         header.addStretch()
         
@@ -583,7 +577,6 @@ class Dashboard(QWidget):
             ("QRS Complex", "0", "ms", "qrs_duration"),
             ("QRS Axis", "0°", "", "qrs_axis"),
             ("ST Interval", "0", "ms", "st_interval"),
-            ("Time Elapsed", "00:00", "", "time_elapsed"),
             ("Sampling Rate", "0", "Hz", "sampling_rate"),
         ]
         
@@ -932,10 +925,6 @@ class Dashboard(QWidget):
             if 'st_interval' in ecg_metrics:
                 self.metric_labels['st_interval'].setText(f"{ecg_metrics['st_interval']} ms")
             
-            # Update Time Elapsed
-            if 'time_elapsed' in ecg_metrics:
-                self.metric_labels['time_elapsed'].setText(ecg_metrics['time_elapsed'])
-            
             # Update Sampling Rate
             if 'sampling_rate' in ecg_metrics:
                 self.metric_labels['sampling_rate'].setText(ecg_metrics['sampling_rate'])
@@ -1172,6 +1161,7 @@ class Dashboard(QWidget):
                         sr_text = ecg_metrics['sampling_rate']
                         if sr_text and sr_text != '--':
                             self.metric_labels['sampling_rate'].setText(f"{sr_text}")
+                    # Time Elapsed metric removed
                             
         except Exception as e:
             print(f"❌ Error updating dashboard metrics from ECG: {e}")
