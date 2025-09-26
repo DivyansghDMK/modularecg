@@ -23,10 +23,13 @@ class DemoManager:
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         
-        # Wave speed control variables
-        self.current_wave_speed = 12.5  # mm/s
-        self.samples_per_second = 200  # Base sampling rate
-        self.speed_multiplier = 1.0  # Will be calculated based on wave speed
+        # Wave speed control variables (like divyansh.py)
+        self.current_wave_speed = 25.0  # mm/s (default)
+        self.samples_per_second = 150  # Base sampling rate for CSV demo
+        self.time_window = 10.0  # Default time window (25mm/s)
+        
+        # Data pointer for plotting (like divyansh.py)
+        self.data_ptr = 0
         
         # Provide dashboard with effective sampling rate when in demo
         self._set_demo_sampling_rate(self.samples_per_second)
@@ -49,23 +52,19 @@ class DemoManager:
         """
         Update wave speed settings based on current settings manager.
         This affects the visual speed and spacing of ECG waves.
+        EXACT SAME LOGIC AS DIVYANSH.PY
         """
         # Get current wave speed from settings
         self.current_wave_speed = self.ecg_test_page.settings_manager.get_wave_speed()
         
-        # Calculate speed multiplier based on wave speed
-        # 12.5 mm/s = slow (0.5x), 25 mm/s = normal (1.0x), 50 mm/s = fast (2.0x)
-        if self.current_wave_speed <= 12.5:
-            self.speed_multiplier = 0.5  # Slow waves, peaks closer together
-        elif self.current_wave_speed <= 25.0:
-            self.speed_multiplier = 1.0  # Normal speed
-        else:  # 50 mm/s
-            self.speed_multiplier = 2.0  # Fast waves, peaks further apart
+        # EXACT SAME LOGIC AS DIVYANSH.PY:
+        # 12.5 mm/s → 20 s window (more peaks visible - compressed)
+        # 25 mm/s → 10 s window (default)
+        # 50 mm/s → 5 s window (fewer peaks visible - stretched)
+        baseline_time_window = 10.0
+        self.time_window = baseline_time_window * (25.0 / float(self.current_wave_speed))
         
-        # Update sampling rate for demo data reading
-        # self.samples_per_second = int(200 * self.speed_multiplier)
-        
-        print(f"🌊 Wave speed updated: {self.current_wave_speed}mm/s (multiplier: {self.speed_multiplier}x)")
+        print(f"🌊 Wave speed updated: {self.current_wave_speed}mm/s (time window: {self.time_window:.1f}s)")
 
     
     
@@ -74,8 +73,8 @@ class DemoManager:
         try:
             if not hasattr(self.ecg_test_page, 'sampler') or self.ecg_test_page.sampler is None:
                 self.ecg_test_page.sampler = type('Sampler', (), {})()
-            # Keep dashboard filter stable: clamp to >=200 Hz
-            safe_fs = max(200.0, float(sampling_rate))
+            # Keep dashboard filter stable: clamp to >=80 Hz (new default)
+            safe_fs = max(80.0, float(sampling_rate))
             self.ecg_test_page.sampler.sampling_rate = safe_fs
         except Exception:
             pass
@@ -100,7 +99,7 @@ class DemoManager:
 
             print("🟢 Demo mode ON - Starting demo data...")
             
-            # Update wave speed settings before starting
+            # Update wave speed settings before starting (like divyansh.py)
             self._update_wave_speed_settings()
             
             # Reset fixed metrics for new demo session
@@ -178,7 +177,7 @@ class DemoManager:
             
             # Initialize data with first few rows
             # Prefill enough samples to immediately show ~4 peaks
-            csv_base_fs = int(150 * self.speed_multiplier)  # demo CSV base
+            csv_base_fs = 80  # demo CSV base aligned to new default
             prefill_needed = min(self.ecg_test_page.buffer_size, max(100, int(csv_base_fs * 4.0)), len(df))
             for lead in lead_columns:
                 if lead in self.ecg_test_page.leads:
@@ -250,8 +249,10 @@ class DemoManager:
                             
                             # Dynamic delay based on wave speed with error handling
                             try:
-                                base_delay = 0.004  # 250 samples per second base (matching real hardware)
-                                actual_delay = max(0.001, base_delay / max(0.1, self.speed_multiplier))
+                                base_delay = 1.0 / 80.0  # 80 samples per second base (matching new default)
+                                # Use time window to calculate delay (like divyansh.py)
+                                speed_factor = getattr(self, 'time_window', 10.0) / 10.0
+                                actual_delay = max(0.001, base_delay * speed_factor)
                                 time.sleep(actual_delay)
                             except Exception as e:
                                 print(f"❌ Error in sleep delay: {e}")
@@ -282,8 +283,8 @@ class DemoManager:
             self.demo_thread = threading.Thread(target=read_csv_data, name="ECGDemoCSVThread", daemon=True)
             self.demo_thread.start()
             
-            # Update effective sampling rate for CSV demo (base 150 Hz scaled by speed)
-            self.samples_per_second = int(150 * self.speed_multiplier)
+            # Update effective sampling rate for CSV demo (base 150 Hz)
+            self.samples_per_second = 150
             self._set_demo_sampling_rate(self.samples_per_second)
 
             # Start timer to update plots with real CSV data
@@ -294,7 +295,9 @@ class DemoManager:
             # Adjust timer interval based on wave speed
             # Use a reasonable UI FPS (~30-60 FPS)
             base_interval = 33  # ~30 FPS base
-            timer_interval = max(10, int(base_interval / self.speed_multiplier))
+            # Use time window to adjust timer interval (like divyansh.py)
+            speed_factor = getattr(self, 'time_window', 10.0) / 10.0
+            timer_interval = max(10, int(base_interval * speed_factor))
             self.demo_timer.start(timer_interval)
             
             print(f"🚀 Demo mode started with wave speed: {self.current_wave_speed}mm/s")
@@ -305,61 +308,97 @@ class DemoManager:
             # Don't start demo if CSV reading fails
             self.ecg_test_page.demo_toggle.setChecked(False)
 
-    def update_demo_plots(self):
-        current_speed = self.ecg_test_page.settings_manager.get_wave_speed()
-        if current_speed != self.current_wave_speed:
-            # Update internal speed and adjust timer interval without full restart
+    def on_settings_changed(self, key, value):
+        """Handle immediate settings changes for instant wave updates"""
+        if key in ["wave_speed", "wave_gain"]:
+            print(f"🎛️ Demo mode: {key} changed to {value} - updating internal settings")
+            print(f"🎛️ Demo mode: _running_demo = {self._running_demo}")
+            # Always update internal settings, even if demo is not running
             self._update_wave_speed_settings()
-            try:
-                if self.demo_timer:
-                    base_interval = 33  # ~30 FPS base
-                    timer_interval = max(10, int(base_interval / self.speed_multiplier))
-                    self.demo_timer.setInterval(timer_interval)
-                # Keep dashboard calculator in sync with effective sampling rate
-                # CSV demo base is 150Hz; synthetic is handled in start_synthetic_demo
-                self.samples_per_second = int(150 * self.speed_multiplier)
-                self._set_demo_sampling_rate(self.samples_per_second)
-            except Exception:
-                pass
+            
+            # If demo is running, apply changes immediately
+            if self._running_demo:
+                print(f"🎛️ Demo mode: {key} changed to {value} - applying instantly")
+                try:
+                    self.update_demo_plots()
+                    print(f"🎛️ Demo mode: update_demo_plots completed successfully")
+                except Exception as e:
+                    print(f"❌ Error in immediate demo update: {e}")
+            else:
+                print(f"🎛️ Demo mode: {key} changed to {value} - settings saved for next demo start")
+    
+    def update_demo_plots(self):
+        """Update plots using exact same logic as divyansh.py"""
+        print(f"🎛️ update_demo_plots: Starting with current_wave_speed={self.current_wave_speed}")
         
+        # Always get fresh values from settings manager (like divyansh.py does)
+        current_speed = self.ecg_test_page.settings_manager.get_wave_speed()
+        current_gain = self.ecg_test_page.settings_manager.get_wave_gain()
+        
+        print(f"🎛️ update_demo_plots: Settings manager says speed={current_speed}, gain={current_gain}")
+        
+        # Update internal values if they changed
+        if current_speed != self.current_wave_speed:
+            print(f"🎛️ update_demo_plots: Speed changed from {self.current_wave_speed} to {current_speed}")
+            self._update_wave_speed_settings()
+            # Keep dashboard calculator in sync with effective sampling rate
+            self._set_demo_sampling_rate(self.samples_per_second)
+        
+        # --- EXACT SAME LOGIC AS DIVYANSH.PY ---
+        # 1. Use the time window calculated in _update_wave_speed_settings
+        # This ensures consistent behavior: 12.5mm/s=compressed, 25mm/s=default, 50mm/s=stretched
+        time_window = getattr(self, 'time_window', 10.0)  # Fallback to 10s if not set
+        num_samples_to_show = max(1, int(time_window * self.samples_per_second))
+        
+        print(f"🎛️ update_demo_plots: time_window={time_window}, num_samples_to_show={num_samples_to_show}")
+        
+        # Get current gain
+        try:
+            current_gain = float(self.ecg_test_page.settings_manager.get_wave_gain()) / 10.0
+        except Exception:
+            current_gain = 1.0
+        
+        print(f"🎛️ update_demo_plots: Applied gain={current_gain}")
+        
+        # 2. For each lead, slice and update (exactly like divyansh.py)
         for i, lead in enumerate(self.ecg_test_page.leads):
             if i < len(self.ecg_test_page.data_lines) and i < len(self.ecg_test_page.data):
                 lead_data = self.ecg_test_page.data[i]
-
-                # Center baseline and apply gain 5/10/20
-                centered = lead_data - np.mean(lead_data)
-                try:
-                    gain = float(self.ecg_test_page.settings_manager.get_wave_gain()) / 10.0
-                except Exception:
-                    gain = 1.0
-                centered *= gain
-
-                # Target about 4 peaks (≈4 seconds at 60 BPM) in view regardless of speed
-                display_len = 1000  # keep grid resolution constant
-                desired_seconds = 4.0
-                try:
-                    effective_fs = float(self.samples_per_second) if self.samples_per_second else 250.0
-                except Exception:
-                    effective_fs = 250.0
-                window_len = int(max(100, min(len(lead_data), effective_fs * desired_seconds)))
-                src = np.asarray(centered[-window_len:])
-                if src.size < 2:
-                    resampled = np.zeros(display_len)
-                else:
-                    x_src = np.linspace(0, 1, src.size)
-                    x_dst = np.linspace(0, 1, display_len)
-                    resampled = np.interp(x_dst, x_src, src)
-
-                self.ecg_test_page.data_lines[i].setData(resampled)
-
-                # Dynamic Y-range based on resampled data
-                data_range = np.max(np.abs(resampled)) if resampled.size else 1000
-                y_min = -data_range * 1.2
-                y_max = data_range * 1.2
-                if (y_max - y_min) < 200:
-                    c = (y_max + y_min) / 2
-                    y_min, y_max = c - 100, c + 100
-                self.ecg_test_page.plot_widgets[i].setYRange(y_min, y_max, padding=0.1)
+                
+                total_len = len(lead_data)
+                if total_len == 0:
+                    continue
+                
+                # Use modular indexing exactly like divyansh.py
+                start = int(self.data_ptr % total_len)
+                idx = (start + np.arange(num_samples_to_show)) % total_len
+                data_slice = lead_data[idx]
+                
+                # Apply gain exactly like divyansh.py
+                display_data = data_slice * current_gain
+                
+                # Build time axis exactly matching window length for this speed
+                n = num_samples_to_show
+                time_axis = np.arange(n, dtype=float) / float(self.samples_per_second)
+                
+                # Update curve with time axis (like divyansh.py)
+                self.ecg_test_page.data_lines[i].setData(time_axis, display_data)
+                
+                # Update Y range dynamically based on gain (exactly like divyansh.py)
+                max_amp = max(1.5 * current_gain, float(np.max(np.abs(display_data))) * 1.2 + 1e-6)
+                self.ecg_test_page.plot_widgets[i].setYRange(-max_amp, max_amp)
+                
+                # X range matches current time window (exactly like divyansh.py)
+                self.ecg_test_page.plot_widgets[i].setXRange(0, time_window)
+        
+        # 3. Advance pointer (simulate sweep) - exactly like divyansh.py
+        step = 8
+        if len(self.ecg_test_page.data) > 0:
+            any_len = len(self.ecg_test_page.data[0])
+            if any_len > 0:
+                self.data_ptr = (self.data_ptr + step) % any_len
+        
+        print(f"🎛️ update_demo_plots: Completed successfully")
         
         # Calculate intervals for dashboard in demo mode
         if hasattr(self.ecg_test_page, 'dashboard_callback') and self.ecg_test_page.dashboard_callback:
@@ -429,8 +468,9 @@ class DemoManager:
                         self.ecg_test_page.data[li] = np.roll(self.ecg_test_page.data[li], -1)
                         self.ecg_test_page.data[li][-1] = val
 
-                # Respect wave speed for visual pacing
-                delay = (1.0 / fs) / max(0.5, self.speed_multiplier)
+                # Respect wave speed for visual pacing (like divyansh.py)
+                speed_factor = getattr(self, 'time_window', 10.0) / 10.0
+                delay = (1.0 / fs) * speed_factor
                 time.sleep(delay)
                 t += dt
 
@@ -441,11 +481,13 @@ class DemoManager:
         self.demo_timer = QTimer(self.ecg_test_page)
         self.demo_timer.timeout.connect(self.update_demo_plots)
         base_interval = 33  # ~30 FPS base
-        timer_interval = int(base_interval / max(0.5, self.speed_multiplier))
+        # Use time window to adjust timer interval (like divyansh.py)
+        speed_factor = getattr(self, 'time_window', 10.0) / 10.0
+        timer_interval = int(base_interval * speed_factor)
         self.demo_timer.start(max(10, timer_interval))
 
-        # Effective sampling for synthetic: fs scaled by speed multiplier (min 0.5x)
-        self.samples_per_second = int(fs * max(0.5, self.speed_multiplier))
+        # Effective sampling for synthetic: fs (like divyansh.py)
+        self.samples_per_second = int(fs)
         self._set_demo_sampling_rate(self.samples_per_second)
         print("🚀 Synthetic demo started (CSV missing)")
     
@@ -468,10 +510,17 @@ class DemoManager:
                     recent_data = np.array(lead2_data[-500:])
                     centered_data = recent_data - np.mean(recent_data)
                     
+                    # Check for signal variation
+                    signal_std = np.std(centered_data)
+                    if signal_std < 1.0:  # Very low variation
+                        print(f"❌ Low signal variation detected (std: {signal_std:.2f})")
+                        return
+                    
                     # Demo-specific peak detection with adjusted parameters
+                    min_prominence = max(0.5, signal_std * 0.5)  # Adaptive prominence
                     r_peaks, _ = find_peaks(centered_data, 
                                           distance=int(0.6 * sampling_rate),
-                                          prominence=1.0 * np.std(centered_data))
+                                          prominence=min_prominence)
                     
                     # Calculate intervals only if we have R peaks
                     if len(r_peaks) > 1:
@@ -542,6 +591,7 @@ class DemoManager:
                                 'PR': fixed_pr,
                                 'QRS': fixed_qrs,
                                 'QTc': fixed_qtc,
+                                'QTc_interval': fixed_qtc,  # Add both keys for compatibility
                                 'QRS_axis': fixed_axis,
                                 'ST': fixed_st
                             }

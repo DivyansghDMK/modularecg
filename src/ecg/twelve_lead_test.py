@@ -1778,10 +1778,19 @@ class ECGTestPage(QWidget):
             # Force redraw of all plots
             self.redraw_all_plots()
             
+            # Notify demo manager for instant updates (like divyansh.py)
+            if hasattr(self, 'demo_manager') and self.demo_manager:
+                self.demo_manager.on_settings_changed(key, value)
+            
             print(f"Settings applied and titles updated for {key} = {value}")
 
     def update_all_lead_titles(self):
-        
+        """Update all lead titles with current speed and gain settings"""
+        # Safety check: only update if plots are initialized
+        if not hasattr(self, 'axs') or not self.axs:
+            print("⚠️ Plots not initialized yet, skipping title update")
+            return
+            
         current_speed = self.settings_manager.get_wave_speed()
         current_gain = self.settings_manager.get_wave_gain()
         
@@ -2833,11 +2842,11 @@ class ECGTestPage(QWidget):
                     data = self.data.get(lead, [])
                     
                     if len(data) > 0:
-                        # Apply current settings to the real data
+                        # Detect signal source and apply adaptive scaling
+                        signal_source = self.detect_signal_source(data)
                         gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                        # Convert device data to ECG range and center around zero
                         device_data = np.array(data)
-                        centered = (device_data - 2100) * gain_factor
+                        centered = self.apply_adaptive_gain(device_data, signal_source, gain_factor)
                         
                         # Apply medical-grade filtering for smooth waves
                         filtered_data = self.apply_ecg_filtering(centered)
@@ -2851,16 +2860,37 @@ class ECGTestPage(QWidget):
                         
                         line.set_ydata(plot_data)
                         
-                        # Update axis limits based on current settings
+                        # Update axis limits with adaptive Y-range
                         if i < len(self.axs):
-                            ylim = self.ylim if hasattr(self, 'ylim') else 400
-                            self.axs[i].set_ylim(-ylim, ylim)
+                            # Calculate adaptive Y-range for matplotlib plots
+                            valid_data = filtered_data[~np.isnan(filtered_data)]
+                            if len(valid_data) > 0:
+                                p1 = np.percentile(valid_data, 1)
+                                p99 = np.percentile(valid_data, 99)
+                                data_mean = (p1 + p99) / 2.0
+                                data_std = np.std(valid_data[(valid_data >= p1) & (valid_data <= p99)])
+                                
+                                if signal_source == "human_body":
+                                    padding = max(data_std * 2, 20)
+                                elif signal_source == "weak_body":
+                                    padding = max(data_std * 1.5, 10)
+                                else:
+                                    padding = max(data_std * 4, 200)
+                                
+                                y_min = data_mean - padding
+                                y_max = data_mean + padding
+                                self.axs[i].set_ylim(y_min, y_max)
+                            else:
+                                ylim = self.ylim if hasattr(self, 'ylim') else 400
+                                self.axs[i].set_ylim(-ylim, ylim)
+                            
                             self.axs[i].set_xlim(0, self.buffer_size)
                             
-                            # Update plot title with current settings
+                            # Update plot title with current settings and signal source
                             current_speed = self.settings_manager.get_wave_speed()
                             current_gain = self.settings_manager.get_wave_gain()
-                            new_title = f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV"
+                            signal_type = "Body" if signal_source in ["human_body", "weak_body"] else "Hardware"
+                            new_title = f"{lead} | Speed: {current_speed}mm/s | Gain: {current_gain}mm/mV | {signal_type}"
                             self.axs[i].set_title(new_title, fontsize=8, color='#666', pad=10)
                             print(f"Redraw updated {lead} title: {new_title}")
                         
@@ -2868,16 +2898,136 @@ class ECGTestPage(QWidget):
                         if i < len(self.canvases):
                             self.canvases[i].draw_idle()
 
+    def detect_signal_source(self, data):
+        """Detect if signal is from hardware or human body based on amplitude characteristics"""
+        try:
+            if data is None:
+                return "none"
+            # Safely coerce to a 1D numpy array
+            data_array = np.asarray(data).ravel()
+            if data_array.size == 0:
+                return "none"
+
+            signal_range = float(np.ptp(data_array))  # Peak-to-peak range
+            signal_mean = float(np.mean(np.abs(data_array)))
+            signal_std = float(np.std(data_array))
+            
+            print(f"🔍 Signal Analysis: Range={signal_range:.1f}, Mean={signal_mean:.1f}, Std={signal_std:.1f}")
+            
+            # Heuristics: raw ADC (hardware) often around 0-4095 with baseline ~2000 but body-connected raw can still be ~2000±100
+            # Use range thresholds to classify; treat > 400 as clear hardware dynamics, > 50 as body but weak
+            if signal_range > 400:
+                return "hardware"
+            elif signal_range > 50:
+                return "human_body"
+            elif signal_range > 10:
+                return "weak_body"
+            else:
+                return "noise"
+                
+        except Exception as e:
+            print(f"❌ Error in signal detection: {e}")
+            return "unknown"
+
+    def apply_adaptive_gain(self, data, signal_source, gain_factor):
+        """Apply gain based on signal source with adaptive scaling"""
+        try:
+            device_data = np.array(data)
+            
+            if signal_source == "hardware":
+                # Current logic for hardware (0-4095 range)
+                centered = (device_data - 2100) * gain_factor
+                print(f"🔧 Hardware signal: Applied hardware scaling")
+                
+            elif signal_source == "human_body":
+                # Different centering and scaling for human body (0-500 range)
+                baseline = np.mean(device_data)
+                centered = (device_data - baseline) * gain_factor * 8  # Amplify weak signals
+                print(f"🔧 Human body signal: Applied body scaling (baseline={baseline:.1f}, amplification=8x)")
+                
+            elif signal_source == "weak_body":
+                # Very weak signals - maximum amplification
+                baseline = np.mean(device_data)
+                centered = (device_data - baseline) * gain_factor * 15  # Maximum amplification
+                print(f"🔧 Weak body signal: Applied maximum scaling (baseline={baseline:.1f}, amplification=15x)")
+                
+            else:
+                # Noise or unknown - minimal processing
+                centered = device_data * gain_factor
+                print(f"🔧 Unknown signal: Applied minimal scaling")
+            
+            return centered
+            
+        except Exception as e:
+            print(f"❌ Error in adaptive gain: {e}")
+            return np.array(data) * gain_factor
+
+    def update_plot_y_range_adaptive(self, plot_index, signal_source, data_override=None):
+        """Update Y-axis range based on signal source with adaptive scaling.
+        If data_override is provided, use it for statistics (should be the plotted/scaled data)."""
+        try:
+            if plot_index >= len(self.data) or plot_index >= len(self.plot_widgets):
+                return
+
+            # Get the data for this plot
+            if data_override is not None:
+                data = np.asarray(data_override)
+            else:
+                data = self.data[plot_index]
+            
+            # Remove NaN values and large outliers (robust)
+            valid_data = data[~np.isnan(data)]
+            
+            if len(valid_data) == 0:
+                return
+            
+            # Use percentiles to avoid spikes from clipping the view
+            p1 = np.percentile(valid_data, 1)
+            p99 = np.percentile(valid_data, 99)
+            data_mean = (p1 + p99) / 2.0
+            data_std = np.std(valid_data[(valid_data >= p1) & (valid_data <= p99)])
+            
+            # Calculate appropriate Y-range with adaptive padding based on signal source
+            if signal_source == "human_body":
+                # Use smaller padding for human body signals
+                padding = max(data_std * 2, 20)  # Reduced minimum padding
+                print(f"📊 Human body Y-range: padding={padding:.1f}")
+            elif signal_source == "weak_body":
+                # Even smaller padding for very weak signals
+                padding = max(data_std * 1.5, 10)  # Minimal padding
+                print(f"📊 Weak body Y-range: padding={padding:.1f}")
+            else:
+                # Current logic for hardware
+                padding = max(data_std * 4, 200)  # Original padding
+                print(f"📊 Hardware Y-range: padding={padding:.1f}")
+            
+            if data_std > 0:
+                y_min = data_mean - padding
+                y_max = data_mean + padding
+            else:
+                # Fallback: use percentile window
+                data_range = max(p99 - p1, 50 if signal_source in ["human_body", "weak_body"] else 300)
+                y_min = data_mean - data_range / 2
+                y_max = data_mean + data_range / 2
+            
+            # Apply the new Y-range using PyQtGraph
+            self.plot_widgets[plot_index].setYRange(y_min, y_max)
+            
+        except Exception as e:
+            print(f"❌ Error updating adaptive Y-range: {e}")
+
     def update_ecg_lead(self, lead_index, data_array):
         """Update a specific ECG lead with new data from serial communication"""
         try:
             if 0 <= lead_index < len(self.lines) and len(data_array) > 0:
+                # Detect signal source first
+                signal_source = self.detect_signal_source(data_array)
+                
                 # Apply current settings to the incoming data
                 gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                # Convert device data (typically 0-4095 range) to ECG range and center around zero
-                device_data = np.array(data_array)
-                # Scale to typical ECG range (subtract baseline ~2100 and scale)
-                centered = (device_data - 2100) * gain_factor
+                
+                # Apply adaptive gain based on signal source
+                centered = self.apply_adaptive_gain(data_array, signal_source, gain_factor)
                 
                 # Apply noise reduction filtering
                 filtered_data = self.apply_ecg_filtering(centered)
@@ -2892,10 +3042,10 @@ class ECGTestPage(QWidget):
                 # Update the specific lead line
                 self.lines[lead_index].set_ydata(plot_data)
                 
-                # Update axis limits
+                # Update axis limits with adaptive Y-range
                 if lead_index < len(self.axs):
-                    ylim = self.ylim if hasattr(self, 'ylim') else 400
-                    self.axs[lead_index].set_ylim(-ylim, ylim)
+                    # Use adaptive Y-range based on the filtered (plotted) data
+                    self.update_plot_y_range_adaptive(lead_index, signal_source, data_override=filtered_data)
                     self.axs[lead_index].set_xlim(0, self.buffer_size)
                 
                 # Redraw the specific canvas
@@ -4815,11 +4965,31 @@ class ECGTestPage(QWidget):
                     break
 
             if lines_processed > 0:
+                # Detect signal source from a representative lead for adaptive scaling
+                signal_source = "hardware"  # Default
+                try:
+                    if len(self.data) > 1 and hasattr(self, 'leads'):
+                        # Prefer Lead II (index 1) if available
+                        representative = self.data[1] if len(self.data[1]) > 0 else self.data[0]
+                    else:
+                        representative = self.data[0] if len(self.data) > 0 else []
+                    signal_source = self.detect_signal_source(representative)
+                except Exception as e:
+                    print(f"❌ Error detecting signal source for serial plots: {e}")
+                
                 for i in range(len(self.leads)):
                     try:
                         if i < len(self.data_lines):
-                            self.data_lines[i].setData(self.data[i])
-                            self.update_plot_y_range(i)
+                            # Apply adaptive scaling to the data before plotting
+                            if i < len(self.data) and len(self.data[i]) > 0:
+                                gain_factor = self.settings_manager.get_wave_gain() / 10.0
+                                scaled_data = self.apply_adaptive_gain(self.data[i], signal_source, gain_factor)
+                                self.data_lines[i].setData(scaled_data)
+                                # Use adaptive Y-range based on scaled data
+                                self.update_plot_y_range_adaptive(i, signal_source, data_override=scaled_data)
+                            else:
+                                self.data_lines[i].setData(self.data[i])
+                                self.update_plot_y_range(i)
                     except Exception as e:
                         print(f"❌ Error updating plot {i}: {e}")
                         continue

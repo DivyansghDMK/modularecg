@@ -970,17 +970,17 @@ class Dashboard(QWidget):
                         return self._fallback_wave_update(frame)
                     
                     # Get actual sampling rate from ECG test page
-                    actual_sampling_rate = 250  # Default to 250Hz
+                    actual_sampling_rate = 80  # Default to 80Hz
                     try:
                         if (hasattr(self.ecg_test_page, 'sampler') and 
                             hasattr(self.ecg_test_page.sampler, 'sampling_rate') and 
                             self.ecg_test_page.sampler.sampling_rate):
                             actual_sampling_rate = float(self.ecg_test_page.sampler.sampling_rate)
                             if actual_sampling_rate <= 0 or actual_sampling_rate > 1000:
-                                actual_sampling_rate = 250
+                                actual_sampling_rate = 80
                     except Exception as e:
                         print(f"❌ Error getting sampling rate: {e}")
-                        actual_sampling_rate = 250
+                        actual_sampling_rate = 80
 
                     # Determine visible window based on wave speed (display feature only)
                     try:

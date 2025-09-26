@@ -6,8 +6,8 @@ Constants and configuration values for ECG processing
 ECG_LEADS = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
 
 # Sampling Rates
-DEFAULT_SAMPLING_RATE = 250
-ALTERNATIVE_SAMPLING_RATE = 500
+DEFAULT_SAMPLING_RATE = 80
+ALTERNATIVE_SAMPLING_RATE = 250
 
 # Buffer Configuration
 DEFAULT_BUFFER_SIZE = 1000

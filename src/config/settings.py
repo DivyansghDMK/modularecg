@@ -19,7 +19,7 @@ class AppConfig:
         """Load default configuration values"""
         return {
             "ecg": {
-                "sampling_rate": 250,
+                "sampling_rate": 80,
                 "buffer_size": 1000,
                 "update_interval": 50,  # ms
                 "leads": ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"],
