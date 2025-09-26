@@ -1837,10 +1837,10 @@ class ECGTestPage(QWidget):
         metrics_frame.setStyleSheet("""
             QFrame {
                 background: #000000;
-                border: 2px solid #333333;
+                border: none;
                 border-radius: 6px;
-                padding: 3px;  /* Reduced from 4px */
-                margin: 1px 0;  /* Reduced from 2px */
+                padding: 0;  /* Reduced from 4px */
+                margin: 0;  /* Reduced from 2px */
             }
         """)
         
@@ -1853,10 +1853,10 @@ class ECGTestPage(QWidget):
         
         # Updated metric info to match the image design with consistent color coding
         metric_info = [
-            ("PR", "0", "pr_interval", "#4ecdc4"),
-            ("QRS", "0", "qrs_duration", "#45b7d1"),
-            ("Axis", "0°", "qrs_axis", "#96ceb4"),
-            ("ST", "0", "st_interval", "#feca57"),
+            ("PR", "0", "pr_interval", "#ffffff"),
+            ("QRS", "0", "qrs_duration", "#ffffff"),
+            ("Axis", "0°", "qrs_axis", "#ffffff"),
+            ("ST", "0", "st_segment", "#ffffff"),
             ("Time", "00:00", "time_elapsed", "#ffffff"),
         ]
         
@@ -1880,13 +1880,13 @@ class ECGTestPage(QWidget):
             # Title label with consistent color coding - Make it smaller
             lbl = QLabel(title)
             lbl.setFont(QFont("Arial", 10, QFont.Bold))
-            lbl.setStyleSheet(f"color: {color}; margin-bottom: 3px; font-weight: bold;")  # Use same color as value
+            lbl.setStyleSheet(f"color: #000000; margin-bottom: 3px; font-weight: bold;")  # Use same color as value
             lbl.setAlignment(Qt.AlignCenter)
             
             # Value label with specific colors - Make it smaller
             val = QLabel(value)
-            val.setFont(QFont("Arial", 18, QFont.Bold))
-            val.setStyleSheet(f"color: {color}; background: transparent; padding: 2px 0px;")  # Reduced from 4px
+            val.setFont(QFont("Arial", 50, QFont.Bold))
+            val.setStyleSheet(f"color: #000000; background: transparent; padding: 2px 0px;")  # Reduced from 4px
             val.setAlignment(Qt.AlignCenter)
             
             # Add labels to the metric widget's layout
@@ -1915,13 +1915,13 @@ class ECGTestPage(QWidget):
         
         # Heart icon - Make it smaller
         heart_icon = QLabel("❤")
-        heart_icon.setFont(QFont("Arial", 16))  # Reduced from 18px
+        heart_icon.setFont(QFont("Arial", 50))  # Reduced from 18px
         heart_icon.setStyleSheet("color: #ff0000; background: transparent; border: none; margin: 0; padding: 0;")
         heart_icon.setAlignment(Qt.AlignCenter)
         
         # Heart rate value - Make it smaller
         heart_rate_val = QLabel("00")
-        heart_rate_val.setFont(QFont("Arial", 12, QFont.Bold))  # Reduced from 14px
+        heart_rate_val.setFont(QFont("Arial", 50, QFont.Bold))  # Reduced from 14px
         heart_rate_val.setStyleSheet("color: #ff0000; background: transparent; border: none; margin: 0;")
         heart_rate_val.setAlignment(Qt.AlignCenter)
         heart_rate_val.setContentsMargins(0, 0, 0, 0)
@@ -1973,10 +1973,10 @@ class ECGTestPage(QWidget):
             self.metrics_frame.setStyleSheet("""
                 QFrame#metrics_frame {
                     background: #000000;
-                    border: 2px solid #333333;
+                    border: none;
                     border-radius: 6px;
-                    padding: 4px;
-                    margin: 2px 0;
+                    padding: 0px;
+                    margin: 0px 0;
                     /* Removed unsupported box-shadow property */
                 }
             """)
@@ -1984,17 +1984,17 @@ class ECGTestPage(QWidget):
             # Update text colors for dark mode
             for key, label in self.metric_labels.items():
                 if key == 'heart_rate':
-                    label.setStyleSheet("color: #ff0000; background: transparent; padding: 0; border: none; margin: 0;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 0; border: none; margin: 0; font-size: 50px;")
                 elif key == 'pr_interval':
-                    label.setStyleSheet("color: #ff0000; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'qrs_duration':
-                    label.setStyleSheet("color: #ffff00; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'qrs_axis':
-                    label.setStyleSheet("color: #ffff00; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'st_segment':
-                    label.setStyleSheet("color: #0000ff; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'time_elapsed':
-                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
             
             # Update title colors to green for dark mode
             for child in self.metrics_frame.findChildren(QLabel):
@@ -2008,10 +2008,10 @@ class ECGTestPage(QWidget):
                 QFrame#metrics_frame {
                     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
                         stop:0 #f0fff0, stop:1 #e0f0e0);
-                    border: 2px solid #4CAF50;
+                    border: none;
                     border-radius: 6px;
-                    padding: 4px;
-                    margin: 2px 0;
+                    padding: 0;
+                    margin: 0;
                     /* Removed unsupported box-shadow property */
                 }
             """)
@@ -2019,17 +2019,17 @@ class ECGTestPage(QWidget):
             # Update text colors for medical mode
             for key, label in self.metric_labels.items():
                 if key == 'heart_rate':
-                    label.setStyleSheet("color: #d32f2f; background: transparent; padding: 0; border: none; margin: 0;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 0; border: none; margin: 0; font-size: 50px;")
                 elif key == 'pr_interval':
-                    label.setStyleSheet("color: #d32f2f; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'qrs_duration':
-                    label.setStyleSheet("color: #f57c00; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'qrs_axis':
-                    label.setStyleSheet("color: #f57c00; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'st_segment':
-                    label.setStyleSheet("color: #1976d2; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'time_elapsed':
-                    label.setStyleSheet("color: #388e3c; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
             
             # Update title colors to dark green for medical mode
             for child in self.metrics_frame.findChildren(QLabel):
@@ -2042,10 +2042,10 @@ class ECGTestPage(QWidget):
             self.metrics_frame.setStyleSheet("""
                 QFrame#metrics_frame {
                     background: #ffffff;
-                    border: 2px solid #e0e0e0;
+                    border: none;
                     border-radius: 6px;
-                    padding: 4px;
-                    margin: 2px 0;
+                    padding: 0;
+                    margin: 0;
                     /* Removed unsupported box-shadow property */
                 }
             """)
@@ -2053,17 +2053,17 @@ class ECGTestPage(QWidget):
             # Update text colors for light mode
             for key, label in self.metric_labels.items():
                 if key == 'heart_rate':
-                    label.setStyleSheet("color: #ff0000; background: transparent; padding: 0; border: none; margin: 0;")
+                    label.setStyleSheet("color: #000000; background: transparent; padding: 0; border: none; margin: 0; font-size: 50px;")
                 elif key == 'pr_interval':
-                    label.setStyleSheet("color: #ff0000; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #000000; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'qrs_duration':
-                    label.setStyleSheet("color: #ff8f00; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #000000; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'qrs_axis':
-                    label.setStyleSheet("color: #ff8f00; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #000000; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'st_segment':
-                    label.setStyleSheet("color: #1976d2; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #000000; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'time_elapsed':
-                    label.setStyleSheet("color: #424242; background: transparent; padding: 4px 0px; border: none;")
+                    label.setStyleSheet("color: #000000; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
             
             # Update title colors to dark gray for light mode
             for child in self.metrics_frame.findChildren(QLabel):
@@ -3230,6 +3230,21 @@ class ECGTestPage(QWidget):
 
         if port == "Select Port" or baud == "Select Baud Rate" or port is None or baud is None:
             self.show_connection_warning("Please configure serial port and baud rate in System Setup first.")
+            return
+        
+        # Ensure the selected COM port is actually connected/available before starting
+        try:
+            available_ports = []
+            try:
+                available_ports = [p.device for p in serial.tools.list_ports.comports()]
+            except Exception:
+                available_ports = []
+            if (not available_ports) or (port not in available_ports):
+                self.show_connection_warning("Connect device and select a valid COM port before starting.")
+                return
+        except Exception:
+            # If we cannot verify ports reliably, be safe and block start
+            self.show_connection_warning("Unable to detect COM ports. Please connect device and select a valid port.")
             return
         
         try:

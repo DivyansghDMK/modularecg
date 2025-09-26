@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import numpy as np
-from PyQt5.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve, QTimer, pyqtProperty
+from PyQt5.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve, QTimer, pyqtProperty, QRect
 from PyQt5.QtGui import QIntValidator
 from utils.settings_manager import SettingsManager
 import os
@@ -260,6 +260,15 @@ class SlidingPanel(QWidget):
                 # Make content widget responsive
                 self.make_content_responsive(content_widget)
                 self.content_layout.addWidget(content_widget)
+
+            # Force Layout so first-open renders correctly
+            try:
+                self.content_widget.adjustSize()
+                self.layout.activate()
+                QApplication.processEvents()
+                self.update()
+            except:
+                pass
             
             # Calculate target position (centered on the right side with proper margins)
             # Ensure panel doesn't go off-screen on small devices
@@ -269,12 +278,15 @@ class SlidingPanel(QWidget):
             # Ensure panel doesn't exceed parent bounds
             if target_y + self.height() > self.parent.height() - 10:
                 target_y = self.parent.height() - self.height() - 10
-            
-            # Set up animation
-            self.animation.setStartValue(self.geometry())
-            self.animation.setEndValue(self.parent.geometry().adjusted(target_x, target_y, 
-                                                                     target_x + self.width(), 
-                                                                     target_y + self.height()))
+
+            start_rect = QRect(self.parent.width(), target_y, self.width(), self.height())
+            end_rect = QRect(target_x, target_y, self.width(), self.height())
+
+            # Set up animation using Local QRect
+            self.setGeometry(start_rect)
+
+            self.animation.setStartValue(start_rect)
+            self.animation.setEndValue(end_rect)
 
             # Disconnect any existing connections
             try:
@@ -333,12 +345,12 @@ class SlidingPanel(QWidget):
             # Calculate end position (off-screen to the right)
             end_x = self.parent.width()
             end_y = (self.parent.height() - self.height()) // 2
-            
-            # Set up animation
-            self.animation.setStartValue(self.geometry())
-            self.animation.setEndValue(self.parent.geometry().adjusted(end_x, end_y, 
-                                                                     end_x + self.width(), 
-                                                                     end_y + self.height()))
+
+            # Set up animation using Local QRect
+            start_rect = QRect(self.x(), self.y(), self.width(), self.height())
+            end_rect = QRect(end_x, end_y, self.width(), self.height())
+            self.animation.setStartValue(start_rect)
+            self.animation.setEndValue(end_rect)
             
             # Disconnect any existing connections
             try:
@@ -537,50 +549,66 @@ class ECGMenu(QGroupBox):
 
     def show_sliding_panel(self, content_widget, title, button_name):
         
-        if self.current_open_panel == button_name and self.sliding_panel and self.sliding_panel.is_visible:
+        # If same button clicked while visible → toggle close
+        if self.sliding_panel and self.sliding_panel.is_visible and self.current_open_panel == button_name:
             self.hide_sliding_panel()
             self.current_open_panel = None
             return
-        
-        # If a different panel is open, close it first
-        if self.sliding_panel and self.sliding_panel.is_visible:
-            self.hide_sliding_panel()
-        
+
+        # If panel exists and is visible but a different button was clicked → IMMEDIATE SWAP (no slide-out/in)
+        if self.sliding_panel and self.sliding_panel.is_visible and self.current_open_panel != button_name:
+            try:
+                self.sliding_panel.animation.stop()
+            except:
+                pass
+            self.sliding_panel.is_animating = False
+
+            # Prepare content (wrap in scroll area for short panels)
+            target = self.create_scrollable_content(content_widget) if (content_widget and self.sliding_panel.panel_height < 700) else content_widget
+
+            # Replace content immediately
+            self.sliding_panel.clear_content()
+            if target:
+                # Make responsive and add
+                try:
+                    self.sliding_panel.make_content_responsive(target)
+                except:
+                    pass
+                self.sliding_panel.content_layout.addWidget(target)
+
+            # Ensure sizing/position and keep it visible
+            self.sliding_panel.update_responsive_sizing()
+            self.sliding_panel.reposition_panel()
+            self.sliding_panel.show()
+            self.sliding_panel.raise_()
+
+            self.current_open_panel = button_name
+            return
+
         # Create sliding panel if it doesn't exist
         if not self.sliding_panel:
-            # Find the parent widget (ECGTestPage)
             parent = self.parent_widget
             if not parent:
                 parent = self.parent()
                 while parent and not hasattr(parent, 'grid_widget'):
                     parent = parent.parent()
-            
             if parent:
                 self.sliding_panel = SlidingPanel(parent)
-                
-                # Setup parent monitoring for responsive updates
                 self.setup_parent_monitoring(parent)
-                
-                # Add sliding panel to the main layout
                 if hasattr(parent, 'grid_widget') and parent.grid_widget.layout():
                     parent.grid_widget.layout().addWidget(self.sliding_panel)
-                    print("Added sliding panel to layout")  
                 else:
-                    print("Could not add sliding panel to layout")  
+                    print("Could not add sliding panel to layout")
             else:
                 print("Could not find parent widget")
-        
-        # Show the panel
+
+        # First open → slide in
         if self.sliding_panel:
-            # Make content scrollable for smaller screens
-            if content_widget and self.sliding_panel.panel_height < 700:
-                scrollable_content = self.create_scrollable_content(content_widget)
-                self.sliding_panel.slide_in(scrollable_content, title)
-            else:
-                self.sliding_panel.slide_in(content_widget, title)
+            target = self.create_scrollable_content(content_widget) if (content_widget and self.sliding_panel.panel_height < 700) else content_widget
+            self.sliding_panel.slide_in(target, title)
             self.current_open_panel = button_name
         else:
-            print("Sliding panel is None")  
+            print("Sliding panel is None") 
 
     def hide_sliding_panel(self):
         if self.sliding_panel and self.sliding_panel.is_visible:
@@ -599,6 +627,23 @@ class ECGMenu(QGroupBox):
                 parent = parent.parent()
             if parent:
                 self.parent_widget = parent
+
+        # Ensure sliding panel exists BEFORE creating content (so margins/spacing are correct)
+        if not self.sliding_panel:
+            parent = self.parent_widget
+            if not parent:
+                parent = self.parent()
+                while parent and not hasattr(parent, 'grid_widget'):
+                    parent = parent.parent()
+            if parent:
+                self.sliding_panel = SlidingPanel(parent)
+                self.setup_parent_monitoring(parent)
+                if hasattr(parent, 'grid_widget') and parent.grid_widget.layout():
+                    parent.grid_widget.layout().addWidget(self.sliding_panel)
+
+        # Update responsive sizing so margin_size/spacing_size are current
+        if self.sliding_panel:
+            self.sliding_panel.update_responsive_sizing()
         
         content_widget = self.create_save_ecg_content()
         self.show_sliding_panel(content_widget, "Save ECG Details", "Save ECG")
@@ -1884,11 +1929,13 @@ class ECGMenu(QGroupBox):
                     border-radius: 10px;
                     padding: {max(8, int(margin_size * 0.4))}px;
                     margin: {max(5, int(margin_size * 0.25))}px;
+                    margin-top: {max(18, int(margin_size * 1.0))}px;
                 }}
                 QGroupBox:title {{
                     subcontrol-origin: margin;
+                    subcontrol-position: top left;
                     left: 12px;
-                    top: 6px;
+                    top: 0px;
                     padding: 0 8px 0 8px;
                     color: #ff6600;
                     font-weight: bold;
@@ -1914,7 +1961,7 @@ class ECGMenu(QGroupBox):
                         color: #2c3e50;
                         background: white;
                         padding: {max(4, int(margin_size * 0.2))}px;
-                        border: 2px solid #e0e0e0;
+                        border: 1px solid #e0e0e0;
                         border-radius: 6px;
                         min-width: {button_width}px;
                         min-height: {button_height}px;
@@ -1935,10 +1982,11 @@ class ECGMenu(QGroupBox):
                         border: 2px solid #e0e0e0;
                         border-radius: {max(5, int(margin_size * 0.25))}px;
                         background: white;
-                        margin: 1px;
+                        margin-left: 6px;
+                        margin-right: 8px;
                     }}
                     QRadioButton::indicator:checked {{
-                        border: 2px solid #ff6600;
+                        border: 1px solid #ff6600;
                         background: #ff6600;
                     }}
                 """)
