@@ -2019,17 +2019,17 @@ class ECGTestPage(QWidget):
             # Update text colors for medical mode
             for key, label in self.metric_labels.items():
                 if key == 'heart_rate':
-                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 0; border: none; margin: 0; font-size: 50px;")
+                    label.setStyleSheet("color: #2e7d32; background: transparent; padding: 0; border: none; margin: 0; font-size: 50px;")
                 elif key == 'pr_interval':
-                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
+                    label.setStyleSheet("color: #2e7d32; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'qrs_duration':
-                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
+                    label.setStyleSheet("color: #2e7d32; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'qrs_axis':
-                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
+                    label.setStyleSheet("color: #2e7d32; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'st_segment':
-                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
+                    label.setStyleSheet("color: #2e7d32; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
                 elif key == 'time_elapsed':
-                    label.setStyleSheet("color: #ffffff; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
+                    label.setStyleSheet("color: #2e7d32; background: transparent; padding: 4px 0px; border: none; font-size: 50px;")
             
             # Update title colors to dark green for medical mode
             for child in self.metrics_frame.findChildren(QLabel):
@@ -4359,9 +4359,7 @@ class ECGTestPage(QWidget):
                 ax.tick_params(axis='y', colors='#333333', labelsize=10)
                 ax.set_ylabel(ax.get_ylabel(), color='#333333', fontsize=14, fontweight='bold', labelpad=15)
                 for spine in ax.spines.values():
-                    spine.set_visible(True)
-                    spine.set_color('#333333')
-                    spine.set_linewidth(1.0)
+                    spine.set_visible(False)
                 ax.figure.canvas.draw()
             
             for line in self._overlay_lines:

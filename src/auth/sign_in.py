@@ -1,5 +1,6 @@
 import os
 import json
+from typing import Dict, Any, Optional, Tuple
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox, QStackedWidget, QWidget, QSizePolicy
 )
@@ -32,33 +33,118 @@ USER_DATA_FILE = os.path.join(os.path.dirname(__file__), '../../users.json')
 
 class SignIn:
     def __init__(self):
-        self.users = self.load_users()
+        self.users: Dict[str, Dict[str, Any]] = self.load_users()
 
-    def load_users(self):
-        if os.path.exists(USER_DATA_FILE):
-            with open(USER_DATA_FILE, "r") as f:
-                return json.load(f)
+    def _migrate_legacy_format(self, raw: Any) -> Dict[str, Dict[str, Any]]:
+        # Legacy format: {username: password}
+        if isinstance(raw, dict):
+            sample_values = list(raw.values())
+            if len(sample_values) == 0:
+                return {}
+            if isinstance(sample_values[0], str):
+                return {u: {"password": p} for u, p in raw.items()}
+            # Already in new structured format
+            return raw
+        # Unknown/invalid -> start fresh
         return {}
 
-    def save_users(self):
+    def load_users(self) -> Dict[str, Dict[str, Any]]:
+        if os.path.exists(USER_DATA_FILE):
+            try:
+                with open(USER_DATA_FILE, "r") as f:
+                    data = json.load(f)
+                return self._migrate_legacy_format(data)
+            except Exception:
+                return {}
+        return {}
+
+    def save_users(self) -> None:
         with open(USER_DATA_FILE, "w") as f:
-            json.dump(self.users, f)
+            json.dump(self.users, f, indent=2)
 
-    def sign_in_user(self, username, password):
-        if self.validate_credentials(username, password):
-            return True
-        else:
+    def _find_user_record(self, identifier: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+        # Identifier may be username (dict key) or phone
+        if identifier in self.users:
+            return identifier, self.users[identifier]
+        for uname, record in self.users.items():
+            if str(record.get("phone", "")) == str(identifier):
+                return uname, record
+        return None
+
+    def sign_in_user(self, username: str, password: str) -> bool:
+        # Backward-compatible: validate using password or fallback serial
+        return self.validate_credentials(username, password)
+
+    def sign_in_user_allow_serial(self, identifier: str, secret: str) -> bool:
+        found = self._find_user_record(identifier)
+        if not found:
             return False
+        _, record = found
+        stored_password = str(record.get("password", ""))
+        serial_id = str(record.get("serial_id", ""))
+        # Accept either real password or machine serial ID
+        return str(secret) == stored_password or (serial_id and str(secret) == serial_id)
 
-    def validate_credentials(self, username, password):
-        return self.users.get(username) == password
+    def validate_credentials(self, username: str, password: str) -> bool:
+        found = self._find_user_record(username)
+        if not found:
+            return False
+        _, record = found
+        stored_password = str(record.get("password", "")) if isinstance(record, dict) else str(record)
+        if str(password) == stored_password:
+            return True
+        # Also allow serial as password (forgot-password convenience)
+        serial_id = str(record.get("serial_id", "")) if isinstance(record, dict) else ""
+        return bool(serial_id) and str(password) == serial_id
 
-    def register_user(self, username, password):
-        if username in self.users:
-            return False  # Username already exists
-        self.users[username] = password
-        self.save_users()
+    def _is_unique(self, key: str, value: str) -> bool:
+        if not value:
+            return True
+        for uname, rec in self.users.items():
+            if str(rec.get(key, "")) == str(value):
+                return False
         return True
+
+    def register_user_with_details(
+        self,
+        username: str,
+        password: str,
+        full_name: Optional[str] = None,
+        phone: Optional[str] = None,
+        serial_id: Optional[str] = None,
+        email: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str]:
+        # Username uniqueness
+        if username in self.users:
+            return False, "Username already exists."
+        # Enforce uniqueness: machine serial ID, full name, phone number
+        if serial_id and not self._is_unique("serial_id", serial_id):
+            return False, "Machine Serial ID already registered."
+        if full_name and not self._is_unique("full_name", full_name):
+            return False, "Full Name already registered."
+        if phone and not self._is_unique("phone", phone):
+            return False, "Phone number already registered."
+        record: Dict[str, Any] = {
+            "password": password,
+            "full_name": full_name or "",
+            "phone": phone or "",
+            "serial_id": serial_id or "",
+            "email": email or "",
+        }
+        if isinstance(extra, dict):
+            # Only include simple JSON-serializable values
+            for k, v in extra.items():
+                if k not in record:
+                    record[k] = v
+        self.users[username] = record
+        self.save_users()
+        return True, "Registration successful."
+
+    def register_user(self, username: str, password: str) -> bool:
+        # Maintain legacy API, without extra details
+        ok, _ = self.register_user_with_details(username=username, password=password)
+        return ok
 
 
 class LoginRegisterDialog(QDialog):
@@ -237,9 +323,13 @@ class LoginRegisterDialog(QDialog):
         
         # Create all input fields with glass morphism style
         self.reg_username = QLineEdit()
-        self.reg_username.setPlaceholderText("Username")
+        self.reg_username.setPlaceholderText("Username (will be your phone)")
         self.reg_username.setStyleSheet(self.login_username.styleSheet())
         
+        self.reg_serial = QLineEdit()
+        self.reg_serial.setPlaceholderText("Machine Serial ID")
+        self.reg_serial.setStyleSheet(self.login_username.styleSheet())
+
         self.reg_password = QLineEdit()
         self.reg_password.setPlaceholderText("Password")
         self.reg_password.setEchoMode(QLineEdit.Password)
@@ -275,12 +365,13 @@ class LoginRegisterDialog(QDialog):
         register_btn.clicked.connect(self.handle_register)
         
         # Set size policy for all widgets
-        for w in [self.reg_username, self.reg_password, self.reg_confirm, self.reg_fullname, 
+        for w in [self.reg_username, self.reg_serial, self.reg_password, self.reg_confirm, self.reg_fullname, 
                   self.reg_age, self.reg_gender, self.reg_contact, self.reg_email, register_btn]:
             w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         
         # Add widgets to layout
         layout.addWidget(self.reg_username)
+        layout.addWidget(self.reg_serial)
         layout.addWidget(self.reg_password)
         layout.addWidget(self.reg_confirm)
         layout.addWidget(self.reg_fullname)
@@ -295,34 +386,44 @@ class LoginRegisterDialog(QDialog):
 
     def handle_login(self):
         username = self.login_username.text()
-        password = self.login_password.text()
-        if self.sign_in_logic.sign_in_user(username, password):
+        password_or_serial = self.login_password.text()
+        if self.sign_in_logic.sign_in_user_allow_serial(username, password_or_serial):
             self.result = True
             self.username = username
             self.accept()
         else:
-            QMessageBox.warning(self, "Error", "Invalid username or password.")
+            QMessageBox.warning(self, "Error", "Invalid username or password/serial.")
 
     def handle_register(self):
         username = self.reg_username.text()
         password = self.reg_password.text()
         confirm = self.reg_confirm.text()
+        serial_id = self.reg_serial.text()
         fullname = self.reg_fullname.text()
         age = self.reg_age.text()
         gender = self.reg_gender.text()
         contact = self.reg_contact.text()
         email = self.reg_email.text()
-        if not username or not password:
-            QMessageBox.warning(self, "Error", "Username and password required.")
+        if not username or not password or not serial_id:
+            QMessageBox.warning(self, "Error", "Username, password and machine serial ID are required.")
             return
         if password != confirm:
             QMessageBox.warning(self, "Error", "Passwords do not match.")
             return
         if not fullname or not age or not gender or not contact or not email:
-            QMessageBox.warning(self, "Error", "All details required.")
+            QMessageBox.warning(self, "Error", "All details are required.")
             return
-        if not self.sign_in_logic.register_user(username, password):
-            QMessageBox.warning(self, "Error", "Username already exists.")
+        ok, msg = self.sign_in_logic.register_user_with_details(
+            username=username,
+            password=password,
+            full_name=fullname,
+            phone=contact,
+            serial_id=serial_id,
+            email=email,
+            extra={"age": age, "gender": gender}
+        )
+        if not ok:
+            QMessageBox.warning(self, "Error", msg)
             return
         QMessageBox.information(self, "Success", "Registration successful! You can now sign in.")
         self.stacked.setCurrentIndex(0)
