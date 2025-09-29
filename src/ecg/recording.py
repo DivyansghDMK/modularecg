@@ -153,7 +153,7 @@ class SlidingPanel(QWidget):
             QWidget {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
                     stop:0 #ffffff, stop:1 #f8f9fa);
-                border: 3px solid #ff6600;
+                border: 3px solid #e0e0e0;
                 border-radius: 15px;
             }}
         """)
@@ -668,7 +668,7 @@ class ECGMenu(QGroupBox):
                 color: white;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #ff6600, stop:1 #ff8c42);
-                border: 3px solid #ff6600;
+                border: 2px solid #343434;
                 border-radius: 15px;
                 padding: {max(15, margin_size-10)}px;
                 margin: {max(5, margin_size-15)}px;
@@ -732,7 +732,7 @@ class ECGMenu(QGroupBox):
                     color: #2c3e50;
                 }}
                 QLineEdit:focus {{
-                    border: 2px solid #ff6600;
+                    border: 2px solid #343434;
                     background: #fff8f0;
                 }}
                 QLineEdit:hover {{
@@ -780,7 +780,7 @@ class ECGMenu(QGroupBox):
                 color: #2c3e50;
             }}
             QLineEdit:focus {{
-                border: 2px solid #ff6600;
+                border: 2px solid #343434;
                 background: #fff8f0;
             }}
             QLineEdit:hover {{
@@ -824,7 +824,7 @@ class ECGMenu(QGroupBox):
                 color: #2c3e50;
             }}
             QComboBox:focus {{
-                border: 2px solid #ff6600;
+                border: 2px solid #343434;
                 background: #fff8f0;
             }}
             QComboBox:hover {{
