@@ -575,10 +575,11 @@ class Dashboard(QWidget):
         self.metric_labels = {}
         metric_info = [
             ("Heart Rate", "00", "BPM", "heart_rate"),
-            ("PR Intervals", "0", "ms", "pr_interval"),
-            ("QRS Complex", "0", "ms", "qrs_duration"),
+            ("PR Intervals", "160", "ms", "pr_interval"),
+            ("QRS Complex", "85", "ms", "qrs_duration"),
             ("QRS Axis", "0°", "", "qrs_axis"),
-            ("ST Interval", "0", "ms", "st_interval"),
+            ("ST Interval", "90", "ms", "st_interval"),
+            ("Time", "00:00", "", "time_elapsed"),
             ("Sampling Rate", "0", "Hz", "sampling_rate"),
         ]
         
@@ -1117,7 +1118,8 @@ class Dashboard(QWidget):
             self.metric_labels['qrs_duration'].setText(
                 f"{int(round(intervals['QRS']))} ms" if isinstance(intervals['QRS'], (int, float)) else str(intervals['QRS'])
             )
-        if 'QTc' in intervals and intervals['QTc'] is not None:
+        # QTc label may not exist in current metrics card; update only if present
+        if 'QTc' in intervals and intervals['QTc'] is not None and 'qtc_interval' in self.metric_labels:
             if isinstance(intervals['QTc'], (int, float)) and intervals['QTc'] >= 0:
                 self.metric_labels['qtc_interval'].setText(f"{int(round(intervals['QTc']))} ms")
             else:
@@ -1125,7 +1127,9 @@ class Dashboard(QWidget):
         if 'QRS_axis' in intervals and intervals['QRS_axis'] is not None:
             self.metric_labels['qrs_axis'].setText(str(intervals['QRS_axis']))
         if 'ST' in intervals and intervals['ST'] is not None:
-            self.metric_labels['st_segment'].setText(
+            # Current metrics card uses 'st_interval' key
+            key = 'st_interval' if 'st_interval' in self.metric_labels else 'st_segment'
+            self.metric_labels[key].setText(
                 f"{int(round(intervals['ST']))} ms" if isinstance(intervals['ST'], (int, float)) else str(intervals['ST'])
             )
         # Also update the ECG test page theme if it exists
@@ -1178,6 +1182,10 @@ class Dashboard(QWidget):
                                 'st_interval': self.metric_labels['st_interval'].text() if 'st_interval' in self.metric_labels else None,
                                 'sampling_rate': self.metric_labels['sampling_rate'].text() if 'sampling_rate' in self.metric_labels else None,
                             }
+                            # Ensure demo live time is reflected if provided by demo manager
+                            if 'time_elapsed' in ecg_metrics and 'time_elapsed' in self.metric_labels:
+                                self.metric_labels['time_elapsed'].setText(ecg_metrics['time_elapsed'])
+
                             # Snapshot last 5s per lead
                             from utils.session_recorder import SessionRecorder
                             ecg_snapshot = SessionRecorder.snapshot_from_ecg_page(self.ecg_test_page, seconds=5.0)
