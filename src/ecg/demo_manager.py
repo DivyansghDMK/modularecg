@@ -37,6 +37,9 @@ class DemoManager:
         self._demo_fixed_metrics = None
         # Internal running flag to avoid touching Qt widgets from worker thread
         self._running_demo = False
+        # Warmup control to avoid distorted first seconds
+        self._warmup_until = 0.0
+        self._baseline_means = {}
         # Stop threads if the page is destroyed
         try:
             self.ecg_test_page.destroyed.connect(self._on_page_destroyed)
@@ -186,8 +189,17 @@ class DemoManager:
                     initial_samples = prefill_needed
                     series = df[lead].iloc[:initial_samples]
                     count = min(len(series), self.ecg_test_page.buffer_size)
-                    self.ecg_test_page.data[lead_index][:count] = np.array(series[:count])
+                    arr = np.array(series[:count], dtype=float)
+                    # Record per‑lead baseline from the first 200 samples (or all available)
+                    baseline_window = max(1, min(200, arr.size))
+                    baseline_mean = float(np.mean(arr[:baseline_window])) if arr.size > 0 else 0.0
+                    self._baseline_means[lead_index] = baseline_mean
+                    # Prefill with baseline‑centered data to reduce initial DC offset
+                    self.ecg_test_page.data[lead_index][:count] = arr - baseline_mean
             
+            # Set warmup window to avoid initial visual artifacts
+            self._warmup_until = time.time() + 3.0
+
             # Start reading data row by row from CSV with wave speed control
             def read_csv_data():
                 try:
@@ -228,10 +240,12 @@ class DemoManager:
                                             if (hasattr(self.ecg_test_page, 'data') and 
                                                 lead_index < len(self.ecg_test_page.data) and
                                                 len(self.ecg_test_page.data[lead_index]) > 0):
-                                                
+                                                # Apply baseline centering using captured baseline
+                                                baseline = self._baseline_means.get(lead_index, 0.0)
+                                                centered_value = float(value) - baseline
                                                 self.ecg_test_page.data[lead_index] = np.roll(
                                                     self.ecg_test_page.data[lead_index], -1)
-                                                self.ecg_test_page.data[lead_index][-1] = value
+                                                self.ecg_test_page.data[lead_index][-1] = centered_value
                                             else:
                                                 print(f"❌ Invalid data buffer for lead {lead_index}")
                                                 
@@ -357,8 +371,18 @@ class DemoManager:
             current_gain = float(self.ecg_test_page.settings_manager.get_wave_gain()) / 10.0
         except Exception:
             current_gain = 1.0
-        
-        print(f"🎛️ update_demo_plots: Applied gain={current_gain}")
+
+        # During warmup, ramp the gain to avoid overshoot and clipping
+        now_ts = time.time()
+        if now_ts < self._warmup_until:
+            warmup_left = max(0.0, self._warmup_until - now_ts)
+            warmup_total = 3.0
+            ramp = max(0.2, 1.0 - (warmup_left / warmup_total) * 0.8)  # from 0.2 -> 1.0
+            effective_gain = current_gain * ramp
+        else:
+            effective_gain = current_gain
+
+        print(f"🎛️ update_demo_plots: Applied gain={effective_gain}")
         
         # 2. For each lead, slice and update (exactly like divyansh.py)
         for i, lead in enumerate(self.ecg_test_page.leads):
@@ -374,8 +398,8 @@ class DemoManager:
                 idx = (start + np.arange(num_samples_to_show)) % total_len
                 data_slice = lead_data[idx]
                 
-                # Apply gain exactly like divyansh.py
-                display_data = data_slice * current_gain
+                # Apply gain exactly like divyansh.py (with warmup ramp)
+                display_data = data_slice * effective_gain
                 
                 # Build time axis exactly matching window length for this speed
                 n = num_samples_to_show
@@ -401,8 +425,10 @@ class DemoManager:
         print(f"🎛️ update_demo_plots: Completed successfully")
         
         # Calculate intervals for dashboard in demo mode
+        # Skip during warmup to avoid unstable early metrics
         if hasattr(self.ecg_test_page, 'dashboard_callback') and self.ecg_test_page.dashboard_callback:
-            self._calculate_demo_intervals()
+            if time.time() >= self._warmup_until:
+                self._calculate_demo_intervals()
 
     def start_synthetic_demo(self):
         """Stream synthetic ECG-like waves when CSV is unavailable."""
