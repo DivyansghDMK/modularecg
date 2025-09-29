@@ -40,6 +40,8 @@ class DemoManager:
         # Warmup control to avoid distorted first seconds
         self._warmup_until = 0.0
         self._baseline_means = {}
+        # Track demo start time for live time metric
+        self._demo_started_at = None
         # Stop threads if the page is destroyed
         try:
             self.ecg_test_page.destroyed.connect(self._on_page_destroyed)
@@ -199,6 +201,7 @@ class DemoManager:
             
             # Set warmup window to avoid initial visual artifacts
             self._warmup_until = time.time() + 3.0
+            self._demo_started_at = time.time()
 
             # Start reading data row by row from CSV with wave speed control
             def read_csv_data():
@@ -604,14 +607,14 @@ class DemoManager:
                         # Initialize fixed demo metrics once, then keep constant
                         if self._demo_fixed_metrics is None:
                             try:
-                                fixed_hr = 60
-                                fixed_pr = int(round(pr_interval)) if pr_interval is not None else 160
-                                fixed_qrs = int(round(qrs_duration)) if qrs_duration is not None else 90
+                                fixed_hr = 60  # BPM (fixed)
+                                fixed_pr = 160  # ms (fixed)
+                                fixed_qrs = 85  # ms (fixed)
                                 fixed_qtc = int(round(qtc_interval)) if (qtc_interval is not None and qtc_interval >= 0) else 400
                                 fixed_axis = qrs_axis if qrs_axis is not None else "0°"
-                                fixed_st = st_out if st_out is not None else "Isoelectric"
+                                fixed_st = 90  # ms (fixed)
                             except Exception:
-                                fixed_hr, fixed_pr, fixed_qrs, fixed_qtc, fixed_axis, fixed_st = 60, 160, 90, 400, "0°", "Isoelectric"
+                                fixed_hr, fixed_pr, fixed_qrs, fixed_qtc, fixed_axis, fixed_st = 60, 160, 85, 400, "0°", 90
                             self._demo_fixed_metrics = {
                                 'Heart_Rate': fixed_hr,
                                 'PR': fixed_pr,
@@ -624,6 +627,15 @@ class DemoManager:
 
                         # Always send fixed metrics in demo mode
                         payload = dict(self._demo_fixed_metrics)
+                        # Add live time since demo start in mm:ss
+                        try:
+                            if self._demo_started_at:
+                                elapsed = max(0, int(time.time() - self._demo_started_at))
+                                mm = elapsed // 60
+                                ss = elapsed % 60
+                                payload['time_elapsed'] = f"{mm:02d}:{ss:02d}"
+                        except Exception:
+                            pass
                         try:
                             self.ecg_test_page.dashboard_callback(payload)
                         except Exception as cb_err:
