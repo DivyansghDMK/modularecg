@@ -617,6 +617,30 @@ def main():
             try:
                 if login.exec_() == QDialog.Accepted and login.result:
                     logger.info(f"User {login.username} logged in successfully")
+                    # Attach machine serial ID to crash logger for email subject/body tagging
+                    try:
+                        users = load_users()
+                        record = None
+                        if isinstance(users, dict) and login.username in users:
+                            record = users.get(login.username)
+                        else:
+                            # Fallback: search by phone/contact stored under 'phone'
+                            for uname, rec in (users or {}).items():
+                                try:
+                                    if str(rec.get('phone', '')) == str(login.username):
+                                        record = rec
+                                        break
+                                except Exception:
+                                    continue
+                        serial_id = ''
+                        if isinstance(record, dict):
+                            serial_id = str(record.get('serial_id', ''))
+                        if serial_id:
+                            crash_logger.set_machine_serial_id(serial_id)
+                            os.environ['MACHINE_SERIAL_ID'] = serial_id
+                            logger.info(f"Machine serial ID set for crash reporting: {serial_id}")
+                    except Exception as e:
+                        logger.warning(f"Could not set machine serial ID for crash reporting: {e}")
                     
                     # Create and show dashboard
                     dashboard = Dashboard(username=login.username, role=None)

@@ -36,13 +36,140 @@ class ChatbotThread(QThread):
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            # Use a supported Gemini model for text generation
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(self.prompt)
-            reply = response.text
+            # Prefer stable models. Allow override via CHATBOT_MODEL env.
+            env_model = os.getenv("CHATBOT_MODEL", "").strip()
+            ordered_full_names = [
+                "models/" + env_model if env_model and not env_model.startswith("models/") else env_model,
+                "models/gemini-1.5-flash",
+                "models/gemini-1.5-pro",
+            ]
+            ordered_full_names = [m for m in ordered_full_names if m]
+            model_name = None
+            available_names = set()
+            try:
+                available = list(genai.list_models())
+                for m in available:
+                    n = getattr(m, "name", "")
+                    if n:
+                        available_names.add(n)
+                # Prefer free/flash models if available
+                flash_candidates = [n for n in available_names if "1.5-flash" in n]
+                if flash_candidates:
+                    model_name = sorted(flash_candidates)[0]
+                # Else use first preferred present
+                if not model_name:
+                    for cand in ordered_full_names:
+                        if cand in available_names:
+                            model_name = cand
+                            break
+                # Else pick any model that supports generateContent
+                if not model_name:
+                    for m in available:
+                        methods = getattr(m, "supported_generation_methods", []) or []
+                        if "generateContent" in methods and getattr(m, "name", ""):
+                            model_name = m.name
+                            break
+            except Exception:
+                # Fallback to common
+                model_name = "models/gemini-1.5-flash"
+            if not model_name:
+                model_name = "models/gemini-1.5-flash"
+            # Always try plain id first (SDK examples use plain id)
+            plain_id = model_name.split("/", 1)[-1]
+            def build_model(name_or_id):
+                return genai.GenerativeModel(name_or_id)
+            # Retry once on transient/quota errors with server-provided retry delay
+            def _call(active_model):
+                return active_model.generate_content(
+                    self.prompt,
+                    generation_config={
+                        "max_output_tokens": 256,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                    }
+                )
+            try:
+                # Try plain id first
+                model = build_model(plain_id)
+                response = _call(model)
+            except Exception as e1:
+                msg = str(e1)
+                # On 404 try full name, then alternate model
+                if "404" in msg or "not found" in msg.lower():
+                    try:
+                        model = build_model(model_name)  # full form
+                        response = _call(model)
+                    except Exception:
+                        # Try alternate between flash/pro ids (plain form)
+                        alt_full = (
+                            "models/gemini-1.5-pro" if "1.5-flash" in model_name else "models/gemini-1.5-flash"
+                        )
+                        alt_plain = alt_full.split("/", 1)[-1]
+                        try:
+                            model = build_model(alt_plain)
+                            response = _call(model)
+                        except Exception as e2:
+                            # Surface available models to help user set CHATBOT_MODEL
+                            try:
+                                models_str = "\n".join(sorted(available_names)) if available_names else "(list_models unavailable)"
+                            except Exception:
+                                models_str = "(list_models unavailable)"
+                            self.response_ready.emit(
+                                "Error: Selected model not available.\n"
+                                f"Tried (plain): {plain_id}\nTried (full): {model_name}\n"
+                                f"Available on this key:\n{models_str}\n\n"
+                                "Set CHATBOT_MODEL to one of the above (use full name from list)."
+                            )
+                            return
+                elif "429" in msg or "quota" in msg.lower():
+                    import re, time
+                    wait_s = 30
+                    m = re.search(r"retry[_ ]delay\s*{\s*seconds:\s*(\d+)", msg)
+                    if not m:
+                        m = re.search(r"Please retry in\s*([0-9.]+)s", msg)
+                    if m:
+                        try:
+                            wait_s = int(float(m.group(1)))
+                        except Exception:
+                            wait_s = 30
+                    time.sleep(min(wait_s, 60))
+                    # After wait, try alternate plain id to avoid same cap
+                    alt_full = (
+                        "models/gemini-1.5-pro" if "1.5-flash" in model_name else "models/gemini-1.5-flash"
+                    )
+                    alt_plain = alt_full.split("/", 1)[-1]
+                    try:
+                        model = build_model(alt_plain)
+                        response = _call(model)
+                    except Exception as e2:
+                        self.response_ready.emit(
+                            "Quota exceeded or rate limited.\n"
+                            "Try later, shorten prompts, or enable billing.\n"
+                            "Docs: https://ai.google.dev/gemini-api/docs/rate-limits\n\n"
+                            f"Details: {e2}"
+                        )
+                        return
+                else:
+                    self.response_ready.emit(f"Error: {e1}")
+                    return
+            # Safely extract text
+            reply = getattr(response, "text", None)
+            if not reply:
+                try:
+                    lines = []
+                    for c in getattr(response, "candidates", []) or []:
+                        content = getattr(c, "content", None)
+                        parts = getattr(content, "parts", []) if content else []
+                        for p in parts:
+                            t = getattr(p, "text", None)
+                            if t:
+                                lines.append(t)
+                    reply = "\n".join(lines) if lines else "(No content returned by model)"
+                except Exception:
+                    reply = "(No content returned by model)"
             self.response_ready.emit(reply)
         except Exception as e:
-            self.response_ready.emit(f"Error: {str(e)}")
+            self.response_ready.emit(f"Error: {e}")
 
 class ChatbotDialog(QDialog):
     def __init__(self, parent=None, user_id=None, dashboard_data_func=None):

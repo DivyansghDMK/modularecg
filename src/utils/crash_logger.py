@@ -12,7 +12,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QMessageBox, QProgressBar, QGroupBox, QLineEdit, QFormLayout
-import base64
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 
@@ -86,23 +85,11 @@ class CrashLogger:
         self.session_start = datetime.now()
         self.error_count = 0
         self.crash_count = 0
+        # Optional machine serial id to include in reports
+        self.machine_serial_id = os.getenv('MACHINE_SERIAL_ID', '')
         
         # Log session start
         self.log_info("Application started", "SESSION_START")
-    
-    def _get_default_credentials(self):
-        """Return built-in fallback credentials so email works without config.
-        Values are lightly obfuscated to avoid plain text in source."""
-        try:
-            # email: divyansh.srivastava@deckmount.in
-            e_b64 = "ZGl2eWFuc2guc3JpdmFzdGF2YUBkZWNrbW91bnQuaW4="
-            # app password: vcycezrmzzormkeg
-            p_b64 = "dmN5Y2V6cm16em9ybWtlZw=="
-            email = os.getenv('DEFAULT_EMAIL_SENDER', base64.b64decode(e_b64).decode('utf-8'))
-            password = os.getenv('DEFAULT_EMAIL_PASSWORD', base64.b64decode(p_b64).decode('utf-8'))
-            return email, password
-        except Exception:
-            return '', ''
 
     def _validate_email_config(self):
         """Validate email configuration and provide helpful error messages"""
@@ -170,11 +157,6 @@ class CrashLogger:
                 cfg['sender_email'] = user_cfg.get('sender_email', cfg['sender_email'])
                 cfg['sender_password'] = user_cfg.get('sender_password', cfg['sender_password'])
                 cfg['subject_prefix'] = user_cfg.get('subject_prefix', cfg['subject_prefix'])
-        # If still missing, fall back to built-in credentials
-        if not cfg['sender_email'] or not cfg['sender_password']:
-            def_email, def_pass = self._get_default_credentials()
-            cfg['sender_email'] = cfg['sender_email'] or def_email
-            cfg['sender_password'] = cfg['sender_password'] or def_pass
         # Ensure recipient = sender per requirement
         if not cfg['recipient_email']:
             cfg['recipient_email'] = cfg['sender_email']
@@ -228,8 +210,7 @@ class CrashLogger:
                 'memory_available': f"{psutil.virtual_memory().available / (1024**3):.1f} GB",
                 'disk_usage': f"{psutil.disk_usage('/').percent:.1f}%",
                 'current_user': os.getenv('USER', 'Unknown'),
-                'working_directory': os.getcwd(),
-                'environment_variables': dict(os.environ)
+                'working_directory': os.getcwd()
             }
         except Exception as e:
             return {'error': f"Failed to get system info: {str(e)}"}
@@ -281,6 +262,7 @@ class CrashLogger:
             'exception_message': str(exception) if exception else None,
             'traceback': traceback.format_exc() if exception else None,
             'context': context,
+            'machine_serial_id': self.machine_serial_id or None,
             'crash_count': self.crash_count,
             'session_duration': str(datetime.now() - self.session_start),
             'system_info': self.system_info,
@@ -299,6 +281,15 @@ class CrashLogger:
         
         # Auto-send email for critical crashes
         threading.Thread(target=self._send_crash_email, args=(crash_data,), daemon=True).start()
+
+    def set_machine_serial_id(self, serial_id: str):
+        """Set the machine serial id to include in subsequent crash reports and emails."""
+        try:
+            self.machine_serial_id = str(serial_id or '').strip()
+            if self.machine_serial_id:
+                self.log_info(f"Machine serial set: {self.machine_serial_id}", "SERIAL")
+        except Exception:
+            pass
     
     def _save_crash_log(self, log_data, is_crash=False):
         """Save log data to JSON file"""
@@ -351,7 +342,8 @@ class CrashLogger:
             msg = MIMEMultipart()
             msg['From'] = self.email_config['sender_email']
             msg['To'] = self.email_config['recipient_email']
-            msg['Subject'] = f"{self.email_config['subject_prefix']} - {crash_data['timestamp']}"
+            serial_tag = self.machine_serial_id or 'N/A'
+            msg['Subject'] = f"{self.email_config['subject_prefix']} - {crash_data['timestamp']} [Serial: {serial_tag}]"
             
             # Create email body
             body = f"""
@@ -361,6 +353,7 @@ ECG Monitor Application Crash Report
 Timestamp: {crash_data['timestamp']}
 Session Duration: {crash_data['session_duration']}
 Crash Count: {crash_data['crash_count']}
+Machine Serial: {self.machine_serial_id or 'N/A'}
 
 Error Details:
 --------------
@@ -385,6 +378,11 @@ Memory Usage: {crash_data.get('memory_usage', 'N/A')}
 Recent Log Entries:
 ------------------
 {''.join(crash_data.get('recent_logs', []))}
+
+Log Files:
+----------
+Crash Log: {self.crash_log_file}
+Session Log: {self.session_log_file}
 
 This is an automated crash report from the ECG Monitor application.
 Please investigate and fix the issue.

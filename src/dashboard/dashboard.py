@@ -261,14 +261,16 @@ class Dashboard(QWidget):
         self.medical_btn.setStyleSheet("background: #00b894; color: white; border-radius: 10px; padding: 4px 18px;")
         self.medical_btn.clicked.connect(self.toggle_medical_mode)
         self.medical_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        header.addWidget(self.medical_btn)
+        # Hide button per request while preserving logic
+        self.medical_btn.setVisible(False)
         
         self.dark_btn = QPushButton("Dark Mode")
         self.dark_btn.setCheckable(True)
         self.dark_btn.setStyleSheet("background: #222; color: #fff; border-radius: 10px; padding: 4px 18px;")
         self.dark_btn.clicked.connect(self.toggle_dark_mode)
         self.dark_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        header.addWidget(self.dark_btn)
+        # Hide button per request while preserving logic
+        self.dark_btn.setVisible(False)
         
         # Removed background control button per request
         
@@ -895,8 +897,8 @@ class Dashboard(QWidget):
             
             return metrics
             
-        except Exception as e:
-            print(f"Error calculating live ECG metrics: {e}")
+        except Exception:
+            # Quietly fall back if metrics cannot be calculated
             return {}
 
     def update_dashboard_metrics_live(self, ecg_metrics):
