@@ -321,9 +321,9 @@ class LoginRegisterDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout()
         self.login_email = QLineEdit()
-        self.login_email.setPlaceholderText("Email Address")
+        self.login_email.setPlaceholderText("Username or Phone")
         self.login_password = QLineEdit()
-        self.login_password.setPlaceholderText("Password")
+        self.login_password.setPlaceholderText("Password (or Machine Serial ID)")
         self.login_password.setEchoMode(QLineEdit.Password)
         login_btn = QPushButton("Login")
         login_btn.setObjectName("LoginBtn")
@@ -407,6 +407,8 @@ class LoginRegisterDialog(QDialog):
     def create_register_widget(self):
         widget = QWidget()
         layout = QVBoxLayout()
+        self.reg_serial = QLineEdit()
+        self.reg_serial.setPlaceholderText("Machine Serial ID")
         self.reg_name = QLineEdit()
         self.reg_name.setPlaceholderText("Full Name")
         self.reg_age = QLineEdit()
@@ -426,13 +428,14 @@ class LoginRegisterDialog(QDialog):
         register_btn = QPushButton("Sign Up")
         register_btn.setObjectName("SignUpBtn")
         register_btn.clicked.connect(self.handle_register)
-        for w in [self.reg_name, self.reg_age, self.reg_gender, self.reg_address, self.reg_phone, self.reg_password, self.reg_confirm]:
+        for w in [self.reg_serial, self.reg_name, self.reg_age, self.reg_gender, self.reg_address, self.reg_phone, self.reg_password, self.reg_confirm]:
             w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         # Apply dashboard color coding
-        for w in [self.reg_name, self.reg_age, self.reg_gender, self.reg_address, self.reg_phone, self.reg_password, self.reg_confirm]:
+        for w in [self.reg_serial, self.reg_name, self.reg_age, self.reg_gender, self.reg_address, self.reg_phone, self.reg_password, self.reg_confirm]:
             w.setStyleSheet("border: 2px solid #ff6600; border-radius: 8px; padding: 6px 10px; font-size: 15px; background: #f7f7f7; color: #222;")
         register_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 10px; padding: 8px 0; font-size: 16px; font-weight: bold;")
         register_btn.setMinimumHeight(36)
+        layout.addWidget(self.reg_serial)
         layout.addWidget(self.reg_name)
         layout.addWidget(self.reg_age)
         layout.addWidget(self.reg_gender)
@@ -446,15 +449,15 @@ class LoginRegisterDialog(QDialog):
         return widget
 
     def handle_login(self):
-        email = self.login_email.text()
-        password = self.login_password.text()
-        if self.sign_in_logic.sign_in_user(email, password):
+        email_or_phone = self.login_email.text()
+        password_or_serial = self.login_password.text()
+        if self.sign_in_logic.sign_in_user_allow_serial(email_or_phone, password_or_serial):
             self.result = True
-            self.username = email
+            self.username = email_or_phone
             self.user_details = {}
             self.accept()
         else:
-            QMessageBox.warning(self, "Error", "Invalid email or password.")
+            QMessageBox.warning(self, "Error", "Invalid credentials. Use password or machine serial ID.")
 
     def handle_phone_login(self):
         phone, ok = QInputDialog.getText(self, "Login with Phone Number", "Enter your phone number:")
@@ -467,6 +470,7 @@ class LoginRegisterDialog(QDialog):
             self.accept()
 
     def handle_register(self):
+        serial_id = self.reg_serial.text()
         name = self.reg_name.text()
         age = self.reg_age.text()
         gender = self.reg_gender.text()
@@ -474,15 +478,24 @@ class LoginRegisterDialog(QDialog):
         phone = self.reg_phone.text()
         password = self.reg_password.text()
         confirm = self.reg_confirm.text()
-        if not all([name, age, gender, address, phone, password, confirm]):
-            QMessageBox.warning(self, "Error", "All fields are required.")
+        if not all([serial_id, name, age, gender, address, phone, password, confirm]):
+            QMessageBox.warning(self, "Error", "All fields are required, including Machine Serial ID.")
             return
         if password != confirm:
             QMessageBox.warning(self, "Error", "Passwords do not match.")
             return
-        # Use phone as username for registration
-        if not self.sign_in_logic.register_user(phone, password):
-            QMessageBox.warning(self, "Error", "Phone number already registered.")
+        # Use phone as username for registration, enforce uniqueness on serial/fullname/phone
+        ok, msg = self.sign_in_logic.register_user_with_details(
+            username=phone,
+            password=password,
+            full_name=name,
+            phone=phone,
+            serial_id=serial_id,
+            email="",
+            extra={"age": age, "gender": gender, "address": address}
+        )
+        if not ok:
+            QMessageBox.warning(self, "Error", msg)
             return
         QMessageBox.information(self, "Success", "Registration successful! You can now sign in.")
         self.stacked.setCurrentIndex(0)
