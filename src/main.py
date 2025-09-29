@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from utils.crash_logger import get_crash_logger
+from utils.session_recorder import SessionRecorder
 from PyQt5.QtGui import QFont, QPixmap
 
 # Import core modules
@@ -644,6 +645,23 @@ def main():
                     
                     # Create and show dashboard
                     dashboard = Dashboard(username=login.username, role=None)
+                    # Attach a session recorder for this user
+                    try:
+                        user_record = None
+                        users = load_users()
+                        if isinstance(users, dict) and login.username in users:
+                            user_record = users.get(login.username)
+                        else:
+                            for uname, rec in (users or {}).items():
+                                try:
+                                    if str(rec.get('phone', '')) == str(login.username):
+                                        user_record = rec
+                                        break
+                                except Exception:
+                                    continue
+                        dashboard._session_recorder = SessionRecorder(username=login.username, user_record=user_record or {})
+                    except Exception as e:
+                        logger.warning(f"Session recorder init failed: {e}")
                     dashboard.show()
                     
                     # Run application

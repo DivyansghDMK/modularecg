@@ -1164,6 +1164,29 @@ class Dashboard(QWidget):
                         if sr_text and sr_text != '--':
                             self.metric_labels['sampling_rate'].setText(f"{sr_text}")
                     # Time Elapsed metric removed
+
+                    # Record to session file if enabled
+                    try:
+                        recorder = getattr(self, '_session_recorder', None)
+                        if recorder:
+                            # Pack metrics in compact form
+                            metrics_payload = {
+                                'heart_rate': self.metric_labels['heart_rate'].text() if 'heart_rate' in self.metric_labels else None,
+                                'pr_interval': self.metric_labels['pr_interval'].text() if 'pr_interval' in self.metric_labels else None,
+                                'qrs_duration': self.metric_labels['qrs_duration'].text() if 'qrs_duration' in self.metric_labels else None,
+                                'qrs_axis': self.metric_labels['qrs_axis'].text() if 'qrs_axis' in self.metric_labels else None,
+                                'st_interval': self.metric_labels['st_interval'].text() if 'st_interval' in self.metric_labels else None,
+                                'sampling_rate': self.metric_labels['sampling_rate'].text() if 'sampling_rate' in self.metric_labels else None,
+                            }
+                            # Snapshot last 5s per lead
+                            from utils.session_recorder import SessionRecorder
+                            ecg_snapshot = SessionRecorder.snapshot_from_ecg_page(self.ecg_test_page, seconds=5.0)
+                            # Optional events hook: arrhythmia placeholder
+                            events = {}
+                            recorder.record(metrics_payload, ecg_snapshot, events)
+                    except Exception as rec_err:
+                        # Silent fail; never block UI
+                        pass
                             
         except Exception as e:
             print(f"❌ Error updating dashboard metrics from ECG: {e}")
@@ -1618,6 +1641,13 @@ class Dashboard(QWidget):
     def handle_sign_out(self):
         self.user_label.setText("Not signed in")
         self.sign_btn.setText("Sign In")
+        try:
+            recorder = getattr(self, '_session_recorder', None)
+            if recorder:
+                recorder.close()
+                self._session_recorder = None
+        except Exception:
+            pass
         self.close()
     def go_to_lead_test(self):
         if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
