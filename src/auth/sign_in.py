@@ -66,8 +66,13 @@ class SignIn:
         # Identifier may be username (dict key), phone, or full_name
         if identifier in self.users:
             return identifier, self.users[identifier]
+        ident_norm = str(identifier).strip().lower()
         for uname, record in self.users.items():
-            if str(record.get("phone", "")) == str(identifier):
+            phone = str(record.get("phone", ""))
+            fullname = str(record.get("full_name", ""))
+            if ident_norm == str(phone).strip().lower():
+                return uname, record
+            if fullname and ident_norm == fullname.strip().lower():
                 return uname, record
             if str(record.get("full_name", "")) == str(identifier):
                 return uname, record
