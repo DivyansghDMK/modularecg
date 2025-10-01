@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import threading
 import numpy as np
@@ -173,15 +174,30 @@ class DemoManager:
             except Exception:
                 pass
             self.demo_timer = None
-        # Resolve dummycsv.csv from common locations
+        # Resolve dummycsv.csv from common locations including PyInstaller bundle
         ecg_dir = os.path.dirname(__file__)
         src_dir = os.path.abspath(os.path.join(ecg_dir, '..'))
         project_root = os.path.abspath(os.path.join(src_dir, '..'))
-        candidates = [
-            os.path.join(ecg_dir, 'dummycsv.csv'),
-            os.path.join(project_root, 'dummycsv.csv'),
-            os.path.abspath('dummycsv.csv')
-        ]
+        
+        # Check if running as PyInstaller bundle
+        if getattr(sys, 'frozen', False):
+            # Running in PyInstaller bundle
+            bundle_dir = sys._MEIPASS
+            candidates = [
+                os.path.join(bundle_dir, 'dummycsv.csv'),
+                os.path.join(bundle_dir, '_internal', 'dummycsv.csv'),
+                os.path.join(os.path.dirname(sys.executable), 'dummycsv.csv'),
+                os.path.join(ecg_dir, 'dummycsv.csv'),
+                os.path.join(project_root, 'dummycsv.csv'),
+                os.path.abspath('dummycsv.csv')
+            ]
+        else:
+            # Running as script
+            candidates = [
+                os.path.join(ecg_dir, 'dummycsv.csv'),
+                os.path.join(project_root, 'dummycsv.csv'),
+                os.path.abspath('dummycsv.csv')
+            ]
         csv_path = None
         for p in candidates:
             if os.path.exists(p):
