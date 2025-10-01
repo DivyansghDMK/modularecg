@@ -11,7 +11,8 @@ from PyQt5.QtGui import QIntValidator
 from utils.settings_manager import SettingsManager
 import os
 import matplotlib.pyplot as plt
-import pandas as pd 
+import pandas as pd
+import json 
  
 class ECGRecording:
     def __init__(self):
@@ -698,7 +699,7 @@ class ECGMenu(QGroupBox):
         except Exception:
             pass
         
-        labels = ["Organisation", "Doctor", "Patient Name"]
+        labels = ["Org.", "Doctor", "Patient Name"]
         entries = {}
 
         # Responsive form fields
@@ -876,6 +877,47 @@ class ECGMenu(QGroupBox):
         gender_menu.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addWidget(gender_menu, 4, 1)
 
+        # Prefill previously saved values if available
+        try:
+            prefill = None
+            # 1) Use in-memory cached details if present
+            if hasattr(self, "patient_details") and isinstance(self.patient_details, dict):
+                prefill = self.patient_details
+            # 2) Else attempt to load from disk cache to persist across restarts
+            if prefill is None:
+                try:
+                    with open("last_patient_details.json", "r") as jf:
+                        prefill = json.load(jf)
+                        # Cache in memory for subsequent opens during this session
+                        setattr(self, "patient_details", prefill)
+                except Exception:
+                    prefill = None
+
+            if prefill:
+                pd = self.patient_details
+                # Org. (optional in cached data)
+                if "Org." in pd and pd["Org."]:
+                    entries["Org."].setText(pd["Org."]) 
+                # Doctor
+                if "doctor" in pd and pd["doctor"]:
+                    entries["Doctor"].setText(pd["doctor"]) 
+                # Patient Name
+                first = pd.get("first_name", "") or ""
+                last = pd.get("last_name", "") or ""
+                full_name = (first + (" " + last if last else "")).strip()
+                if full_name:
+                    entries["Patient Name"].setText(full_name)
+                # Age
+                if "age" in pd and pd["age"] is not None:
+                    entries["Age"].setText(str(pd["age"]))
+                # Gender
+                if "gender" in pd and pd["gender"]:
+                    idx = gender_menu.findText(str(pd["gender"]))
+                    if idx != -1:
+                        gender_menu.setCurrentIndex(idx)
+        except Exception:
+            pass
+
         layout.addWidget(form_frame)
 
         # Submit button
@@ -909,7 +951,7 @@ class ECGMenu(QGroupBox):
         return widget
 
     def submit_ecg_details(self, entries, gender_menu):
-        values = {label: entries[label].text().strip() for label in ["Organisation", "Doctor", "Patient Name", "Age"]}
+        values = {label: entries[label].text().strip() for label in ["Org.", "Doctor", "Patient Name", "Age"]}
         values["Gender"] = gender_menu.currentText()
 
         if any(v == "" for v in values.values()) or values["Gender"] == "Select":
@@ -927,17 +969,25 @@ class ECGMenu(QGroupBox):
                 "age": values["Age"],
                 "gender": values["Gender"],
                 "doctor": values["Doctor"],
+                "Org.": values.get("Org.", ""),
+                "patient_name": values.get("Patient Name", ""),
                 "date_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             setattr(self, "patient_details", patient_details)
             if self.dashboard:
                 setattr(self.dashboard, "patient_details", patient_details)
+            # Persist last details to disk so they survive app restarts
+            try:
+                with open("last_patient_details.json", "w") as jf:
+                    json.dump(patient_details, jf)
+            except Exception as disk_err:
+                print(f"⚠️ Could not persist patient details: {disk_err}")
         except Exception as e:
             print(f"⚠️ Could not cache patient details: {e}")
 
         try:
             with open("ecg_data.txt", "a") as file:
-                file.write(f"{values['Organisation']}, {values['Doctor']}, {values['Patient Name']}, {values['Age']}, {values['Gender']}\n")
+                file.write(f"{values['Org.']}, {values['Doctor']}, {values['Patient Name']}, {values['Age']}, {values['Gender']}\n")
             QMessageBox.information(self.parent(), "Saved", "ECG details saved successfully!")
             self.hide_sliding_panel()
         except Exception as e:
@@ -1186,7 +1236,8 @@ class ECGMenu(QGroupBox):
 
     def create_working_mode_content(self):
         # Get current settings from settings manager
-        self.settings_manager = SettingsManager()
+        if not self.settings_manager:
+            self.settings_manager = SettingsManager()
         
         # Define sections for working mode
         sections = [
@@ -1201,19 +1252,9 @@ class ECGMenu(QGroupBox):
                 'setting_key': 'wave_gain'
             },
             {
-                'title': 'Lead Sequence',
-                'options': [("Standard", "Standard"), ("Cabrera", "Cabrera")],
-                'setting_key': 'lead_sequence'
-            },
-            {
                 'title': 'Sampling Mode',
                 'options': [("Simultaneous", "Simultaneous"), ("Sequence", "Sequence")],
                 'setting_key': 'sampling_mode'
-            },
-            {
-                'title': 'Demo Function',
-                'options': [("Off", "Off"), ("On", "On")],
-                'setting_key': 'demo_function'
             },
             {
                 'title': 'Priority Storage',
@@ -1279,27 +1320,37 @@ class ECGMenu(QGroupBox):
         self.show_sliding_panel(content_widget, "Printer Setup", "Printer Setup")
 
     def create_printer_setup_content(self):
+
+        # Get current settings from settings manager
+        if not self.settings_manager:
+            self.settings_manager = SettingsManager()
+
         # Define sections for printer setup
         sections = [
             {
                 'title': 'Analysis Result',
                 'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "on"}
+                'setting_key': 'printer_analysis_result'
             },
             {
                 'title': 'Average Wave',
                 'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "on"}
+                'setting_key': 'printer_average_wave'
+            },
+            {
+                'title': 'Lead Sequence',
+                'options': [("Standard", "Standard"), ("Cabrera", "Cabrera")],
+                'setting_key': 'lead_sequence'
             },
             {
                 'title': 'Selected Rhythm Lead',
                 'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "off"}
+                'setting_key': 'printer_rhythm_lead'
             },
             {
                 'title': 'Sensitivity',
                 'options': [("High", "High"), ("Medium", "Medium"), ("Low", "Low")],
-                'variable': {"value": "High"}
+                'setting_key': 'printer_sensitivity'
             }
         ]
         
@@ -1334,27 +1385,32 @@ class ECGMenu(QGroupBox):
         self.show_sliding_panel(content_widget, "Filter Settings", "Set Filter")
 
     def create_filter_content(self):
+
+        # Get current settings from settings manager
+        if not self.settings_manager:
+            self.settings_manager = SettingsManager()
+
         # Define sections for filter settings
         sections = [
             {
                 'title': 'Low Pass Filter',
                 'options': [("Off", "off"), ("25Hz", "25"), ("50Hz", "50"), ("100Hz", "100")],
-                'variable': {"value": "50"}
+                'setting_key': 'filter_low_pass'
             },
             {
                 'title': 'High Pass Filter',
                 'options': [("Off", "off"), ("0.05Hz", "0.05"), ("0.5Hz", "0.5"), ("1Hz", "1")],
-                'variable': {"value": "0.5"}
+                'setting_key': 'filter_high_pass'
             },
             {
                 'title': 'Notch Filter',
                 'options': [("Off", "off"), ("50Hz", "50"), ("60Hz", "60")],
-                'variable': {"value": "60"}
+                'setting_key': 'filter_notch'
             },
             {
                 'title': 'Smoothing',
                 'options': [("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high")],
-                'variable': {"value": "medium"}
+                'setting_key': 'filter_smoothing'
             }
         ]
         
@@ -1401,37 +1457,42 @@ class ECGMenu(QGroupBox):
     # ----------------------------- System Setup -----------------------------
 
     def create_system_setup_content(self):
+
+        # Get current settings from settings manager
+        if not self.settings_manager:
+            self.settings_manager = SettingsManager()
+
         # Define sections for system setup
         sections = [
             {
                 'title': 'BEAT VOL',
                 'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "on"}
+                'setting_key': 'system_beat_vol'
             },
             {
                 'title': 'ALARM VOL',
                 'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "on"}
+                'setting_key': 'system_alarm_vol'
             },
             {
                 'title': 'KEY TONE',
                 'options': [("On", "on"), ("Off", "off")],
-                'variable': {"value": "on"}
+                'setting_key': 'system_key_tone'
             },
             {
                 'title': 'AUTO POWER OFF',
                 'options': [("5min", "5"), ("10min", "10"), ("15min", "15"), ("Off", "off")],
-                'variable': {"value": "10"}
+                'setting_key': 'system_auto_power_off'
             },
             {
                 'title': 'LANGUAGE',
                 'options': [("English", "en"), ("Spanish", "es"), ("French", "fr")],
-                'variable': {"value": "en"}
+                'setting_key': 'system_language'
             },
             {
                 'title': 'DATE FORMAT',
                 'options': [("MM/DD/YYYY", "mmdd"), ("DD/MM/YYYY", "ddmm"), ("YYYY/MM/DD", "yyyymm")],
-                'variable': {"value": "mmdd"}
+                'setting_key': 'system_date_format'
             }
         ]
         
@@ -1458,27 +1519,32 @@ class ECGMenu(QGroupBox):
     # ----------------------------- Load Default -----------------------------
 
     def create_load_default_content(self):
+
+        # Get current settings from settings manager
+        if not self.settings_manager:
+            self.settings_manager = SettingsManager()
+
         # Define sections for load default
         sections = [
             {
                 'title': 'ECG Settings',
                 'options': [("Load Defaults", "ecg"), ("Keep Current", "keep")],
-                'variable': {"value": "ecg"}
+                'setting_key': 'load_default_ecg'
             },
             {
                 'title': 'Display Settings',
                 'options': [("Load Defaults", "display"), ("Keep Current", "keep")],
-                'variable': {"value": "display"}
+                'setting_key': 'load_default_display'
             },
             {
                 'title': 'System Settings',
                 'options': [("Load Defaults", "system"), ("Keep Current", "keep")],
-                'variable': {"value": "system"}
+                'setting_key': 'load_default_system'
             },
             {
                 'title': 'All Settings',
                 'options': [("Load All Defaults", "all"), ("Keep All Current", "keep")],
-                'variable': {"value": "keep"}
+                'setting_key': 'load_default_all'
             }
         ]
         
@@ -1626,27 +1692,32 @@ class ECGMenu(QGroupBox):
     # ----------------------------- Factory Maintain -----------------------------
 
     def create_factory_maintain_content(self):
+
+        # Get current settings from settings manager
+        if not self.settings_manager:
+            self.settings_manager = SettingsManager()
+
         # Define sections for factory maintenance
         sections = [
             {
                 'title': 'Calibration',
                 'options': [("Calibrate Now", "calibrate"), ("Skip", "skip")],
-                'variable': {"value": "skip"}
+                'setting_key': 'factory_calibration'
             },
             {
                 'title': 'Self Test',
                 'options': [("Run Test", "test"), ("Skip", "skip")],
-                'variable': {"value": "skip"}
+                'setting_key': 'factory_self_test'
             },
             {
                 'title': 'Memory Reset',
                 'options': [("Reset All", "reset"), ("Keep Data", "keep")],
-                'variable': {"value": "keep"}
+                'setting_key': 'factory_memory_reset'
             },
             {
                 'title': 'Factory Reset',
                 'options': [("Reset to Factory", "factory"), ("Cancel", "cancel")],
-                'variable': {"value": "cancel"}
+                'setting_key': 'factory_reset'
             }
         ]
         
@@ -1721,7 +1792,7 @@ class ECGMenu(QGroupBox):
         """)
         msg_layout = QVBoxLayout(msg_frame)
         
-        confirm_msg = QLabel("Are you sure you want to exit the application?")
+        confirm_msg = QLabel("Do you want to quit?")
         confirm_msg.setStyleSheet(f"""
             QLabel {{
                 font: bold {max(12, int(margin_size * 0.6))}pt Arial;
@@ -1989,6 +2060,10 @@ class ECGMenu(QGroupBox):
                 # Set checked state if variable exists
                 if 'variable' in section_data and section_data['variable']:
                     btn.setChecked(section_data['variable'].get('value') == val)
+                elif 'setting_key' in section_data and self.settings_manager:
+                    # Load saved setting value
+                    saved_value = self.settings_manager.get_setting(section_data['setting_key'])
+                    btn.setChecked(saved_value == val)
                 
                 # Connect to appropriate handler
                 if 'setting_key' in section_data:

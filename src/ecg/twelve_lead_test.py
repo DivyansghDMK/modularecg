@@ -1915,7 +1915,7 @@ class ECGTestPage(QWidget):
         heart_box.setAlignment(Qt.AlignCenter)
         
         # Heart rate title
-        hr_title = QLabel("BPM")
+        hr_title = QLabel("HR")
         hr_title.setFont(QFont("Arial", 9, QFont.Bold))
         hr_title.setStyleSheet("color: #ff0000; margin-bottom: 2px; font-weight: bold;")
         hr_title.setAlignment(Qt.AlignCenter)
@@ -4272,6 +4272,14 @@ class ECGTestPage(QWidget):
                         ymax = min(ymax, 8000)
                     else:
                         ymin, ymax = -500, 500
+
+                    yr = (ymax - ymin)
+                    lead_name = self.leads[idx] if idx < len(self.leads) else ""
+                    is_chest = lead_name in ["V1", "V2", "V3", "V4", "V5", "V6"]
+                    top_extra = 0.30 if is_chest else 0.08
+                    bottom_extra = 0.20 if is_chest else 0.02
+                    ymin = ymin - yr * bottom_extra
+                    ymax = ymax + yr * top_extra
                     
                     ax.set_ylim(ymin, ymax)
                 else:
@@ -4880,6 +4888,13 @@ class ECGTestPage(QWidget):
                         ymax = min(ymax, 8000)
                     else:
                         ymin, ymax = -500, 500
+
+                    yr = (ymax - ymin)
+                    is_chest = lead in ["V1", "V2", "V3", "V4", "V5", "V6"]
+                    top_extra = 0.30 if is_chest else 0.08
+                    bottom_extra = 0.20 if is_chest else 0.02
+                    ymin = ymin - yr * bottom_extra
+                    ymax = ymax + yr * top_extra
                     
                     ax.set_ylim(ymin, ymax)
                 else:
