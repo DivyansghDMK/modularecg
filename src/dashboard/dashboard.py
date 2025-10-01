@@ -392,8 +392,16 @@ class Dashboard(QWidget):
         heart_img.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         heart_layout.addWidget(heart_img)
         
-        heart_layout.addWidget(QLabel("Stress Level: Low"))
-        heart_layout.addWidget(QLabel("Average Variability: 90ms"))
+        # Live stress and HRV labels
+        self.stress_label = QLabel("Stress Level: --")
+        self.stress_label.setStyleSheet("font-size: 13px; color: #666;")
+        self.stress_label.setAlignment(Qt.AlignCenter)
+        heart_layout.addWidget(self.stress_label)
+        
+        self.hrv_label = QLabel("Average Variability: --")
+        self.hrv_label.setStyleSheet("font-size: 13px; color: #666;")
+        self.hrv_label.setAlignment(Qt.AlignCenter)
+        heart_layout.addWidget(self.hrv_label)
         
         grid.addWidget(heart_card, 0, 0, 2, 1)
         
@@ -453,19 +461,89 @@ class Dashboard(QWidget):
         visitors_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         visitors_layout = QVBoxLayout(visitors_card)
         
-        visitors_label = QLabel("Total Visitors")
+        from datetime import datetime
+        current_month = datetime.now().month
+        current_year = datetime.now().year
+        
+        visitors_label = QLabel(f"Visitors - Last 6 Months ({current_year})")
         visitors_label.setFont(QFont("Arial", 14, QFont.Bold))
         visitors_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         visitors_layout.addWidget(visitors_label)
         
         pie_canvas = MplCanvas(width=2.5, height=2.5)
-        pie_data = [30, 25, 30, 15]
-        pie_labels = ["December", "November", "October", "September"]
-        pie_colors = ["#ff6600", "#00b894", "#636e72", "#fdcb6e"]
+        
+        # Generate last 6 months dynamically with real session counts
+        import calendar
+        month_names = []
+        month_data = []
+        
+        # Get session counts per month
+        try:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            sessions_dir = os.path.join(base_dir, 'reports', 'sessions')
+            
+            for i in range(5, -1, -1):  # Last 6 months
+                # Calculate target month/year
+                target_month = ((current_month - i - 1) % 12) + 1
+                target_year = current_year if (current_month - i) > 0 else current_year - 1
+                
+                month_names.append(calendar.month_name[target_month][:3])
+                
+                # Count session files for this month
+                count = 0
+                if os.path.exists(sessions_dir):
+                    for filename in os.listdir(sessions_dir):
+                        if filename.endswith('.jsonl'):
+                            try:
+                                # Parse date from filename: session_user_YYYYMMDD_HHMMSS.jsonl
+                                parts = filename.split('_')
+                                if len(parts) >= 3:
+                                    date_str = parts[-2]  # YYYYMMDD
+                                    if len(date_str) == 8:
+                                        file_year = int(date_str[:4])
+                                        file_month = int(date_str[4:6])
+                                        if file_year == target_year and file_month == target_month:
+                                            count += 1
+                            except Exception:
+                                continue
+                
+                # Use actual count, or show 1 if zero to keep chart visible
+                month_data.append(max(1, count))
+        except Exception as e:
+            print(f"⚠️ Could not calculate visitor stats: {e}")
+            month_data = [1, 1, 1, 1, 1, 1]  # Fallback to equal distribution
+        
+        pie_data = month_data
+        pie_labels = month_names
+        # Modern colors matching software orange theme
+        pie_colors = ["#ff6600", "#ff8533", "#ffaa66", "#ffcc99", "#ffe6cc", "#fff3e6"]
+        
+        # Draw pie without labels to avoid overlap, use legend instead
         wedges, texts, autotexts = pie_canvas.axes.pie(
-            pie_data, labels=pie_labels, autopct='%1.0f%%', colors=pie_colors, startangle=90
+            pie_data, labels=None, autopct='%1.0f%%', colors=pie_colors, 
+            startangle=90, pctdistance=0.7
         )
+        
+        # Percentage text - adaptive color for readability
+        for i, autotext in enumerate(autotexts):
+            if i < 3:
+                autotext.set_color('white')
+            else:
+                autotext.set_color('#222')
+            autotext.set_fontsize(10)
+            autotext.set_weight('bold')
+        
+        # Add legend on the side instead of labels on pie
+        pie_canvas.axes.legend(
+            wedges, pie_labels,
+            loc="center left",
+            bbox_to_anchor=(1, 0, 0.5, 1),
+            fontsize=9,
+            frameon=False
+        )
+        
         pie_canvas.axes.set_aspect('equal')
+        pie_canvas.figure.tight_layout(pad=0.3)
         pie_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         visitors_layout.addWidget(pie_canvas)
         
@@ -483,16 +561,39 @@ class Dashboard(QWidget):
         schedule_layout.addWidget(schedule_label)
         self.schedule_calendar = QCalendarWidget()
         self.schedule_calendar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.schedule_calendar.setMinimumHeight(120)
+        self.schedule_calendar.setMinimumHeight(180)
+        self.schedule_calendar.setMaximumHeight(250)
 
         self.schedule_calendar.setStyleSheet("""
-        QCalendarWidget QWidget { background: #ffffff; color: #222; }
-        QCalendarWidget QAbstractItemView {
-            background: #ffffff; color: #222;
-            selection-background-color: #ffe6cc; selection-color: #000;
+        QCalendarWidget QWidget { 
+            background: #ffffff; 
+            color: #222; 
         }
-        QCalendarWidget QToolButton { color: #222; background: transparent; }
-        QCalendarWidget QSpinBox { color: #222; }
+        QCalendarWidget QAbstractItemView {
+            background: #ffffff; 
+            color: #222;
+            selection-background-color: #ff6600; 
+            selection-color: #fff;
+        }
+        QCalendarWidget QToolButton { 
+            color: #222; 
+            background: transparent;
+            padding: 4px;
+            margin: 2px;
+        }
+        QCalendarWidget QToolButton:hover {
+            background: #ffe6cc;
+            border-radius: 4px;
+        }
+        QCalendarWidget QSpinBox { 
+            color: #222;
+            background: #f7f7f7;
+            border: 1px solid #ddd;
+            padding: 2px;
+        }
+        QCalendarWidget QWidget#qt_calendar_navigationbar {
+            background: #f7f7f7;
+        }
     """)
 
         # Highlight last ECG usage date in red
@@ -525,52 +626,34 @@ class Dashboard(QWidget):
         self.schedule_calendar.selectionChanged.connect(self.on_calendar_selection_changed)
         schedule_layout.addWidget(self.schedule_calendar)
         grid.addWidget(schedule_card, 2, 0)
-        # --- Issue Found Card ---
+        # --- Conclusion Card ---
         issue_card = QFrame()
         issue_card.setStyleSheet("background: white; border-radius: 16px;")
         issue_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         issue_layout = QVBoxLayout(issue_card)
         
-        issue_label = QLabel("Issue Found")
+        issue_label = QLabel("Conclusion")
         issue_label.setFont(QFont("Arial", 14, QFont.Bold))
+        issue_label.setStyleSheet("color: #ff6600;")
         issue_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         issue_layout.addWidget(issue_label)
         
-        issues_text = (
-            "1. Heart Rate\n"
-            "   • Tachycardia: Abnormally fast heart rate.\n"
-            "   • Bradycardia: Abnormally slow heart rate.\n\n"
-            "2. Heart Rhythm\n"
-            "   • Normal Sinus Rhythm: Regular rhythm from the sinoatrial node.\n"
-            "   • Arrhythmias: Irregular rhythms (e.g., atrial fibrillation, ventricular tachycardia, heart block).\n\n"
-            "3. Electrical Conduction\n"
-            "   • Heart block (1st, 2nd, 3rd degree), bundle branch blocks (right/left).\n\n"
-            "4. Cardiac Size and Hypertrophy\n"
-            "   • Enlarged chambers or hypertrophy (e.g., left ventricular hypertrophy).\n\n"
-            "5. Ischemia and Infarction\n"
-            "   • Ischemia: ST depression.\n"
-            "   • Infarction: ST elevation, pathological Q waves.\n\n"
-            "6. Electrolyte Abnormalities\n"
-            "   • Hyperkalemia: Peaked T waves.\n"
-            "   • Hypokalemia: Flattened/inverted T waves, U waves.\n"
-            "   • Calcium: QT interval changes.\n\n"
-            "7. Pericardial Disease\n"
-            "   • Pericarditis: Diffuse ST elevation, PR depression.\n\n"
-            "8. Pacemaker Activity\n"
-            "   • Pacemaker function and capture.\n\n"
-            "9. Drug Effects\n"
-            "   • Digitalis, antiarrhythmics: Characteristic ECG changes.\n\n"
-            "10. Cardiac Arrest Patterns\n"
-            "   • Asystole, ventricular fibrillation, PEA."
-        )
+        # Live conclusion box that updates based on ECG analysis
+        self.conclusion_box = QTextEdit()
+        self.conclusion_box.setReadOnly(True)
+        self.conclusion_box.setStyleSheet("background: #f7f7f7; border: none; font-size: 12px; padding: 10px;")
+        self.conclusion_box.setMinimumHeight(180)
+        self.conclusion_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
-        issues_box = QTextEdit()
-        issues_box.setReadOnly(True)
-        issues_box.setText(issues_text)
-        issues_box.setStyleSheet("background: #f7f7f7; border: none; font-size: 12px;")
-        issues_box.setMinimumHeight(180)
-        issues_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        issue_layout.addWidget(issues_box)
+        # Set initial placeholder text
+        self.conclusion_box.setHtml("""
+            <p style='color: #888; font-style: italic;'>
+            No ECG data available yet.<br><br>
+            Start an ECG test or enable demo mode to see your personalized analysis and recommendations.
+            </p>
+        """)
+        
+        issue_layout.addWidget(self.conclusion_box)
         
         grid.addWidget(issue_card, 2, 1, 1, 1)
 
@@ -645,12 +728,7 @@ class Dashboard(QWidget):
         # Add scroll area to dashboard layout
         dashboard_layout.addWidget(scroll_area)
         
-        # Add generate report button
-        self.generate_report_btn = QPushButton("Generate Report")
-        self.generate_report_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 10px; padding: 8px 24px; font-size: 16px; font-weight: bold;")
-        self.generate_report_btn.clicked.connect(self.generate_pdf_report)
-        self.generate_report_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        dashboard_layout.addWidget(self.generate_report_btn, alignment=Qt.AlignRight)
+        # Generate report button removed from dashboard (available in ECG Test page)
         
         # --- ECG Animation Setup ---
         self.ecg_x = np.linspace(0, 2, 500)
@@ -1110,6 +1188,16 @@ class Dashboard(QWidget):
                     try:
                         ecg_metrics = self.calculate_live_ecg_metrics(original_data, sampling_rate=actual_sampling_rate)
                         self.update_dashboard_metrics_live(ecg_metrics)
+                        
+                        # Calculate and update stress level and HRV
+                        self.update_stress_and_hrv(original_data, actual_sampling_rate)
+                        
+                        # Update live conclusion every 5 seconds
+                        if not hasattr(self, '_last_conclusion_update'):
+                            self._last_conclusion_update = 0
+                        if time.time() - self._last_conclusion_update > 5:
+                            self.update_live_conclusion()
+                            self._last_conclusion_update = time.time()
                     except Exception as e:
                         print(f"❌ Error calculating ECG metrics: {e}")
                         # Continue with display even if metrics fail
@@ -1722,6 +1810,158 @@ class Dashboard(QWidget):
         else:
             self.user_label.setText("Not signed in")
             self.sign_btn.setText("Sign In")
+    def update_stress_and_hrv(self, ecg_signal, sampling_rate):
+        """Calculate and update stress level and HRV from ECG data"""
+        try:
+            from scipy.signal import find_peaks
+            
+            if len(ecg_signal) < 500:
+                return
+            
+            # Find R-peaks
+            peaks, _ = find_peaks(
+                ecg_signal,
+                height=np.mean(ecg_signal) + 0.5 * np.std(ecg_signal),
+                distance=int(0.4 * sampling_rate)
+            )
+            
+            if len(peaks) >= 3:
+                # Calculate R-R intervals in milliseconds
+                rr_intervals = np.diff(peaks) * (1000 / sampling_rate)
+                
+                # Filter valid intervals (300-2000 ms)
+                valid_rr = rr_intervals[(rr_intervals >= 300) & (rr_intervals <= 2000)]
+                
+                if len(valid_rr) >= 2:
+                    # HRV: Standard deviation of R-R intervals (SDNN)
+                    hrv_ms = np.std(valid_rr)
+                    
+                    # Store for conclusion generation
+                    self._current_hrv = hrv_ms
+                    
+                    # Stress level based on HRV
+                    if hrv_ms > 100:
+                        stress = "Low"
+                        stress_color = "#27ae60"
+                    elif hrv_ms > 50:
+                        stress = "Moderate"
+                        stress_color = "#f39c12"
+                    else:
+                        stress = "High"
+                        stress_color = "#e74c3c"
+                    
+                    # Update labels
+                    if hasattr(self, 'stress_label'):
+                        self.stress_label.setText(f"Stress Level: {stress}")
+                        self.stress_label.setStyleSheet(f"font-size: 13px; color: {stress_color}; font-weight: bold;")
+                    
+                    if hasattr(self, 'hrv_label'):
+                        self.hrv_label.setText(f"Average Variability: {int(hrv_ms)}ms")
+                        self.hrv_label.setStyleSheet("font-size: 13px; color: #666;")
+        except Exception as e:
+            print(f"⚠️ Error calculating stress/HRV: {e}")
+    
+    def update_live_conclusion(self):
+        """Generate personalized conclusion based on current ECG metrics"""
+        try:
+            findings = []
+            recommendations = []
+            
+            # Get current metrics
+            hr_text = self.metric_labels.get('heart_rate', QLabel()).text()
+            pr_text = self.metric_labels.get('pr_interval', QLabel()).text()
+            qrs_text = self.metric_labels.get('qrs_duration', QLabel()).text()
+            st_text = self.metric_labels.get('st_interval', QLabel()).text()
+            
+            # Parse values
+            try:
+                hr = int(hr_text.replace(' BPM', '').replace(' bpm', '').strip()) if hr_text and hr_text != '00' else 0
+            except:
+                hr = 0
+            
+            try:
+                pr = int(pr_text.replace(' ms', '').strip()) if pr_text and pr_text != '0 ms' else 0
+            except:
+                pr = 0
+            
+            try:
+                qrs = int(qrs_text.replace(' ms', '').strip()) if qrs_text and qrs_text != '0 ms' else 0
+            except:
+                qrs = 0
+            
+            # Analyze Heart Rate
+            if hr > 0:
+                if hr > 100:
+                    findings.append("[!] <b>Tachycardia detected</b> - Heart rate elevated above normal range")
+                    recommendations.append("• Consider relaxation techniques or consult physician")
+                elif hr < 60:
+                    findings.append("[i] <b>Bradycardia detected</b> - Heart rate below normal range")
+                    recommendations.append("• May be normal for athletes, monitor symptoms")
+                else:
+                    findings.append("[OK] <b>Normal heart rate</b> - Within healthy range (60-100 BPM)")
+            
+            # Analyze PR Interval
+            if pr > 0:
+                if pr > 200:
+                    findings.append("[!] <b>Prolonged PR interval</b> - Possible first-degree heart block")
+                    recommendations.append("• Recommend clinical correlation and follow-up")
+                elif pr < 120:
+                    findings.append("[i] <b>Short PR interval</b> - May indicate pre-excitation")
+                else:
+                    findings.append("[OK] <b>Normal PR interval</b> - Conduction within normal limits")
+            
+            # Analyze QRS Duration
+            if qrs > 0:
+                if qrs > 120:
+                    findings.append("[!] <b>Wide QRS complex</b> - Possible bundle branch block")
+                    recommendations.append("• Consider 12-lead ECG analysis for bundle branch pattern")
+                elif qrs > 100:
+                    findings.append("[i] <b>Borderline QRS duration</b> - Monitor for changes")
+                else:
+                    findings.append("[OK] <b>Normal QRS duration</b> - Ventricular conduction normal")
+            
+            # Check HRV/Stress
+            if hasattr(self, '_current_hrv'):
+                hrv = self._current_hrv
+                if hrv > 100:
+                    findings.append("[OK] <b>Good heart rate variability</b> - Low stress indicated")
+                elif hrv > 50:
+                    findings.append("[i] <b>Moderate HRV</b> - Normal stress levels")
+                else:
+                    findings.append("[!] <b>Low HRV</b> - Elevated stress or fatigue")
+                    recommendations.append("• Ensure adequate rest and stress management")
+            
+            # Build conclusion HTML
+            if not findings:
+                conclusion_html = """
+                    <p style='color: #888; font-style: italic;'>
+                    Waiting for stable ECG data...<br><br>
+                    Metrics are being analyzed. Please wait a few seconds.
+                    </p>
+                """
+            else:
+                conclusion_html = "<b style='color: #ff6600;'>Findings:</b><br>"
+                for f in findings:
+                    conclusion_html += f + "<br>"
+                
+                if recommendations:
+                    conclusion_html += "<br><b style='color: #ff6600;'>Recommendations:</b><br>"
+                    for r in recommendations:
+                        conclusion_html += r + "<br>"
+                
+                conclusion_html += """
+                    <br><p style='font-size: 10px; color: #999; font-style: italic;'>
+                    <b>NOTE:</b> This is an automated analysis for educational purposes only. 
+                    Not a substitute for professional medical advice.
+                    </p>
+                """
+            
+            if hasattr(self, 'conclusion_box'):
+                self.conclusion_box.setHtml(conclusion_html)
+        
+        except Exception as e:
+            print(f"⚠️ Error updating conclusion: {e}")
+    
     def update_session_time(self):
         """Update live session timer on both dashboard and ECG test page"""
         try:

@@ -1915,7 +1915,7 @@ class ECGTestPage(QWidget):
         heart_box.setAlignment(Qt.AlignCenter)
         
         # Heart rate title
-        hr_title = QLabel("HR")
+        hr_title = QLabel("BPM")
         hr_title.setFont(QFont("Arial", 9, QFont.Bold))
         hr_title.setStyleSheet("color: #ff0000; margin-bottom: 2px; font-weight: bold;")
         hr_title.setAlignment(Qt.AlignCenter)
@@ -4272,14 +4272,6 @@ class ECGTestPage(QWidget):
                         ymax = min(ymax, 8000)
                     else:
                         ymin, ymax = -500, 500
-
-                    yr = (ymax - ymin)
-                    lead_name = self.leads[idx] if idx < len(self.leads) else ""
-                    is_chest = lead_name in ["V1", "V2", "V3", "V4", "V5", "V6"]
-                    top_extra = 0.30 if is_chest else 0.08
-                    bottom_extra = 0.20 if is_chest else 0.02
-                    ymin = ymin - yr * bottom_extra
-                    ymax = ymax + yr * top_extra
                     
                     ax.set_ylim(ymin, ymax)
                 else:
@@ -4888,13 +4880,6 @@ class ECGTestPage(QWidget):
                         ymax = min(ymax, 8000)
                     else:
                         ymin, ymax = -500, 500
-
-                    yr = (ymax - ymin)
-                    is_chest = lead in ["V1", "V2", "V3", "V4", "V5", "V6"]
-                    top_extra = 0.30 if is_chest else 0.08
-                    bottom_extra = 0.20 if is_chest else 0.02
-                    ymin = ymin - yr * bottom_extra
-                    ymax = ymax + yr * top_extra
                     
                     ax.set_ylim(ymin, ymax)
                 else:
@@ -4961,10 +4946,10 @@ class ECGTestPage(QWidget):
                         continue
                 return
 
-            # SERIAL branch - read available data without blocking
+            # SERIAL branch
             lines_processed = 0
-            max_packets_per_update = 5  # Reduced from 20 to prevent UI freezing
-            while lines_processed < max_packets_per_update:
+            max_attempts = 20
+            while lines_processed < max_attempts:
                 try:
                     all_8_leads = self.serial_reader.read_value()
                     if all_8_leads:
@@ -4987,7 +4972,6 @@ class ECGTestPage(QWidget):
                             print(f"❌ Error updating sampling rate: {e}")
                         lines_processed += 1
                     else:
-                        # No more data available in buffer, stop reading
                         break
                 except Exception as e:
                     print(f"❌ Error reading serial data: {e}")
@@ -5022,20 +5006,16 @@ class ECGTestPage(QWidget):
                     except Exception as e:
                         print(f"❌ Error updating plot {i}: {e}")
                         continue
-                
-                # Calculate metrics less frequently to avoid blocking (every 5 updates = ~250ms)
                 try:
-                    if self.update_count % 5 == 0:
-                        self.calculate_ecg_metrics()
+                    self.calculate_ecg_metrics()
                 except Exception as e:
                     print(f"❌ Error calculating ECG metrics: {e}")
-                
                 try:
                     if hasattr(self, 'heartbeat_counter'):
                         self.heartbeat_counter += 1
                     else:
                         self.heartbeat_counter = 0
-                    if self.heartbeat_counter % 20 == 0 and len(self.data) > 1:  # Reduced frequency
+                    if self.heartbeat_counter % 10 == 0 and len(self.data) > 1:
                         heart_rate = self.calculate_heart_rate(self.data[1])
                         if heart_rate > 0:
                             print(f"💓 HEARTBEAT: {heart_rate} BPM")

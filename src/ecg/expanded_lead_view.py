@@ -153,14 +153,14 @@ class MetricsCard(QFrame):
         self.value = value
         self.unit = unit
         self.color = color
-        # Base sizes used for responsive scaling
-        self._base_title_pt = 14
-        self._base_value_pt = 28
-        self._base_status_pt = 12
+        # Base sizes used for responsive scaling - reduced for smaller screens
+        self._base_title_pt = 11
+        self._base_value_pt = 20
+        self._base_status_pt = 10
         
         # Increase card vertical room to prevent value text cropping on macOS/Windows
-        self.setMinimumHeight(200)
-        self.setMaximumHeight(240)
+        self.setMinimumHeight(160)
+        self.setMaximumHeight(200)
         self.base_style = f"""
             QFrame {{
                 background: white;
@@ -206,11 +206,12 @@ class MetricsCard(QFrame):
         # Value
         self.value_label = QLabel(f"{self.value} {self.unit}")
         self.value_label.setFont(QFont("Segoe UI", self._base_value_pt, QFont.Bold))
-        self.value_label.setStyleSheet("color: #2c3e50; border: none; margin: 8px 0; font-weight: bold; background: transparent;")
+        self.value_label.setStyleSheet("color: #2c3e50; border: none; margin: 4px 0; font-weight: bold; background: transparent;")
         self.value_label.setAlignment(Qt.AlignLeft)
         # Ensure enough label height for larger fonts to avoid clipping
-        self.value_label.setMinimumHeight(56)
+        self.value_label.setMinimumHeight(40)
         self.value_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.value_label.setWordWrap(True)
         layout.addWidget(self.value_label)
         
         layout.addStretch()
@@ -439,8 +440,10 @@ class ExpandedLeadView(QDialog):
         header_layout.setContentsMargins(15, 0, 5, 0)
         
         title_label = QLabel(f"Lead {self.lead_name} - Detailed Waveform Analysis")
-        title_label.setFont(QFont("Segoe UI", 22, QFont.Bold))
+        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
         title_label.setStyleSheet("color: #2c3e50; border: none; background: transparent;")
+        title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        title_label.setWordWrap(True)
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         
@@ -708,14 +711,15 @@ class ExpandedLeadView(QDialog):
         arrhythmia_layout.setSpacing(15)
         
         title = QLabel("Rhythm Interpretation:")
-        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title.setFont(QFont("Segoe UI", 13, QFont.Bold))
         title.setStyleSheet("color: #2c3e50; border: none; background: transparent;")
         arrhythmia_layout.addWidget(title)
         
         self.arrhythmia_list = QLabel("Analyzing...")
-        self.arrhythmia_list.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        self.arrhythmia_list.setFont(QFont("Segoe UI", 12, QFont.Bold))
         self.arrhythmia_list.setStyleSheet("color: #34495e; border: none; background: transparent;")
         self.arrhythmia_list.setWordWrap(True)
+        self.arrhythmia_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         arrhythmia_layout.addWidget(self.arrhythmia_list, 1)
         
         parent_layout.addWidget(arrhythmia_frame)

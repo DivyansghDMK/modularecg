@@ -660,14 +660,14 @@ def main():
             try:
                 if login.exec_() == QDialog.Accepted and login.result:
                     logger.info(f"User {login.username} logged in successfully")
-                    # Attach machine serial ID to crash logger for email subject/body tagging
+                    # Attach machine serial ID to crash logger for email subject/body   tagging
                     try:
                         users = load_users()
                         record = None
                         if isinstance(users, dict) and login.username in users:
                             record = users.get(login.username)
                         else:
-                            # Fallback: search by phone/contact stored under 'phone'
+                            # Fallback: search by phone/contact stored under 'phone'    
                             for uname, rec in (users or {}).items():
                                 try:
                                     if str(rec.get('phone', '')) == str(login.username):
