@@ -13,7 +13,39 @@ class SettingsManager:
             "demo_function": "Off",
             "storage": "SD",
             "serial_port": "Select Port",
-            "baud_rate": "115200"
+            "baud_rate": "115200",
+
+            # Printer Setup settings
+            "printer_analysis_result": "on",
+            "printer_average_wave": "on",
+            "printer_rhythm_lead": "off",
+            "printer_sensitivity": "High",
+
+            # Filter settings
+            "filter_low_pass": "50",
+            "filter_high_pass": "0.5",
+            "filter_notch": "60",
+            "filter_smoothing": "medium",
+
+            # System Setup settings
+            "system_beat_vol": "on",
+            "system_alarm_vol": "on",
+            "system_key_tone": "on",
+            "system_auto_power_off": "10",
+            "system_language": "en",
+            "system_date_format": "mmdd",
+
+            # Load Default settings
+            "load_default_ecg": "ecg",
+            "load_default_display": "display",
+            "load_default_system": "system",
+            "load_default_all": "keep",
+
+            # Factory Maintain settings
+            "factory_calibration": "skip",
+            "factory_self_test": "skip",
+            "factory_memory_reset": "keep",
+            "factory_reset": "cancel"
         }
         self.settings = self.load_settings()
     

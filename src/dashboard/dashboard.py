@@ -158,6 +158,9 @@ class Dashboard(QWidget):
         # Set responsive size policy
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumSize(800, 600)  # Minimum size for usability
+
+        # Reports filter date
+        self.reports_filter_date = None
         
         # Store username, role, and full user details
         self.username = username
@@ -474,12 +477,24 @@ class Dashboard(QWidget):
         schedule_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         schedule_layout = QVBoxLayout(schedule_card)
         
-        schedule_label = QLabel("Schedule")
+        schedule_label = QLabel("Calendar")
         schedule_label.setFont(QFont("Arial", 14, QFont.Bold))
         schedule_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         schedule_layout.addWidget(schedule_label)
-        cal = QCalendarWidget()
-        cal.setFixedHeight(120)
+        self.schedule_calendar = QCalendarWidget()
+        self.schedule_calendar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.schedule_calendar.setMinimumHeight(120)
+
+        self.schedule_calendar.setStyleSheet("""
+        QCalendarWidget QWidget { background: #ffffff; color: #222; }
+        QCalendarWidget QAbstractItemView {
+            background: #ffffff; color: #222;
+            selection-background-color: #ffe6cc; selection-color: #000;
+        }
+        QCalendarWidget QToolButton { color: #222; background: transparent; }
+        QCalendarWidget QSpinBox { color: #222; }
+    """)
+
         # Highlight last ECG usage date in red
         from PyQt5.QtGui import QTextCharFormat, QColor
         last_ecg_file = 'last_ecg_date.json'
@@ -501,10 +516,14 @@ class Dashboard(QWidget):
                 fmt = QTextCharFormat()
                 fmt.setBackground(QColor('red'))
                 fmt.setForeground(QColor('white'))
-                cal.setDateTextFormat(last_date, fmt)
+                self.schedule_calendar.setDateTextFormat(last_date, fmt)
             except Exception:
                 pass
-        schedule_layout.addWidget(cal)
+
+        # connect date click/selection to filter reports
+        self.schedule_calendar.clicked.connect(self.on_calendar_date_selected)
+        self.schedule_calendar.selectionChanged.connect(self.on_calendar_selection_changed)
+        schedule_layout.addWidget(self.schedule_calendar)
         grid.addWidget(schedule_card, 2, 0)
         # --- Issue Found Card ---
         issue_card = QFrame()
@@ -591,11 +610,11 @@ class Dashboard(QWidget):
         # Store metric labels for live update
         self.metric_labels = {}
         metric_info = [
-            ("Heart Rate", "00", "BPM", "heart_rate"),
-            ("PR Intervals", "0", "ms", "pr_interval"),
+            ("HR", "00", "BPM", "heart_rate"),
+            ("PR", "0", "ms", "pr_interval"),
             ("QRS Complex", "0", "ms", "qrs_duration"),
             ("QRS Axis", "0°", "", "qrs_axis"),
-            ("ST Interval", "0", "ms", "st_interval"),
+            ("ST", "0", "ms", "st_interval"),
             ("Time", "00:00", "", "time_elapsed"),
             ("Sampling Rate", "0", "Hz", "sampling_rate"),
         ]
@@ -707,27 +726,55 @@ class Dashboard(QWidget):
         self.setLayout(main_layout)
         self.page_stack.setCurrentWidget(self.dashboard_page)
 
+    # Calendar date selection
+
+    def on_calendar_date_selected(self, qdate):
+        try:
+            self.reports_filter_date = qdate.toString("yyyy-MM-dd")
+            self.refresh_recent_reports_ui(self.reports_filter_date)
+        except Exception:
+            self.refresh_recent_reports_ui()  # safe fallback
+
+    def on_calendar_selection_changed(self):
+        try:
+            qdate = self.schedule_calendar.selectedDate()
+            self.reports_filter_date = qdate.toString("yyyy-MM-dd")
+            self.refresh_recent_reports_ui(self.reports_filter_date)
+        except Exception:
+            pass
+
     def open_chatbot_dialog(self):
         dlg = ChatbotDialog(self)
         dlg.exec_()
 
-    def refresh_recent_reports_ui(self):
+    def refresh_recent_reports_ui(self, filter_date=None):
         import os, json
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         reports_dir = os.path.join(base_dir, "..", "reports")
         index_path = os.path.join(reports_dir, "index.json")
-        # Clear
+
+        # Clear list
         while self.reports_list_layout.count():
             item = self.reports_list_layout.takeAt(0)
             w = item.widget()
             if w: w.setParent(None)
+
         entries = []
         if os.path.exists(index_path):
             try:
                 with open(index_path, 'r') as f:
-                    entries = json.load(f)
+                    entries = json.load(f) or []
             except Exception:
                 entries = []
+
+        # Use the calendar’s current filter if none explicitly provided
+        if filter_date is None:
+            filter_date = getattr(self, "reports_filter_date", None)
+
+        if filter_date:
+            fd = str(filter_date).strip()
+            entries = [e for e in entries if str(e.get('date','')).strip() == fd]
+
         for e in entries[:10]:
             row = QHBoxLayout()
             meta = QLabel(f"{e.get('date','')} {e.get('time','')}  |  {e.get('patient','')}  |  {e.get('title','Report')}")
@@ -740,6 +787,7 @@ class Dashboard(QWidget):
             row.addWidget(btn)
             cont = QWidget(); cont.setLayout(row)
             self.reports_list_layout.addWidget(cont)
+
         spacer = QWidget(); spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.reports_list_layout.addWidget(spacer)
 
@@ -1779,8 +1827,8 @@ class Dashboard(QWidget):
                     canvas.axes.set_facecolor("#232323")
                     canvas.figure.set_facecolor("#232323")
                     canvas.draw()
-                for cal in child.findChildren(QCalendarWidget):
-                    cal.setStyleSheet("background: #232323; color: #fff; border-radius: 12px; border: 2px solid #fff;")
+                for self.schedule_calendar in child.findChildren(QCalendarWidget):
+                    self.schedule_calendar.setStyleSheet("background: #232323; color: #fff; border-radius: 12px; border: 2px solid #fff;")
                 for txt in child.findChildren(QTextEdit):
                     txt.setStyleSheet("background: #232323; color: #fff; border-radius: 12px; border: 2px solid #fff;")
         else:
@@ -1796,8 +1844,8 @@ class Dashboard(QWidget):
                     canvas.axes.set_facecolor("#fff")
                     canvas.figure.set_facecolor("#fff")
                     canvas.draw()
-                for cal in child.findChildren(QCalendarWidget):
-                    cal.setStyleSheet("")
+                for self.schedule_calendar in child.findChildren(QCalendarWidget):
+                    self.schedule_calendar.setStyleSheet("")
                 for txt in child.findChildren(QTextEdit):
                     txt.setStyleSheet("")
         # Update ECG test page theme if it exists
