@@ -59,5 +59,45 @@
     "age": "12",
     "gender": "male",
     "address": "1220"
+  },
+  "1234567890": {
+    "password": "Tanya",
+    "full_name": "Tanya",
+    "phone": "1234567890",
+    "serial_id": "123124",
+    "email": "",
+    "age": "24",
+    "gender": "Other",
+    "address": "XYZ"
+  },
+  "12340987": {
+    "password": "12340987",
+    "full_name": "Divyansh S",
+    "phone": "12340987",
+    "serial_id": "123098",
+    "email": "",
+    "age": "20",
+    "gender": "Others",
+    "address": "APQ"
+  },
+  "0909090909": {
+    "password": "12222",
+    "full_name": "Divyanshu",
+    "phone": "0909090909",
+    "serial_id": "12222",
+    "email": "",
+    "age": "20",
+    "gender": "M",
+    "address": "XYA"
+  },
+  "99118822": {
+    "password": "Mehul@123",
+    "full_name": "Mehul",
+    "phone": "99118822",
+    "serial_id": "99887766",
+    "email": "",
+    "age": "20",
+    "gender": "Mal",
+    "address": "XJA"
   }
 }

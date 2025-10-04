@@ -12,7 +12,8 @@ from utils.settings_manager import SettingsManager
 import os
 import matplotlib.pyplot as plt
 import pandas as pd
-import json 
+import json
+import sys
  
 class ECGRecording:
     def __init__(self):
@@ -99,30 +100,44 @@ class Lead12BlackPage(QWidget):
                 except Exception as e:
                     print(f"ECG analysis error in lead {self.lead_names[i]}:", e)
             self.canvases[i].draw()
-        # --- Lead II metrics and dashboard update (as before) ---
+        # --- Lead II metrics and dashboard update (only when demo mode is ON) ---
         lead_ii_signal = self.ecg_buffers[1][self.ptrs[1]:self.ptrs[1]+self.window_size]
         if len(lead_ii_signal) >= 1000:
             try:
-                # Placeholder for Lead II metrics calculation
-                pr_interval = 0.2  # Dummy value
-                qrs_duration = 0.08  # Dummy value
-                qt_interval = 0.4  # Dummy value
-                qtc_interval = 0.42  # Dummy value
-                qrs_axis = "--"  # Placeholder
-                st_segment = "--"  # Placeholder
-                with open("ecg_metrics_output.txt", "w") as f:
-                    f.write("# ECG Metrics Output\n")
-                    f.write("# Format: PR_interval(ms), QRS_duration(ms), QTc_interval(ms), QRS_axis, ST_segment\n")
-                    f.write(f"{pr_interval*1000}, {qrs_duration*1000}, {qtc_interval*1000}, {qrs_axis}, {st_segment}\n")
-                    # Dummy peak lists
-                    f.write(f"P_peaks: {list(np.array([100, 200, 300]))}\n")
-                    f.write(f"Q_peaks: {list(np.array([150, 250, 350]))}\n")
-                    f.write(f"R_peaks: {list(np.array([180, 280, 380]))}\n")
-                    f.write(f"S_peaks: {list(np.array([210, 310, 410]))}\n")
-                    f.write(f"T_peaks: {list(np.array([240, 340, 440]))}\n")
-                if self.dashboard and hasattr(self.dashboard, "update_ecg_metrics"):
-                    self.dashboard.update_ecg_metrics(pr_interval, qrs_duration, qtc_interval, qrs_axis, st_segment)
-                    QTimer.singleShot(0, self.dashboard.repaint)
+                # Only update metrics if demo mode is active
+                if (self.dashboard and hasattr(self.dashboard, 'ecg_test_page') and 
+                    hasattr(self.dashboard.ecg_test_page, 'demo_toggle') and 
+                    self.dashboard.ecg_test_page.demo_toggle.isChecked()):
+                    
+                    # Placeholder for Lead II metrics calculation (demo mode only)
+                    pr_interval = 0.2  # Dummy value
+                    qrs_duration = 0.08  # Dummy value
+                    qt_interval = 0.4  # Dummy value
+                    qtc_interval = 0.42  # Dummy value
+                    qrs_axis = "--"  # Placeholder
+                    st_segment = "--"  # Placeholder
+                    with open("ecg_metrics_output.txt", "w") as f:
+                        f.write("# ECG Metrics Output\n")
+                        f.write("# Format: PR_interval(ms), QRS_duration(ms), QTc_interval(ms), QRS_axis, ST_segment\n")
+                        f.write(f"{pr_interval*1000}, {qrs_duration*1000}, {qtc_interval*1000}, {qrs_axis}, {st_segment}\n")
+                        # Dummy peak lists
+                        f.write(f"P_peaks: {list(np.array([100, 200, 300]))}\n")
+                        f.write(f"Q_peaks: {list(np.array([150, 250, 350]))}\n")
+                        f.write(f"R_peaks: {list(np.array([180, 280, 380]))}\n")
+                        f.write(f"S_peaks: {list(np.array([210, 310, 410]))}\n")
+                        f.write(f"T_peaks: {list(np.array([240, 340, 440]))}\n")
+                    if self.dashboard and hasattr(self.dashboard, "update_ecg_metrics"):
+                        # Create intervals dict with proper format
+                        intervals = {
+                            'Heart_Rate': 60,  # Demo heart rate
+                            'PR': pr_interval * 1000,  # Convert to ms
+                            'QRS': qrs_duration * 1000,  # Convert to ms
+                            'QTc': qtc_interval * 1000,  # Convert to ms
+                            'QRS_axis': qrs_axis,
+                            'ST': st_segment
+                        }
+                        self.dashboard.update_ecg_metrics(intervals)
+                        QTimer.singleShot(0, self.dashboard.repaint)
             except Exception as e:
                 print("ECG analysis error:", e)
 
@@ -1912,7 +1927,26 @@ class ECGMenu(QGroupBox):
         )
         
         if reply == QMessageBox.Yes:
-            QApplication.quit()
+            # Set flag to indicate application exit
+            if hasattr(self.parent(), 'parent') and hasattr(self.parent().parent(), '_exited_application'):
+                self.parent().parent()._exited_application = True
+            
+            # Close main windows and exit application
+            try:
+                # Close the dashboard and all its child windows
+                if hasattr(self.parent(), 'parent'):
+                    dashboard = self.parent().parent()
+                    if hasattr(dashboard, 'ecg_test_page') and dashboard.ecg_test_page:
+                        dashboard.ecg_test_page.close()
+                    dashboard.close()
+                
+                # Force exit the application
+                QApplication.quit()
+                sys.exit(0)
+            except Exception as e:
+                print(f"Error during exit: {e}")
+                QApplication.quit()
+                sys.exit(0)
         else:
             self.hide_sliding_panel()
 

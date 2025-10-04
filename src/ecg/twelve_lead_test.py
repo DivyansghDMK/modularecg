@@ -1677,7 +1677,7 @@ class ECGTestPage(QWidget):
         """Calculate PR interval from P wave to QRS complex - LIVE"""
         try:
             if len(lead_data) < 200:
-                return 160  # Fallback
+                return 0  # Fallback
             
             # Apply bandpass filter to enhance R-peaks (0.5-40 Hz)
             from scipy.signal import butter, filtfilt, find_peaks
@@ -1717,7 +1717,7 @@ class ECGTestPage(QWidget):
             
             return 160  # Fallback
         except:
-            return 160
+            return 0
 
     def calculate_qrs_duration(self, lead_data):
         """Calculate QRS complex duration - LIVE"""
@@ -2139,6 +2139,10 @@ class ECGTestPage(QWidget):
         return metrics_frame
 
     def update_ecg_metrics_on_top_of_lead_graphs(self, intervals):
+        # Don't update if intervals is None (waiting for demo or live data)
+        if intervals is None:
+            return
+        
         if 'Heart_Rate' in intervals and intervals['Heart_Rate'] is not None:
             self.metric_labels['heart_rate'].setText(
                 f"{int(round(intervals['Heart_Rate']))}" if isinstance(intervals['Heart_Rate'], (int, float)) else str(intervals['Heart_Rate'])
@@ -2296,8 +2300,9 @@ class ECGTestPage(QWidget):
     # ------------------------ Calculate ECG Intervals ------------------------
 
     def calculate_ecg_intervals(self, lead_ii_data):
+        # Don't calculate unless data is available and sufficient
         if not lead_ii_data or len(lead_ii_data) < 100:
-            return {}
+            return None  # Return None instead of empty dict
         
         try:
             from ecg.pan_tompkins import pan_tompkins
@@ -2309,14 +2314,24 @@ class ECGTestPage(QWidget):
             r_peaks = pan_tompkins(data, fs=500)  # 500Hz sampling rate
             
             if len(r_peaks) < 2:
-                return {}
+                return None  # Return None instead of empty dict
             
             # Calculate heart rate
             rr_intervals = np.diff(r_peaks) / 500.0  # Convert to seconds
             mean_rr = np.mean(rr_intervals)
             heart_rate = 60 / mean_rr if mean_rr > 0 else 0
             
-            # Calculate intervals
+            # Check if demo mode is active
+            demo_mode_active = (hasattr(self, 'demo_toggle') and 
+                              hasattr(self.demo_toggle, 'isChecked') and 
+                              self.demo_toggle.isChecked())
+            
+            # Only calculate intervals when demo mode is ON
+            # When demo mode is OFF, don't return intervals (wait for live data)
+            if not demo_mode_active:
+                return None  # Return None to prevent showing zero values
+            
+            # Calculate intervals (only when demo mode is ON)
             pr_interval = 0.16  
             qrs_duration = 0.08  
             qt_interval = 0.4    
@@ -2336,7 +2351,7 @@ class ECGTestPage(QWidget):
                 
         except Exception as e:
             print(f"Error calculating ECG intervals: {e}")
-            return {}
+            return None  # Return None instead of empty dict
 
     # ------------------------ Show help dialog ------------------------
 

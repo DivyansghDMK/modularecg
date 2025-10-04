@@ -153,6 +153,9 @@ class DemoManager:
             
             # Stop demo data generation
             self.stop_demo_data()
+            
+            # Reset metrics to zero on both ECG test page and dashboard
+            self.reset_metrics_to_zero()
     
     def start_demo_data(self):
         """Start reading real ECG data from dummycsv.csv file with wave speed control"""
@@ -489,9 +492,12 @@ class DemoManager:
         
         print(f"🎛️ update_demo_plots: Completed successfully")
         
-        # Calculate intervals for dashboard in demo mode
+        # Calculate intervals for dashboard ONLY in demo mode
         # Skip during warmup to avoid unstable early metrics
-        if hasattr(self.ecg_test_page, 'dashboard_callback') and self.ecg_test_page.dashboard_callback:
+        if (hasattr(self.ecg_test_page, 'dashboard_callback') and self.ecg_test_page.dashboard_callback and
+            hasattr(self.ecg_test_page, 'demo_toggle') and 
+            hasattr(self.ecg_test_page.demo_toggle, 'isChecked') and 
+            self.ecg_test_page.demo_toggle.isChecked()):
             if time.time() >= self._warmup_until:
                 self._calculate_demo_intervals()
 
@@ -805,20 +811,34 @@ class DemoManager:
                 print("⏹️ Demo timer stopped")
         except Exception:
             pass
-        finally:
-            self.demo_timer = None
-
-        # Clear demo data and plots safely
+    
+    def reset_metrics_to_zero(self):
+        """Reset all metrics to zero on both ECG test page and dashboard"""
         try:
-            with self._lock:
-                for i in range(len(self.ecg_test_page.data)):
-                    self.ecg_test_page.data[i] = np.zeros(self.ecg_test_page.buffer_size)
-                for line in self.ecg_test_page.data_lines:
-                    line.setData(np.zeros(self.ecg_test_page.buffer_size))
-            print("🧹 Demo data cleared and plots reset")
-        except Exception:
-            pass
-
+            # Reset ECG test page metrics to zero
+            if hasattr(self.ecg_test_page, 'metric_labels'):
+                self.ecg_test_page.metric_labels.get('heart_rate', QLabel()).setText("0")
+                self.ecg_test_page.metric_labels.get('pr_interval', QLabel()).setText("0")
+                self.ecg_test_page.metric_labels.get('qrs_duration', QLabel()).setText("0")
+                self.ecg_test_page.metric_labels.get('qrs_axis', QLabel()).setText("0°")
+                self.ecg_test_page.metric_labels.get('st_segment', QLabel()).setText("0")
+                self.ecg_test_page.metric_labels.get('qtc_interval', QLabel()).setText("0")
+                print("✅ ECG test page metrics reset to zero")
+            
+            # Reset dashboard metrics to zero
+            if hasattr(self.ecg_test_page, 'parent') and hasattr(self.ecg_test_page.parent, 'metric_labels'):
+                dashboard = self.ecg_test_page.parent
+                dashboard.metric_labels.get('heart_rate', QLabel()).setText("0 BPM")
+                dashboard.metric_labels.get('pr_interval', QLabel()).setText("0 ms")
+                dashboard.metric_labels.get('qrs_duration', QLabel()).setText("0 ms")
+                dashboard.metric_labels.get('qrs_axis', QLabel()).setText("0°")
+                dashboard.metric_labels.get('st_interval', QLabel()).setText("0 ms")
+                dashboard.metric_labels.get('qtc_interval', QLabel()).setText("0 ms")
+                dashboard.metric_labels.get('time_elapsed', QLabel()).setText("00:00")
+                print("✅ Dashboard metrics reset to zero")
+        except Exception as e:
+            print(f"⚠️ Could not reset metrics to zero: {e}")
+        
         # Clear heart rate smoothing data
         self.demo_heart_rates.clear()
         print("✅ Demo mode stopped successfully")

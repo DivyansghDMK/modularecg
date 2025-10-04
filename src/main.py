@@ -10,10 +10,10 @@ from PyQt5.QtWidgets import (
     QApplication, QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, 
     QMessageBox, QStackedWidget, QWidget, QInputDialog, QSizePolicy
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QRegExp
 from utils.crash_logger import get_crash_logger
 from utils.session_recorder import SessionRecorder
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtGui import QFont, QPixmap, QRegExpValidator
 
 # Import core modules
 try:
@@ -326,6 +326,20 @@ class LoginRegisterDialog(QDialog):
         self.login_password = QLineEdit()
         self.login_password.setPlaceholderText("Password")
         self.login_password.setEchoMode(QLineEdit.Password)
+        
+        # Create password field with eye toggle
+        password_row = QHBoxLayout()
+        password_row.addWidget(self.login_password)
+        self.login_password_eye_btn = QPushButton("👁")
+        self.login_password_eye_btn.setFixedSize(36, 36)
+        self.login_password_eye_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 8px; font-size: 16px;")
+        self.login_password_eye_btn.clicked.connect(lambda: self.toggle_password_visibility(self.login_password, self.login_password_eye_btn))
+        password_row.addWidget(self.login_password_eye_btn)
+
+        # Connect Enter key to login function
+        self.login_password.returnPressed.connect(self.handle_login)
+        self.login_email.returnPressed.connect(self.handle_login)
+        
         login_btn = QPushButton("Login")
         login_btn.setObjectName("LoginBtn")
         login_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 10px; padding: 8px 0; font-size: 16px; font-weight: bold;")
@@ -334,12 +348,12 @@ class LoginRegisterDialog(QDialog):
         phone_btn.setObjectName("SignUpBtn")
         phone_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 10px; padding: 8px 0; font-size: 16px; font-weight: bold;")
         phone_btn.clicked.connect(self.handle_phone_login)
-        for w in [self.login_email, self.login_password, login_btn, phone_btn]:
+        for w in [self.login_email, login_btn, phone_btn]:
             w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.login_email.setStyleSheet("border: 2px solid #ff6600; border-radius: 8px; padding: 6px 10px; font-size: 15px; background: #f7f7f7; color: #222;")
         self.login_password.setStyleSheet("border: 2px solid #ff6600; border-radius: 8px; padding: 6px 10px; font-size: 15px; background: #f7f7f7; color: #222;")
         layout.addWidget(self.login_email)
-        layout.addWidget(self.login_password)
+        layout.addLayout(password_row)
         layout.addWidget(login_btn)
         layout.addWidget(phone_btn)
         # Add nav links under phone_btn
@@ -416,10 +430,18 @@ class LoginRegisterDialog(QDialog):
         self.reg_age.setPlaceholderText("Age")
         self.reg_gender = QLineEdit()
         self.reg_gender.setPlaceholderText("Gender")
+
+        gender_validator = QRegExpValidator(QRegExp("[a-zA-Z]+"))
+        self.reg_gender.setValidator(gender_validator)
+
         self.reg_address = QLineEdit()
         self.reg_address.setPlaceholderText("Address")
         self.reg_phone = QLineEdit()
         self.reg_phone.setPlaceholderText("Phone Number")
+
+        phone_validator = QRegExpValidator(QRegExp("[0-9]+"))
+        self.reg_phone.setValidator(phone_validator)
+        
         self.reg_password = QLineEdit()
         self.reg_password.setPlaceholderText("Password")
         self.reg_password.setEchoMode(QLineEdit.Password)
@@ -486,10 +508,19 @@ class LoginRegisterDialog(QDialog):
                 self.user_details = record  # Store full user details
                 self.accept()
             else:
-                self.result = True
-                self.username = identifier
-                self.user_details = {}
-                self.accept()
+                # Check if this is a serial ID login case (forgot password recovery)
+                serial_found = self.sign_in_logic.find_user_by_serial_id(identifier)
+                if serial_found:
+                    username, record = serial_found
+                    self.result = True
+                    self.username = username
+                    self.user_details = record  # Store full user details
+                    self.accept()
+                else:
+                    self.result = True
+                    self.username = identifier
+                    self.user_details = {}
+                    self.accept()
         else:
             QMessageBox.warning(self, "Error", "Invalid credentials. Please check your full name and password.")
 
@@ -709,7 +740,11 @@ def main():
                     # Run application
                     app.exec_()
                     
-                    logger.info(f"User {login.username} logged out")
+                    if hasattr(dashboard, '_exited_application'):
+                        logger.info("Application closed by user")
+                        break
+                    else:
+                        logger.info(f"User {login.username} logged out")
                     
                     # After dashboard closes (sign out), show login again
                     login = LoginRegisterDialog()

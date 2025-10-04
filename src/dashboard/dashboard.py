@@ -640,9 +640,6 @@ class Dashboard(QWidget):
         self.schedule_calendar.clicked.connect(self.on_calendar_date_selected)
         self.schedule_calendar.selectionChanged.connect(self.on_calendar_selection_changed)
         
-        # Connect month/year navigation to custom dropdowns
-        self.schedule_calendar.currentPageChanged.connect(self.on_calendar_page_changed)
-        
         schedule_layout.addWidget(self.schedule_calendar)
         grid.addWidget(schedule_card, 2, 0)
         # --- Conclusion Card ---
@@ -839,80 +836,6 @@ class Dashboard(QWidget):
             self.refresh_recent_reports_ui(self.reports_filter_date)
         except Exception:
             pass
-
-    def on_calendar_page_changed(self, year, month):
-        """Handle calendar page change and show month/year dropdowns"""
-        try:
-            # Show month dropdown
-            self.show_month_dropdown(year, month)
-        except Exception as e:
-            print(f"Error in calendar page change: {e}")
-
-    def show_month_dropdown(self, year, month):
-        """Show month selection dropdown"""
-        from PyQt5.QtWidgets import QComboBox, QDialog, QVBoxLayout, QPushButton, QLabel
-        from PyQt5.QtCore import Qt
-        
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Select Month")
-        dialog.setModal(True)
-        dialog.setFixedSize(200, 300)
-        
-        layout = QVBoxLayout(dialog)
-        
-        # Year selection
-        year_label = QLabel("Year:")
-        year_label.setFont(QFont("Arial", 12, QFont.Bold))
-        layout.addWidget(year_label)
-        
-        year_combo = QComboBox()
-        current_year = year
-        for y in range(current_year - 5, current_year + 6):
-            year_combo.addItem(str(y))
-        year_combo.setCurrentText(str(year))
-        layout.addWidget(year_combo)
-        
-        # Month selection
-        month_label = QLabel("Month:")
-        month_label.setFont(QFont("Arial", 12, QFont.Bold))
-        layout.addWidget(month_label)
-        
-        month_combo = QComboBox()
-        months = ["January", "February", "March", "April", "May", "June",
-                 "July", "August", "September", "October", "November", "December"]
-        for i, month_name in enumerate(months):
-            month_combo.addItem(month_name)
-        month_combo.setCurrentIndex(month - 1)
-        layout.addWidget(month_combo)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        
-        ok_button = QPushButton("OK")
-        ok_button.setStyleSheet("background: #ff6600; color: white; border-radius: 5px; padding: 8px;")
-        ok_button.clicked.connect(lambda: self.apply_calendar_selection(
-            int(year_combo.currentText()), month_combo.currentIndex() + 1, dialog))
-        
-        cancel_button = QPushButton("Cancel")
-        cancel_button.setStyleSheet("background: #666; color: white; border-radius: 5px; padding: 8px;")
-        cancel_button.clicked.connect(dialog.reject)
-        
-        button_layout.addWidget(ok_button)
-        button_layout.addWidget(cancel_button)
-        layout.addLayout(button_layout)
-        
-        dialog.exec_()
-
-    def apply_calendar_selection(self, year, month, dialog):
-        """Apply the selected year and month to the calendar"""
-        try:
-            from PyQt5.QtCore import QDate
-            # Set the calendar to the selected month/year
-            self.schedule_calendar.setCurrentPage(year, month)
-            dialog.accept()
-        except Exception as e:
-            print(f"Error applying calendar selection: {e}")
-            dialog.reject()
 
     def open_chatbot_dialog(self):
         dlg = ChatbotDialog(self)

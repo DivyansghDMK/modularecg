@@ -62,16 +62,31 @@ class SignIn:
         with open(USER_DATA_FILE, "w") as f:
             json.dump(self.users, f, indent=2)
 
+    def _is_phone_number(self, text: str) -> bool:
+        """Check if the input looks like a phone number"""
+        import re
+        # Remove all non-digit characters
+        digits_only = re.sub(r'\D', '', text)
+        # Check if it's 7-15 digits (typical phone number length)
+        return len(digits_only) >= 7 and len(digits_only) <= 15
+
     def _find_user_record(self, identifier: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         # Identifier may be username (dict key), phone, or full_name
         if identifier in self.users:
             return identifier, self.users[identifier]
         ident_norm = str(identifier).strip().lower()
+        
+        # If input looks like a phone number, only check against phone fields
+        if self._is_phone_number(identifier):
+            for uname, record in self.users.items():
+                phone = str(record.get("phone", ""))
+                if ident_norm == str(phone).strip().lower():
+                    return uname, record
+            return None
+        
+        # If input doesn't look like phone number, check against full names only
         for uname, record in self.users.items():
-            phone = str(record.get("phone", ""))
             fullname = str(record.get("full_name", ""))
-            if ident_norm == str(phone).strip().lower():
-                return uname, record
             if fullname and ident_norm == fullname.strip().lower():
                 return uname, record
             if str(record.get("full_name", "")) == str(identifier):
@@ -110,6 +125,14 @@ class SignIn:
         serial_id = str(record.get("serial_id", "")) if isinstance(record, dict) else ""
         return bool(serial_id) and str(password) == serial_id
 
+    def find_user_by_serial_id(self, serial_id: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """Find user record by serial ID"""
+        for uname, record in self.users.items():
+            user_serial_id = str(record.get("serial_id", ""))
+            if user_serial_id and str(serial_id) == user_serial_id:
+                return uname, record
+        return None
+
     def _is_unique(self, key: str, value: str) -> bool:
         if not value:
             return True
@@ -131,11 +154,9 @@ class SignIn:
         # Username uniqueness
         if username in self.users:
             return False, "Username already exists."
-        # Enforce uniqueness: machine serial ID, full name, phone number
+        # Enforce uniqueness: machine serial ID and phone number only
         if serial_id and not self._is_unique("serial_id", serial_id):
             return False, "Machine Serial ID already registered."
-        if full_name and not self._is_unique("full_name", full_name):
-            return False, "Full Name already registered."
         if phone and not self._is_unique("phone", phone):
             return False, "Phone number already registered."
         record: Dict[str, Any] = {
