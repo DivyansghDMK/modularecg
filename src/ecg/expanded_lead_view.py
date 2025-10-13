@@ -377,6 +377,13 @@ class ExpandedLeadView(QDialog):
         self.arrhythmia_detector = ArrhythmiaDetector(sampling_rate)
         # Display gain to make waves visually smaller (half-height)
         self.display_gain = 0.5
+
+        self.amplification = 1.0  # Amplification factor
+        self.min_amplification = 0.1  # Minimum 10% of original
+        self.max_amplification = 10.0  # Maximum 10x amplification
+
+        # Store original y-axis limits (will be set after first plot)
+        self.fixed_ylim = None
         
         # Live data update
         self.timer = QTimer()
@@ -401,6 +408,10 @@ class ExpandedLeadView(QDialog):
         # Start live updates if parent is available (hardware data)
         if parent is not None:
             self.start_live_mode()
+
+            # Initialize button states based on parent acquisition status
+            if hasattr(self, 'expanded_start_btn'):
+                self.update_button_states()
     
     def setup_ui(self):
         """Setup the user interface"""
@@ -462,6 +473,37 @@ class ExpandedLeadView(QDialog):
         header_layout.addWidget(close_btn)
         
         parent_layout.addWidget(header_frame)
+
+    # Mouse wheel event for amplification
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel scrolling for amplification"""
+        try:
+            # Get scroll direction
+            delta = event.angleDelta().y()
+            
+            # Calculate amplification change
+            if delta > 0:
+                # Scroll up = amplify (zoom in)
+                self.amplification *= 1.1
+            else:
+                # Scroll down = deamplify (zoom out)
+                self.amplification /= 1.1
+            
+            # Clamp amplification to limits
+            self.amplification = max(self.min_amplification, 
+                                    min(self.max_amplification, self.amplification))
+            
+            # Update the plot
+            self.update_plot()
+            
+            # Update amplification display if it exists
+            if hasattr(self, 'amp_label'):
+                self.amp_label.setText(f"{self.amplification:.2f}x")
+            
+            event.accept()
+        except Exception as e:
+            print(f"Error in wheel event: {e}")
     
     def create_ecg_plot(self, parent_layout):
         """Create the ECG plot area"""
@@ -488,19 +530,221 @@ class ExpandedLeadView(QDialog):
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.canvas.setMinimumSize(700, 420)
         plot_layout.addWidget(self.canvas)
+
+        # --- AMPLIFICATION CONTROLS ---
+        control_frame = QFrame()
+        control_frame.setStyleSheet("background: transparent; border: none;")
+        control_layout = QHBoxLayout(control_frame)
+        control_layout.setContentsMargins(10, 5, 10, 5)
+        control_layout.setSpacing(10)
+        
+        # Amplification label
+        amp_title = QLabel("Amplification:")
+        amp_title.setStyleSheet("""
+            color: #2c3e50; 
+            font-weight: bold; 
+            font-size: 11pt;
+            background: transparent;
+            border: none;
+        """)
+        control_layout.addWidget(amp_title)
+        
+        # - Button (Decrease amplification)
+        minus_btn = QPushButton("−")
+        minus_btn.setMinimumSize(40, 35)
+        minus_btn.setMaximumSize(40, 35)
+        minus_btn.setStyleSheet("""
+            QPushButton {
+                background: #3498db; 
+                color: white; 
+                border-radius: 6px;
+                font-weight: bold; 
+                font-size: 18pt;
+                border: 2px solid #2980b9;
+            }
+            QPushButton:hover { 
+                background: #2980b9; 
+            }
+            QPushButton:pressed {
+                background: #21618c;
+            }
+        """)
+        minus_btn.clicked.connect(self.decrease_amplification)
+        control_layout.addWidget(minus_btn)
+        
+        # Amplification display
+        self.amp_label = QLabel(f"{self.amplification:.2f}x")
+        self.amp_label.setMinimumWidth(60)
+        self.amp_label.setAlignment(Qt.AlignCenter)
+        self.amp_label.setStyleSheet("""
+            color: #2c3e50; 
+            font-weight: bold; 
+            font-size: 12pt;
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            padding: 5px;
+        """)
+        control_layout.addWidget(self.amp_label)
+        
+        # + Button (Increase amplification)
+        plus_btn = QPushButton("+")
+        plus_btn.setMinimumSize(40, 35)
+        plus_btn.setMaximumSize(40, 35)
+        plus_btn.setStyleSheet("""
+            QPushButton {
+                background: #3498db; 
+                color: white; 
+                border-radius: 6px;
+                font-weight: bold; 
+                font-size: 18pt;
+                border: 2px solid #2980b9;
+            }
+            QPushButton:hover { 
+                background: #2980b9; 
+            }
+            QPushButton:pressed {
+                background: #21618c;
+            }
+        """)
+        plus_btn.clicked.connect(self.increase_amplification)
+        control_layout.addWidget(plus_btn)
+        
+        # Reset Button
+        reset_btn = QPushButton("Reset")
+        reset_btn.setMinimumSize(60, 35)
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background: #95a5a6; 
+                color: white; 
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-weight: bold; 
+                font-size: 10pt;
+                border: 2px solid #7f8c8d;
+            }
+            QPushButton:hover { 
+                background: #7f8c8d; 
+            }
+        """)
+        reset_btn.clicked.connect(self.reset_amplification)
+        control_layout.addWidget(reset_btn)
+        
+        # Info label
+        info_label = QLabel("💡 Use mouse scroll to zoom")
+        info_label.setStyleSheet("""
+            color: #7f8c8d; 
+            font-size: 9pt;
+            font-style: italic;
+            background: transparent;
+            border: none;
+        """)
+        control_layout.addWidget(info_label)
+        
+        control_layout.addStretch()
+
+        startstop_layout = QHBoxLayout()
+        startstop_layout.addStretch()
+        
+        # Start Button for Expanded Lead View
+        self.expanded_start_btn = QPushButton("Start")
+        self.expanded_start_btn.setMinimumSize(100, 40)
+        self.expanded_start_btn.setStyleSheet("""
+            QPushButton {
+                background: #28a745; 
+                color: white; 
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: bold; 
+                font-size: 11pt;
+                border: 2px solid #218838;
+            }
+            QPushButton:hover { 
+                background: #218838; 
+            }
+            QPushButton:pressed {
+                background: #1e7e34;
+            }
+            QPushButton:disabled {
+                background: #6c757d;
+                border: 2px solid #6c757d;
+            }
+        """)
+        self.expanded_start_btn.clicked.connect(self.start_parent_acquisition)
+        startstop_layout.addWidget(self.expanded_start_btn)
+        
+        # Stop Button for Expanded Lead View
+        self.expanded_stop_btn = QPushButton("Stop")
+        self.expanded_stop_btn.setMinimumSize(100, 40)
+        self.expanded_stop_btn.setStyleSheet("""
+            QPushButton {
+                background: #dc3545; 
+                color: white; 
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: bold; 
+                font-size: 11pt;
+                border: 2px solid #c82333;
+            }
+            QPushButton:hover { 
+                background: #c82333; 
+            }
+            QPushButton:pressed {
+                background: #bd2130;
+            }
+            QPushButton:disabled {
+                background: #6c757d;
+                border: 2px solid #6c757d;
+            }
+        """)
+        self.expanded_stop_btn.clicked.connect(self.stop_parent_acquisition)
+        startstop_layout.addWidget(self.expanded_stop_btn)
+        
+        plot_layout.addLayout(startstop_layout)
+        
+        plot_layout.addWidget(control_frame)
         
         parent_layout.addWidget(plot_frame, 7) # Plot takes ~70% of horizontal space
+
+    # Amplification functions
+
+    def increase_amplification(self):
+        """Increase amplification by 20%"""
+        self.amplification *= 1.2
+        self.amplification = min(self.max_amplification, self.amplification)
+        if hasattr(self, 'amp_label'):
+            self.amp_label.setText(f"{self.amplification:.2f}x")
+        self.update_plot()
+        print(f"✅ Amplification increased to {self.amplification:.2f}x")
+
+    def decrease_amplification(self):
+        """Decrease amplification by 20%"""
+        self.amplification /= 1.2
+        self.amplification = max(self.min_amplification, self.amplification)
+        if hasattr(self, 'amp_label'):
+            self.amp_label.setText(f"{self.amplification:.2f}x")
+        self.update_plot()
+        print(f"✅ Amplification decreased to {self.amplification:.2f}x")
+
+    def reset_amplification(self):
+        """Reset amplification to default (1.0x)"""
+        self.amplification = 1.0
+        if hasattr(self, 'amp_label'):
+            self.amp_label.setText(f"{self.amplification:.2f}x")
+        self.update_plot()
+        print("✅ Amplification reset to 1.00x")
     
     def setup_ecg_plot(self):
         """Setup the ECG plot with proper styling"""
         if len(self.ecg_data) == 0:
             self.ax.text(0.5, 0.5, 'No ECG Data Available', 
-                         transform=self.ax.transAxes, ha='center', va='center',
-                         fontsize=16, color='gray')
+                        transform=self.ax.transAxes, ha='center', va='center',
+                        fontsize=16, color='gray')
             return
         
         time = np.arange(len(self.ecg_data)) / self.sampling_rate
-        scaled = self.ecg_data * self.display_gain
+        # Plot at 1.0x to establish baseline
+        scaled = self.ecg_data * self.display_gain * 1.0  # Use 1.0x for baseline
         
         self.ax.plot(time, scaled, color='#0984e3', linewidth=1.0, label='ECG Signal')
         
@@ -513,9 +757,17 @@ class ExpandedLeadView(QDialog):
         self.ax.spines['right'].set_visible(False)
         
         self.ax.set_xlim(0, max(time) if len(time) > 0 else 1)
+        
+        # Store fixed y-limits based on original data (1.0x amplification)
         if len(self.ecg_data) > 0:
             y_margin = (np.max(scaled) - np.min(scaled)) * 0.1
-            self.ax.set_ylim(np.min(scaled) - y_margin, np.max(scaled) + y_margin)
+            y_min = np.min(scaled) - y_margin
+            y_max = np.max(scaled) + y_margin
+            self.fixed_ylim = (y_min, y_max)
+            self.ax.set_ylim(y_min, y_max)
+
+        if hasattr(self, 'canvas'):
+            self.canvas.draw()
     
     def create_metrics_panel(self, parent_layout):
         """Create the metrics panel"""
@@ -661,6 +913,11 @@ class ExpandedLeadView(QDialog):
                         self.ecg_data = np.array(new_data)
                         self.update_plot()
                         self.analyze_ecg()
+
+                        # Update button states to reflect parent's status
+                        if hasattr(self, 'expanded_start_btn'):
+                            self.update_button_states()
+
         except Exception as e:
             print(f"Error updating live data: {e}")
     
@@ -681,26 +938,39 @@ class ExpandedLeadView(QDialog):
             # Clear the plot
             self.ax.clear()
             
-            # Plot new data with reduced gain for smaller appearance
+            # Plot new data with amplification - wave will grow/shrink
             time = np.arange(len(self.ecg_data)) / self.sampling_rate
-            scaled = self.ecg_data * self.display_gain
+            scaled = self.ecg_data * self.display_gain * self.amplification  # Apply amplification
             self.ax.plot(time, scaled, color='#0984e3', linewidth=1.0, label='ECG Signal')
             
             # Update labels and styling
             self.ax.set_xlabel('Time (seconds)', fontsize=14, fontweight='bold', color='#34495e')
             self.ax.set_ylabel('Amplitude (mV)', fontsize=14, fontweight='bold', color='#34495e')
-            self.ax.set_title(f'Lead {self.lead_name} - Live PQRST Analysis', fontsize=18, fontweight='bold', color='#2c3e50')
+            # Show amplification in title
+            amp_text = f" (Zoom: {self.amplification:.2f}x)" if self.amplification != 1.0 else ""
+            self.ax.set_title(f'Lead {self.lead_name} - Live PQRST Analysis{amp_text}', 
+                            fontsize=18, fontweight='bold', color='#2c3e50')
             
             # Grid and styling
             self.ax.grid(True, which='both', linestyle='--', linewidth=0.5, color='#bdc3c7')
             self.ax.spines['top'].set_visible(False)
             self.ax.spines['right'].set_visible(False)
             
-            # Set limits
+            # Set x limits
             self.ax.set_xlim(0, max(time) if len(time) > 0 else 1)
-            if len(self.ecg_data) > 0:
-                y_margin = (np.max(scaled) - np.min(scaled)) * 0.1
-                self.ax.set_ylim(np.min(scaled) - y_margin, np.max(scaled) + y_margin)
+            
+            # FIXED Y-AXIS: Always use the same y-limits regardless of amplification
+            # This makes the wave appear to zoom in/out
+            if self.fixed_ylim is not None:
+                self.ax.set_ylim(self.fixed_ylim[0], self.fixed_ylim[1])
+            elif len(self.ecg_data) > 0 and self.fixed_ylim is None:
+                # Fallback: calculate and store fixed limits if not set
+                baseline_scaled = self.ecg_data * self.display_gain * 1.0
+                y_margin = (np.max(baseline_scaled) - np.min(baseline_scaled)) * 0.1
+                y_min = np.min(baseline_scaled) - y_margin
+                y_max = np.max(baseline_scaled) + y_margin
+                self.fixed_ylim = (y_min, y_max)
+                self.ax.set_ylim(y_min, y_max)
             
             # Redraw
             self.canvas.draw()
@@ -712,6 +982,101 @@ class ExpandedLeadView(QDialog):
         """Handle window close event"""
         self.stop_live_mode()
         event.accept()
+
+    # Start/Stop Acquisition from Expanded Lead View
+
+    def start_parent_acquisition(self):
+        """Start serial data acquisition from parent ECG test page"""
+        try:
+            parent = self.parent()
+            
+            # Check if demo mode is active - prevent starting if it is
+            if parent and hasattr(parent, 'demo_toggle') and parent.demo_toggle.isChecked():
+                QMessageBox.warning(self, "Demo Mode Active", 
+                    "Cannot start serial acquisition while Demo mode is ON.\n\n"
+                    "Please turn off Demo mode first to use real serial data.")
+                print("Cannot start acquisition - Demo mode is active")
+                return
+            
+            if parent and hasattr(parent, 'start_acquisition'):
+                print("Starting acquisition from expanded lead view...")
+                parent.start_acquisition()
+                
+                # Update button states
+                self.expanded_start_btn.setEnabled(False)
+                self.expanded_stop_btn.setEnabled(True)
+                
+                # Ensure live mode is active for this view
+                if not self.is_live:
+                    self.start_live_mode()
+                    
+                print("✅ Acquisition started successfully from expanded view")
+            else:
+                QMessageBox.warning(self, "Error", 
+                    "Cannot start acquisition. Parent ECG page not found.")
+                print("Parent ECG test page not available")
+        except Exception as e:
+            print(f"Error starting acquisition from expanded view: {e}")
+            QMessageBox.warning(self, "Error", 
+                f"Failed to start acquisition: {str(e)}")
+    
+    def stop_parent_acquisition(self):
+        """Stop serial data acquisition from parent ECG test page"""
+        try:
+            parent = self.parent()
+            if parent and hasattr(parent, 'stop_acquisition'):
+                print("⏹️ Stopping acquisition from expanded lead view...")
+                parent.stop_acquisition()
+                
+                # Update button states
+                self.expanded_start_btn.setEnabled(True)
+                self.expanded_stop_btn.setEnabled(False)
+                
+                print("✅ Acquisition stopped successfully from expanded view")
+            else:
+                QMessageBox.warning(self, "Error", 
+                    "Cannot stop acquisition. Parent ECG page not found.")
+                print("❌ Parent ECG test page not available")
+        except Exception as e:
+            print(f"❌ Error stopping acquisition from expanded view: {e}")
+            QMessageBox.warning(self, "Error", 
+                f"Failed to stop acquisition: {str(e)}")
+    
+    def update_button_states(self):
+        """Update start/stop button states based on parent acquisition status"""
+        try:
+            parent = self.parent()
+            
+            # Check if demo mode is active
+            is_demo_mode = False
+            if parent and hasattr(parent, 'demo_toggle'):
+                is_demo_mode = parent.demo_toggle.isChecked()
+            
+            # Hide buttons if demo mode is ON, show if OFF
+            if hasattr(self, 'expanded_start_btn') and hasattr(self, 'expanded_stop_btn'):
+                if is_demo_mode:
+                    # Demo mode is ON - hide the buttons
+                    self.expanded_start_btn.setVisible(False)
+                    self.expanded_stop_btn.setVisible(False)
+                    print("Demo mode ON - Start/Stop buttons hidden in expanded view")
+                else:
+                    # Demo mode is OFF - show the buttons and update their states
+                    self.expanded_start_btn.setVisible(True)
+                    self.expanded_stop_btn.setVisible(True)
+                    
+                    # Update enabled/disabled state based on acquisition status
+                    if parent and hasattr(parent, 'timer'):
+                        is_running = parent.timer.isActive()
+                        self.expanded_start_btn.setEnabled(not is_running)
+                        self.expanded_stop_btn.setEnabled(is_running)
+                    else:
+                        # Default state if parent not available
+                        self.expanded_start_btn.setEnabled(True)
+                        self.expanded_stop_btn.setEnabled(False)
+                    
+                    print("Demo mode OFF - Start/Stop buttons visible in expanded view")
+        except Exception as e:
+            print(f"Error updating button states: {e}")
     
     def create_arrhythmia_panel(self, parent_layout):
         """Create the arrhythmia analysis panel"""
@@ -763,13 +1128,28 @@ class ExpandedLeadView(QDialog):
     def calculate_metrics(self, analysis):
         """Calculate ECG metrics from analysis results"""
         try:
+            # Check if demo mode is active from parent
+            parent = self._parent if hasattr(self, '_parent') else None
+            is_demo_mode = False
+            if parent is not None and hasattr(parent, 'demo_toggle'):
+                is_demo_mode = parent.demo_toggle.isChecked()
+            
+            # If demo mode is active, use fixed demo values
+            if is_demo_mode:
+                self.update_metric('heart_rate', 60)
+                self.update_metric('rr_interval', 1000)
+                self.update_metric('pr_interval', 160)
+                self.update_metric('qrs_duration', 85)
+                self.update_metric('p_duration', 80)
+                return
+            
+            # Otherwise, calculate from real data
             r_peaks, p_peaks, q_peaks, s_peaks, t_peaks = (
                 analysis['r_peaks'], analysis['p_peaks'], analysis['q_peaks'],
                 analysis['s_peaks'], analysis['t_peaks']
             )
             
             # Heart Rate & RR Interval - use same calculation as 12-lead page if available
-            parent = self._parent if hasattr(self, '_parent') else None
             heart_rate = 0
             if parent is not None and hasattr(parent, 'calculate_heart_rate'):
                 try:
