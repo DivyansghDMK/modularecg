@@ -7,3 +7,4 @@ harsh, harsh, ptr, 30, Female
 harsh, harsh, ptr, 30, Female
 harsh, harsh, ptr, 30, Female
 deck, deck, deck, 12, Male
+Divyansh, Divyansh, Manik, 30, Female

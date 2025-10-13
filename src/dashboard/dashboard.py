@@ -1770,6 +1770,9 @@ class Dashboard(QWidget):
                     patient = {}
                 patient["date_time"] = now_str
 
+                # Force update conclusions before generating report
+                self.update_live_conclusion()
+                
                 # Generate the PDF with patient details
                 generate_ecg_report(filename, ecg_data, lead_img_paths, self, self.ecg_test_page, patient)
                 

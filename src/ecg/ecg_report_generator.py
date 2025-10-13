@@ -393,15 +393,24 @@ def create_clean_ecg_image(lead_name, width=6, height=2):
 
 def get_dashboard_conclusions_from_image(dashboard_instance):
     """
-    Extract only heading part from dashboard conclusion box (before the dash)
+    Extract live conclusions from dashboard conclusion box HTML content
     Returns: List of clean conclusion headings only (up to 8 conclusions)
     """
     conclusions = []
     
     if dashboard_instance and hasattr(dashboard_instance, 'conclusion_box'):
         try:
-            # Get plain text from conclusion box
-            plain_text = dashboard_instance.conclusion_box.toPlainText()
+            # Get HTML content from conclusion box
+            html_content = dashboard_instance.conclusion_box.toHtml()
+            
+            # Parse HTML to extract text content
+            from PyQt5.QtCore import Qt
+            from PyQt5.QtGui import QTextDocument
+            
+            # Create a temporary QTextDocument to parse HTML
+            doc = QTextDocument()
+            doc.setHtml(html_content)
+            plain_text = doc.toPlainText()
             
             # Split by lines and filter out empty lines
             lines = [line.strip() for line in plain_text.split('\n') if line.strip()]
@@ -416,10 +425,12 @@ def get_dashboard_conclusions_from_image(dashboard_instance):
                     not line.startswith('NOTE:') and
                     not line.startswith('This is an automated') and
                     not line.startswith('Consider') and  # Skip recommendations
+                    not line.startswith('•') and  # Skip bullet points
                     len(line) > 10):  # Only meaningful conclusions
                     
-                    # Clean up the line (remove status indicators)
+                    # Clean up the line (remove HTML tags and status indicators)
                     clean_line = line.replace('[!]', '').replace('[i]', '').replace('[OK]', '').strip()
+                    clean_line = clean_line.replace('<b>', '').replace('</b>', '').replace('<br>', '')
                     
                     # Extract only the heading part (before the dash)
                     if ' - ' in clean_line:
@@ -427,14 +438,22 @@ def get_dashboard_conclusions_from_image(dashboard_instance):
                         conclusions.append(heading_only)
                     elif clean_line and not clean_line.startswith('<'):
                         # If no dash, use the whole line but limit length
-                        conclusions.append(clean_line[:25] + "..." if len(clean_line) > 25 else clean_line)
+                        conclusions.append(clean_line[:30] + "..." if len(clean_line) > 30 else clean_line)
             
             print(f"📋 Extracted {len(conclusions)} conclusion headings from dashboard:")
             for i, conclusion in enumerate(conclusions, 1):
                 print(f"   {i}. {conclusion}")
+            
+            # Debug: Print raw HTML content if no conclusions found
+            if not conclusions:
+                print("🔍 DEBUG: No conclusions extracted. Raw HTML content:")
+                print(f"HTML: {html_content[:200]}...")
+                print(f"Plain text: {plain_text[:200]}...")
                 
         except Exception as e:
             print(f"⚠️ Error extracting conclusions from dashboard: {e}")
+            import traceback
+            traceback.print_exc()
     
     # Fallback to default conclusion headings if none found
     if not conclusions:
