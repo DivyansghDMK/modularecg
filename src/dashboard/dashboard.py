@@ -1528,7 +1528,16 @@ class Dashboard(QWidget):
         QRS = self.metric_labels['qrs_duration'].text().split()[0] if 'qrs_duration' in self.metric_labels else "90"
         QT = "380"  # Default value
         QTc = self.metric_labels['qtc_interval'].text().split()[0] if 'qtc_interval' in self.metric_labels else "400"
-        ST = self.metric_labels['st_segment'].text().split()[0] if 'st_segment' in self.metric_labels else "100"
+        # Use correct ST key used by metrics cards
+        ST = None
+        try:
+            if 'st_interval' in self.metric_labels:
+                ST = self.metric_labels['st_interval'].text().split()[0]
+            elif 'st_segment' in self.metric_labels:
+                ST = self.metric_labels['st_segment'].text().split()[0]
+        except Exception:
+            ST = None
+        ST = ST if ST is not None else "100"
 
         # Prepare data for the report generator
         ecg_data = {
@@ -1772,6 +1781,42 @@ class Dashboard(QWidget):
 
                 # Force update conclusions before generating report
                 self.update_live_conclusion()
+                
+                # Calculate wave amplitudes before generating report
+                print("🔬 Calculating wave amplitudes for report...")
+                if hasattr(self, 'ecg_test_page') and self.ecg_test_page:
+                    try:
+                        print(f"🔬 ECG test page found, calling calculate_wave_amplitudes()...")
+                        wave_amps = self.ecg_test_page.calculate_wave_amplitudes()
+                        print(f"🔬 Raw wave_amps returned: {wave_amps}")
+                        
+                        # Add wave amplitudes to ecg_data
+                        ecg_data['p_amp'] = wave_amps.get('p_amp', 0.0)
+                        ecg_data['qrs_amp'] = wave_amps.get('qrs_amp', 0.0)
+                        ecg_data['t_amp'] = wave_amps.get('t_amp', 0.0)
+                        ecg_data['rv5'] = wave_amps.get('rv5', 0.0)
+                        ecg_data['sv1'] = wave_amps.get('sv1', 0.0)
+                        
+                        print(f"📊 Wave amplitudes added to ecg_data:")
+                        print(f"   P={ecg_data['p_amp']:.4f}, QRS={ecg_data['qrs_amp']:.4f}, T={ecg_data['t_amp']:.4f}")
+                        print(f"   RV5={ecg_data['rv5']:.4f}, SV1={ecg_data['sv1']:.4f}, RV5+SV1={ecg_data['rv5'] + ecg_data['sv1']:.4f}")
+                        print(f"🔬 Final ecg_data keys: {ecg_data.keys()}")
+                    except Exception as e:
+                        print(f"⚠️ Error calculating wave amplitudes: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        ecg_data['p_amp'] = 0.0
+                        ecg_data['qrs_amp'] = 0.0
+                        ecg_data['t_amp'] = 0.0
+                        ecg_data['rv5'] = 0.0
+                        ecg_data['sv1'] = 0.0
+                else:
+                    print("⚠️ No ECG test page available for wave amplitude calculation")
+                    ecg_data['p_amp'] = 0.0
+                    ecg_data['qrs_amp'] = 0.0
+                    ecg_data['t_amp'] = 0.0
+                    ecg_data['rv5'] = 0.0
+                    ecg_data['sv1'] = 0.0
                 
                 # Generate the PDF with patient details
                 generate_ecg_report(filename, ecg_data, lead_img_paths, self, self.ecg_test_page, patient)

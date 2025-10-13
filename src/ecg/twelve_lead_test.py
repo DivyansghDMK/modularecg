@@ -1712,6 +1712,172 @@ class ECGTestPage(QWidget):
             print(f"❌ Critical error in calculate_heart_rate: {e}")
             return 60
 
+    def calculate_wave_amplitudes(self):
+        """Calculate P, QRS, and T wave amplitudes from all leads for report generation"""
+        try:
+            amplitudes = {
+                'p_amp': 0.0,
+                'qrs_amp': 0.0,
+                't_amp': 0.0,
+                'rv5': 0.0,
+                'sv1': 0.0
+            }
+            
+            # Get Lead II for P, QRS, T measurements
+            lead_ii_data = self.data[1] if len(self.data) > 1 else None
+            if lead_ii_data is None or len(lead_ii_data) < 200:
+                return amplitudes
+            
+            # Check for real signal
+            if np.all(lead_ii_data == 0) or np.std(lead_ii_data) < 0.1:
+                return amplitudes
+            
+            # Get sampling rate
+            fs = 250
+            if hasattr(self, 'sampler') and hasattr(self.sampler, 'sampling_rate'):
+                fs = float(self.sampler.sampling_rate)
+            
+            # Filter signal
+            from scipy.signal import butter, filtfilt
+            nyquist = fs / 2
+            low = 0.5 / nyquist
+            high = min(40.0 / nyquist, 0.99)
+            b, a = butter(2, [low, high], btype='band')
+            filtered_data = filtfilt(b, a, lead_ii_data)
+            
+            # Detect R-peaks
+            from scipy.signal import find_peaks
+            squared = np.square(np.diff(filtered_data))
+            integrated = np.convolve(squared, np.ones(int(0.15 * fs)) / (0.15 * fs), mode='same')
+            threshold = np.mean(integrated) + 0.5 * np.std(integrated)
+            r_peaks, _ = find_peaks(integrated, height=threshold, distance=int(0.6 * fs))
+            
+            if len(r_peaks) < 2:
+                return amplitudes
+            
+            # Analyze each beat and average the amplitudes
+            p_amps = []
+            qrs_amps = []
+            t_amps = []
+            
+            for r_idx in r_peaks[1:-1]:  # Skip first and last to avoid edge effects
+                try:
+                    # P-wave amplitude (120-200ms before R)
+                    p_start = max(0, r_idx - int(0.20 * fs))
+                    p_end = max(0, r_idx - int(0.12 * fs))
+                    if p_end > p_start:
+                        p_segment = filtered_data[p_start:p_end]
+                        baseline = np.mean(filtered_data[max(0, p_start - int(0.05 * fs)):p_start])
+                        p_peak = np.max(p_segment) - baseline
+                        if p_peak > 0:
+                            p_amps.append(p_peak)
+                    
+                    # QRS amplitude (Q to peak R to S)
+                    qrs_start = max(0, r_idx - int(0.08 * fs))
+                    qrs_end = min(len(filtered_data), r_idx + int(0.08 * fs))
+                    if qrs_end > qrs_start:
+                        qrs_segment = filtered_data[qrs_start:qrs_end]
+                        qrs_amp = np.max(qrs_segment) - np.min(qrs_segment)
+                        if qrs_amp > 0:
+                            qrs_amps.append(qrs_amp)
+                    
+                    # T-wave amplitude (100-300ms after R)
+                    t_start = min(len(filtered_data), r_idx + int(0.10 * fs))
+                    t_end = min(len(filtered_data), r_idx + int(0.30 * fs))
+                    if t_end > t_start:
+                        t_segment = filtered_data[t_start:t_end]
+                        baseline = np.mean(filtered_data[r_idx:t_start])
+                        t_peak = np.max(t_segment) - baseline
+                        if t_peak > 0:
+                            t_amps.append(t_peak)
+                
+                except Exception as e:
+                    continue
+            
+            # Calculate median amplitudes (more robust than mean)
+            if len(p_amps) > 0:
+                amplitudes['p_amp'] = np.median(p_amps)
+            if len(qrs_amps) > 0:
+                amplitudes['qrs_amp'] = np.median(qrs_amps)
+            if len(t_amps) > 0:
+                amplitudes['t_amp'] = np.median(t_amps)
+            
+            # Calculate RV5 and SV1 for specific leads
+            # Lead V5 is index 10, Lead V1 is index 6
+            if len(self.data) > 10:
+                lead_v5_data = self.data[10]
+                if lead_v5_data is not None and len(lead_v5_data) > 200 and np.std(lead_v5_data) > 0.1:
+                    # Filter V5
+                    filtered_v5 = filtfilt(b, a, lead_v5_data)
+                    # Detect R-peaks in V5
+                    squared_v5 = np.square(np.diff(filtered_v5))
+                    integrated_v5 = np.convolve(squared_v5, np.ones(int(0.15 * fs)) / (0.15 * fs), mode='same')
+                    threshold_v5 = np.mean(integrated_v5) + 0.5 * np.std(integrated_v5)
+                    r_peaks_v5, _ = find_peaks(integrated_v5, height=threshold_v5, distance=int(0.6 * fs))
+                    
+                    # Measure R-wave amplitude in V5
+                    rv5_amps = []
+                    for r_idx in r_peaks_v5[1:-1]:
+                        try:
+                            qrs_start = max(0, r_idx - int(0.08 * fs))
+                            qrs_end = min(len(filtered_v5), r_idx + int(0.08 * fs))
+                            if qrs_end > qrs_start:
+                                qrs_segment = filtered_v5[qrs_start:qrs_end]
+                                baseline = np.mean(filtered_v5[max(0, qrs_start - int(0.05 * fs)):qrs_start])
+                                r_amp = np.max(qrs_segment) - baseline
+                                if r_amp > 0:
+                                    rv5_amps.append(r_amp)
+                        except:
+                            continue
+                    
+                    if len(rv5_amps) > 0:
+                        amplitudes['rv5'] = np.median(rv5_amps)
+            
+            if len(self.data) > 6:
+                lead_v1_data = self.data[6]
+                if lead_v1_data is not None and len(lead_v1_data) > 200 and np.std(lead_v1_data) > 0.1:
+                    # Filter V1
+                    filtered_v1 = filtfilt(b, a, lead_v1_data)
+                    # Detect R-peaks in V1
+                    squared_v1 = np.square(np.diff(filtered_v1))
+                    integrated_v1 = np.convolve(squared_v1, np.ones(int(0.15 * fs)) / (0.15 * fs), mode='same')
+                    threshold_v1 = np.mean(integrated_v1) + 0.5 * np.std(integrated_v1)
+                    r_peaks_v1, _ = find_peaks(integrated_v1, height=threshold_v1, distance=int(0.6 * fs))
+                    
+                    # Measure S-wave amplitude in V1 (negative deflection after R)
+                    sv1_amps = []
+                    for r_idx in r_peaks_v1[1:-1]:
+                        try:
+                            s_start = r_idx
+                            s_end = min(len(filtered_v1), r_idx + int(0.08 * fs))
+                            if s_end > s_start:
+                                s_segment = filtered_v1[s_start:s_end]
+                                baseline = np.mean(filtered_v1[max(0, s_start - int(0.05 * fs)):s_start])
+                                s_amp = baseline - np.min(s_segment)  # S wave is negative, so baseline - min
+                                if s_amp > 0:
+                                    sv1_amps.append(s_amp)
+                        except:
+                            continue
+                    
+                    if len(sv1_amps) > 0:
+                        amplitudes['sv1'] = np.median(sv1_amps)
+            
+            print(f"📊 Wave Amplitudes Calculated: P={amplitudes['p_amp']:.2f}, QRS={amplitudes['qrs_amp']:.2f}, T={amplitudes['t_amp']:.2f}, RV5={amplitudes['rv5']:.2f}, SV1={amplitudes['sv1']:.2f}")
+            
+            return amplitudes
+            
+        except Exception as e:
+            print(f"❌ Error calculating wave amplitudes: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'p_amp': 0.0,
+                'qrs_amp': 0.0,
+                't_amp': 0.0,
+                'rv5': 0.0,
+                'sv1': 0.0
+            }
+
     def calculate_pr_interval(self, lead_data):
         """Calculate PR interval from P wave to QRS complex - LIVE"""
         try:

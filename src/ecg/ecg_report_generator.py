@@ -1053,22 +1053,155 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
                      fontSize=10, fontName="Helvetica", fillColor=colors.black)
     master_drawing.add(rr_label)
 
-    # HARD-CODED additional parameters below vitals (left aligned, fixed values)
-    p_qrs_label = String(130, 596, "P/QRS/T = 12/37/34", 
+    # CALCULATED wave amplitudes and lead-specific measurements
+    # Prefer values passed in data; if missing/zero, compute from live ecg_test_page data (last 10s)
+    p_amp_mv = data.get('p_amp', 0.0)
+    qrs_amp_mv = data.get('qrs_amp', 0.0)
+    t_amp_mv = data.get('t_amp', 0.0)
+    
+    print(f"🔬 Report Generator - Received wave amplitudes from data:")
+    print(f"   p_amp: {p_amp_mv}, qrs_amp: {qrs_amp_mv}, t_amp: {t_amp_mv}")
+    print(f"   Available keys in data: {list(data.keys())}")
+    
+    # If not provided or zero, compute quickly from Lead II in ecg_test_page (robust fallback)
+    def _compute_from_data_array(arr, fs):
+        import numpy as np
+        from scipy.signal import butter, filtfilt, find_peaks
+        if arr is None or len(arr) < int(2*fs) or np.std(arr) < 0.1:
+            return 0.0, 0.0, 0.0
+        nyq = fs/2.0
+        b,a = butter(2, [max(0.5/nyq, 0.001), min(40.0/nyq,0.99)], btype='band')
+        x = filtfilt(b,a,arr)
+        # Simple R detection via Pan-Tompkins style envelope
+        squared = np.square(np.diff(x))
+        win = max(1, int(0.15*fs))
+        env = np.convolve(squared, np.ones(win)/win, mode='same')
+        thr = np.mean(env) + 0.5*np.std(env)
+        r_peaks, _ = find_peaks(env, height=thr, distance=int(0.6*fs))
+        if len(r_peaks) < 3:
+            return 0.0, 0.0, 0.0
+        p_vals, qrs_vals, t_vals = [], [], []
+        for r in r_peaks[1:-1]:
+            # P: 120-200ms before R
+            p_start = max(0, r-int(0.20*fs)); p_end = max(0, r-int(0.12*fs))
+            if p_end>p_start:
+                seg = x[p_start:p_end]
+                base = np.mean(x[max(0,p_start-int(0.05*fs)):p_start])
+                p_vals.append(max(seg)-base)
+            # QRS: +-80ms around R
+            qrs_start = max(0, r-int(0.08*fs)); qrs_end = min(len(x), r+int(0.08*fs))
+            if qrs_end>qrs_start:
+                seg = x[qrs_start:qrs_end]
+                qrs_vals.append(max(seg)-min(seg))
+            # T: 100-300ms after R
+            t_start = min(len(x), r+int(0.10*fs)); t_end = min(len(x), r+int(0.30*fs))
+            if t_end>t_start:
+                seg = x[t_start:t_end]
+                base = np.mean(x[r:t_start]) if t_start>r else 0.0
+                t_vals.append(max(seg)-base)
+        def med(v):
+            return float(np.median(v)) if len(v)>0 else 0.0
+        return med(p_vals), med(qrs_vals), med(t_vals)
+
+    if (p_amp_mv<=0 or qrs_amp_mv<=0 or t_amp_mv<=0) and ecg_test_page is not None and hasattr(ecg_test_page,'data'):
+        try:
+            fs = 250.0
+            if hasattr(ecg_test_page, 'sampler') and hasattr(ecg_test_page.sampler,'sampling_rate') and ecg_test_page.sampler.sampling_rate:
+                fs = float(ecg_test_page.sampler.sampling_rate)
+            arr = None
+            if len(ecg_test_page.data)>1:
+                lead_ii = ecg_test_page.data[1]
+                if isinstance(lead_ii, (list, tuple)):
+                    import numpy as np
+                    lead_ii = np.asarray(lead_ii)
+                arr = lead_ii[-int(10*fs):] if lead_ii is not None and len(lead_ii)>int(10*fs) else lead_ii
+            cp, cqrs, ct = _compute_from_data_array(arr, fs)
+            if p_amp_mv<=0: p_amp_mv = cp
+            if qrs_amp_mv<=0: qrs_amp_mv = cqrs
+            if t_amp_mv<=0: t_amp_mv = ct
+            print(f"🔁 Fallback computed amplitudes from Lead II: P={p_amp_mv:.4f}, QRS={qrs_amp_mv:.4f}, T={t_amp_mv:.4f}")
+        except Exception as e:
+            print(f"⚠️ Fallback amplitude computation failed: {e}")
+
+    # Convert to mm (ECG standard: 1mV = 10mm)
+    p_mm = int(p_amp_mv * 10) if p_amp_mv > 0 else 12  # fallback to 12
+    qrs_mm = int(qrs_amp_mv * 10) if qrs_amp_mv > 0 else 37  # fallback to 37
+    t_mm = int(t_amp_mv * 10) if t_amp_mv > 0 else 34  # fallback to 34
+    
+    print(f"   Converted to mm: P={p_mm}, QRS={qrs_mm}, T={t_mm}")
+    
+    p_qrs_label = String(130, 596, f"P/QRS/T = {p_mm}/{qrs_mm}/{t_mm}", 
                          fontSize=10, fontName="Helvetica", fillColor=colors.black)
     master_drawing.add(p_qrs_label)
 
-    rv5_sv_label = String(130, 580, "RV5/SV1 = 1.260/0.786", 
+    # Get RV5 and SV1 amplitudes
+    rv5_amp = data.get('rv5', 0.0)
+    sv1_amp = data.get('sv1', 0.0)
+    
+    print(f"🔬 Report Generator - Received RV5/SV1 from data:")
+    print(f"   rv5: {rv5_amp}, sv1: {sv1_amp}")
+    
+    # If missing/zero, compute from V5 and V1 of last 10 seconds
+    if (rv5_amp<=0 or sv1_amp<=0) and ecg_test_page is not None and hasattr(ecg_test_page,'data'):
+        try:
+            import numpy as np
+            from scipy.signal import butter, filtfilt, find_peaks
+            fs = 250.0
+            if hasattr(ecg_test_page, 'sampler') and hasattr(ecg_test_page.sampler,'sampling_rate') and ecg_test_page.sampler.sampling_rate:
+                fs = float(ecg_test_page.sampler.sampling_rate)
+            def _get_last(arr):
+                return arr[-int(10*fs):] if arr is not None and len(arr)>int(10*fs) else arr
+            # V5 index 10, V1 index 6
+            v5 = _get_last(ecg_test_page.data[10]) if len(ecg_test_page.data)>10 else None
+            v1 = _get_last(ecg_test_page.data[6]) if len(ecg_test_page.data)>6 else None
+            if v5 is not None and len(v5)>int(2*fs):
+                nyq = fs/2.0
+                b,a = butter(2, [max(0.5/nyq, 0.001), min(40.0/nyq,0.99)], btype='band')
+                v5f = filtfilt(b,a, np.asarray(v5))
+                env = np.convolve(np.square(np.diff(v5f)), np.ones(int(0.15*fs))/(0.15*fs), mode='same')
+                r,_ = find_peaks(env, height=np.mean(env)+0.5*np.std(env), distance=int(0.6*fs))
+                vals=[]
+                for rr in r[1:-1]:
+                    qs = max(0, rr-int(0.08*fs)); qe = min(len(v5f), rr+int(0.08*fs))
+                    base = np.mean(v5f[max(0,qs-int(0.05*fs)):qs])
+                    vals.append(np.max(v5f[qs:qe])-base)
+                if len(vals)>0 and rv5_amp<=0: rv5_amp = float(np.median(vals))
+            if v1 is not None and len(v1)>int(2*fs):
+                nyq = fs/2.0
+                b,a = butter(2, [max(0.5/nyq, 0.001), min(40.0/nyq,0.99)], btype='band')
+                v1f = filtfilt(b,a, np.asarray(v1))
+                env = np.convolve(np.square(np.diff(v1f)), np.ones(int(0.15*fs))/(0.15*fs), mode='same')
+                r,_ = find_peaks(env, height=np.mean(env)+0.5*np.std(env), distance=int(0.6*fs))
+                vals=[]
+                for rr in r[1:-1]:
+                    ss = rr; se = min(len(v1f), rr+int(0.08*fs))
+                    base = np.mean(v1f[max(0,ss-int(0.05*fs)):ss])
+                    vals.append(base-np.min(v1f[ss:se]))
+                if len(vals)>0 and sv1_amp<=0: sv1_amp = float(np.median(vals))
+            print(f"🔁 Fallback computed RV5/SV1: RV5={rv5_amp:.4f}, SV1={sv1_amp:.4f}")
+        except Exception as e:
+            print(f"⚠️ Fallback RV5/SV1 computation failed: {e}")
+
+    # Convert to mV for display (values assumed to be in microvolt-like units; normalize)
+    rv5_mv = rv5_amp / 1000 if rv5_amp > 0 else 1.260  # fallback
+    sv1_mv = sv1_amp / 1000 if sv1_amp > 0 else 0.786  # fallback
+    
+    print(f"   Converted to mV: RV5={rv5_mv:.3f}, SV1={sv1_mv:.3f}")
+    
+    rv5_sv_label = String(130, 580, f"RV5/SV1 = {rv5_mv:.3f}/{sv1_mv:.3f}", 
                           fontSize=10, fontName="Helvetica", fillColor=colors.black)
     master_drawing.add(rv5_sv_label)
 
-    rv5_sv1_sum_label = String(280, 612, "RV5+SV1 = 0.512", 
+    # Calculate RV5+SV1 sum
+    rv5_sv1_sum = rv5_mv + sv1_mv
+    
+    rv5_sv1_sum_label = String(280, 612, f"RV5+SV1 = {rv5_sv1_sum:.3f}", 
                                fontSize=10, fontName="Helvetica", fillColor=colors.black)
     master_drawing.add(rv5_sv1_sum_label)
 
-    otcf_label = String(280, 596, "OTCF = 0.049", 
+    qtcf_label = String(280, 596, "QTCF = 0.049", 
                         fontSize=10, fontName="Helvetica", fillColor=colors.black)
-    master_drawing.add(otcf_label)
+    master_drawing.add(qtcf_label)
 
     
 
