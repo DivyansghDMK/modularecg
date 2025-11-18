@@ -1,5 +1,5 @@
 import sys
-from typing import Any, TextIO
+from typing import Any, Optional, TextIO
 
 
 def format_ecg_data(ecg_data):
@@ -21,7 +21,13 @@ def calculate_average(values):
     return sum(values) / len(values)
 
 
-def safe_print(*args: Any, sep: str = " ", end: str = "\n", file: TextIO | None = None, flush: bool = False) -> None:
+def safe_print(
+    *args: Any,
+    sep: str = " ",
+    end: str = "\n",
+    file: Optional[TextIO] = None,
+    flush: bool = False,
+) -> None:
     """
     Cross-platform print helper that strips or replaces characters the active console
     encoding cannot represent (e.g., emoji on legacy Windows code pages).
