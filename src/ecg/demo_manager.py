@@ -9,6 +9,10 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QMessageBox, QLabel
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from utils.helpers import safe_print
+
+# Use safe_print everywhere in this module to avoid Unicode issues on Windows consoles
+print = safe_print
 
 
 class DemoManager:
@@ -16,6 +20,9 @@ class DemoManager:
     def __init__(self, ecg_test_page):
 
         self.ecg_test_page = ecg_test_page
+        debug_env = os.getenv("ECG_DEMO_DEBUG", "").strip().lower()
+        self._debug_logging = debug_env in ("1", "true", "yes", "on")
+        self._debug_counter = 0
         self.demo_fs = 200  # Demo sampling rate (200 Hz)
         self.demo_thread = None
         self.demo_timer = None
@@ -48,6 +55,9 @@ class DemoManager:
         self._demo_paused_time = None  # Track paused time for resume
         # Smooth Y-range targets per lead so axes react gently to gain changes
         self._demo_lead_ranges = {}
+        # Plot update coordination
+        self._plot_running = False
+        self._skipped_plot_calls = 0
         # Stop threads if the page is destroyed
         try:
             self.ecg_test_page.destroyed.connect(self._on_page_destroyed)
@@ -543,11 +553,10 @@ class DemoManager:
             self.demo_timer.timeout.connect(self.update_demo_plots)
             
             # Adjust timer interval based on wave speed
-            # Use a reasonable UI FPS (~30-60 FPS)
-            base_interval = 33  # ~30 FPS base
-            # Use time window to adjust timer interval (like divyansh.py)
-            speed_factor = getattr(self, 'time_window', 10.0) / 10.0
-            timer_interval = max(10, int(base_interval * speed_factor))
+            # Target 30-40 FPS on Windows for stability
+            base_interval = 40  # base interval milliseconds
+            speed_factor = max(0.5, getattr(self, 'time_window', 10.0) / 10.0)
+            timer_interval = max(25, int(base_interval * speed_factor))
             self.demo_timer.start(timer_interval)
             
             print(f"🚀 Demo mode started with wave speed: {self.current_wave_speed}mm/s")
@@ -561,72 +570,76 @@ class DemoManager:
     def on_settings_changed(self, key, value):
         """Handle immediate settings changes for instant wave updates"""
         if key in ["wave_speed", "wave_gain"]:
-            print(f"🎛️ Demo mode: {key} changed to {value} - updating internal settings")
-            print(f"🎛️ Demo mode: _running_demo = {self._running_demo}")
+            self._debug(f"{key} changed to {value} (running={self._running_demo})")
             # Always update internal settings, even if demo is not running
             self._update_wave_speed_settings()
             
             # If demo is running, apply changes immediately
             if self._running_demo:
-                print(f"🎛️ Demo mode: {key} changed to {value} - applying instantly")
                 try:
                     self.update_demo_plots()
-                    print(f"🎛️ Demo mode: update_demo_plots completed successfully")
                 except Exception as e:
                     print(f"❌ Error in immediate demo update: {e}")
             else:
-                print(f"🎛️ Demo mode: {key} changed to {value} - settings saved for next demo start")
+                self._debug(f"{key} change deferred until demo starts")
     
     def update_demo_plots(self):
         """Update plots using exact same logic as divyansh.py"""
-        print(f"🎛️ update_demo_plots: Starting with current_wave_speed={self.current_wave_speed}")
+        if self._plot_running:
+            self._skipped_plot_calls = (self._skipped_plot_calls + 1) % 1000
+            if self._debug_logging and self._skipped_plot_calls % 60 == 0:
+                self._debug(f"Skipping plot update (skipped total={self._skipped_plot_calls})")
+            return
+        self._plot_running = True
+        try:
+            self._update_demo_plots_inner()
+        finally:
+            self._plot_running = False
+
+    def _update_demo_plots_inner(self):
+        self._debug(f"update_demo_plots start, speed={self.current_wave_speed}")
         
         # Always get fresh values from settings manager (like divyansh.py does)
         current_speed = self.ecg_test_page.settings_manager.get_wave_speed()
         current_gain = self.ecg_test_page.settings_manager.get_wave_gain()
         
-        print(f"🎛️ update_demo_plots: Settings manager says speed={current_speed}, gain={current_gain}")
+        self._debug(f"settings speed={current_speed}, gain={current_gain}")
         
         # Update internal values if they changed
         if current_speed != self.current_wave_speed:
-            print(f"🎛️ update_demo_plots: Speed changed from {self.current_wave_speed} to {current_speed}")
             self._update_wave_speed_settings()
             # Keep dashboard calculator in sync with effective sampling rate
             self._set_demo_sampling_rate(self.samples_per_second)
         
         # --- EXACT SAME LOGIC AS DIVYANSH.PY ---
-        # 1. Use the time window calculated in _update_wave_speed_settings
-        # This ensures consistent behavior: 12.5mm/s=compressed, 25mm/s=default, 50mm/s=stretched
         time_window = getattr(self, 'time_window', 10.0)  # Fallback to 10s if not set
         num_samples_to_show = max(1, int(time_window * self.samples_per_second))
         
-        print(f"🎛️ update_demo_plots: time_window={time_window}, num_samples_to_show={num_samples_to_show}")
+        self._debug(f"time_window={time_window}, samples={num_samples_to_show}")
         
         # Get current gain (match real-time serial behaviour: 10mm/mV baseline)
         try:
             wave_gain = float(self.ecg_test_page.settings_manager.get_wave_gain())
             current_gain = wave_gain / 10.0  # 10mm/mV = 1.0x, 20mm/mV = 2.0x, 2.5mm/mV = 0.25x
-            print(f"🎛️ Demo gain: {current_gain:.2f} (from settings: {wave_gain}mm/mV)")
+            self._debug(f"demo gain={current_gain:.2f} (settings {wave_gain}mm/mV)")
         except Exception:
             current_gain = 1.0
-            print(f"🎛️ Demo gain: {current_gain:.2f} (fallback)")
-
+            self._debug("demo gain fallback to 1.0x")
+        
         # During warmup, ramp the gain to avoid overshoot and clipping
         now_ts = time.time()
         if now_ts < self._warmup_until:
             warmup_left = max(0.0, self._warmup_until - now_ts)
             warmup_total = max(1e-6, self._warmup_until - (self._demo_started_at or now_ts))
-            # Ramp from 0.8 to 1.0 linearly across warmup (minimal ramp for faster display)
             progress = 1.0 - (warmup_left / warmup_total)
             ramp = max(0.8, min(1.0, 0.8 + 0.2 * progress))
             effective_gain = current_gain * ramp
         else:
             effective_gain = current_gain
-
-        print(f"🎛️ update_demo_plots: Applied gain={effective_gain}")
         
+        self._debug(f"effective gain={effective_gain:.3f}")
         peak_amplitude = None
-
+        
         # 2. For each lead, slice and update (exactly like divyansh.py)
         for i, lead in enumerate(self.ecg_test_page.leads):
             if i < len(self.ecg_test_page.data_lines) and i < len(self.ecg_test_page.data):
@@ -636,23 +649,21 @@ class DemoManager:
                 if total_len == 0:
                     continue
                 
-                # Use modular indexing exactly like divyansh.py
                 start = int(self.data_ptr % total_len)
                 idx = (start + np.arange(num_samples_to_show)) % total_len
                 data_slice = lead_data[idx]
                 if data_slice.size == 0:
                     continue
-
-                # Center the slice to keep baseline around zero in demo mode
+        
                 centered_slice = np.array(data_slice, dtype=float)
                 slice_center = np.nanmedian(centered_slice)
                 if np.isfinite(slice_center):
                     centered_slice = centered_slice - slice_center
-
+        
                 finite_mask = np.isfinite(centered_slice)
                 if not np.any(finite_mask):
                     continue
-
+        
                 stats_slice = centered_slice[finite_mask]
                 abs_stats = np.abs(stats_slice)
                 try:
@@ -662,12 +673,10 @@ class DemoManager:
                 if not np.isfinite(baseline_envelope) or baseline_envelope <= 0.0:
                     baseline_envelope = float(np.max(abs_stats)) if abs_stats.size else 1.0
                 baseline_envelope = max(1.0, baseline_envelope)
-
-                # Apply gain after centering
+        
                 display_data = centered_slice * effective_gain
                 display_data = np.nan_to_num(display_data, copy=False)
-
-                # Track peak amplitude across visible leads for demo display
+        
                 lead_peak = None
                 try:
                     finite_display = display_data[finite_mask]
@@ -683,21 +692,17 @@ class DemoManager:
                 except Exception:
                     lead_peak = None
                 
-                # Build time axis exactly matching window length for this speed
                 n = num_samples_to_show
                 time_axis = np.arange(n, dtype=float) / float(self.samples_per_second)
-                
-                # Update curve with time axis (like divyansh.py)
                 self.ecg_test_page.data_lines[i].setData(time_axis, display_data)
                 
-                # Update Y range using percentile baseline so gain affects visual height
                 base_span = max(200.0, baseline_envelope * 1.25)
                 if lead_peak is not None and lead_peak > base_span:
                     overshoot = lead_peak - base_span
                     base_span += overshoot * 0.35
                     if lead_peak > base_span:
                         base_span = lead_peak * 1.05
-
+        
                 prev_span = self._demo_lead_ranges.get(i)
                 if prev_span is not None:
                     smoothed_span = 0.65 * prev_span + 0.35 * base_span
@@ -707,22 +712,20 @@ class DemoManager:
                 self._demo_lead_ranges[i] = smoothed_span
                 self.ecg_test_page.plot_widgets[i].setYRange(-smoothed_span, smoothed_span)
                 
-                # Debug gain effect for first few leads
-                if i < 3 and hasattr(self, '_debug_counter') and self._debug_counter % 200 == 0:
+                if self._debug_logging:
+                    self._debug_counter = (self._debug_counter + 1) % 600
+                if self._debug_logging and i < 3 and self._debug_counter == 0:
                     lead_peak_dbg = lead_peak if lead_peak is not None else float(np.max(np.abs(display_data[finite_mask])))
-                    print(f"🎛️ Demo Lead {i}: gain={current_gain:.2f}, y_span={smoothed_span:.2f}, peak={lead_peak_dbg:.2f}")
+                    self._debug(f"lead {lead} gain={current_gain:.2f} span={smoothed_span:.1f} peak={lead_peak_dbg:.1f}")
                 
-                # X range matches current time window (exactly like divyansh.py)
                 self.ecg_test_page.plot_widgets[i].setXRange(0, time_window)
         
-        # 3. Advance pointer (simulate sweep) - exactly like divyansh.py
         step = 8
         if len(self.ecg_test_page.data) > 0:
             any_len = len(self.ecg_test_page.data[0])
             if any_len > 0:
                 self.data_ptr = (self.data_ptr + step) % any_len
-
-        # Update demo wave gain display in the outer metrics frame
+        
         try:
             gain_mm_per_mv = float(self.ecg_test_page.settings_manager.get_wave_gain())
         except Exception:
@@ -733,7 +736,7 @@ class DemoManager:
             except Exception as gain_ui_err:
                 print(f"⚠️ Unable to update demo wave gain display: {gain_ui_err}")
         
-        print(f"🎛️ update_demo_plots: Completed successfully")
+        self._debug("update_demo_plots complete")
         
         # Calculate intervals for dashboard in demo mode
         # Skip during warmup to avoid unstable early metrics
@@ -893,7 +896,7 @@ class DemoManager:
                             
                             # Use smoothed heart rate for demo
                             heart_rate = np.mean(self.demo_heart_rates)
-                            print(f"📊 Demo smoothed heart rate: {heart_rate:.1f} BPM")
+                            self._debug(f"smoothed heart rate {heart_rate:.1f} BPM")
                         
                         # Calculate P, Q, S, T peaks
                         q_peaks, s_peaks = self._calculate_qs_peaks(centered_data, r_peaks, sampling_rate)
@@ -972,7 +975,7 @@ class DemoManager:
                         qrs_str = f"{self._demo_fixed_metrics['QRS']} ms" if self._demo_fixed_metrics else "N/A"
                         hr_str = f"{self._demo_fixed_metrics['Heart_Rate']} bpm" if self._demo_fixed_metrics else "N/A"
                         
-                        print(f"📈 Demo intervals updated: HR={hr_str}, PR={pr_str}, QRS={qrs_str}")
+                        self._debug(f"intervals: HR={hr_str}, PR={pr_str}, QRS={qrs_str}")
                         
         except Exception as e:
             print(f"❌ Error calculating demo intervals: {e}")
@@ -1047,6 +1050,10 @@ class DemoManager:
         if qt_interval and heart_rate:
             return qt_interval / np.sqrt(60 / heart_rate)
         return None
+
+    def _debug(self, message):
+        if self._debug_logging:
+            safe_print(f"[DEMO DEBUG] {message}")
     
     def stop_demo_data(self):
         """Stop demo data generation"""
