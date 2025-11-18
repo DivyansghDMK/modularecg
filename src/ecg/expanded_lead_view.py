@@ -388,6 +388,14 @@ class ExpandedLeadView(QDialog):
         # Store the baseline (mean) of the signal for proper zooming
         self.signal_baseline = 0.0
         
+        # Demo mode settings - sync with parent's demo manager
+        self.demo_mode_active = False
+        self.demo_manager = None
+        if parent and hasattr(parent, 'demo_manager') and hasattr(parent, 'demo_toggle'):
+            self.demo_mode_active = parent.demo_toggle.isChecked()
+            self.demo_manager = parent.demo_manager
+            print(f"🎬 Expanded view: Demo mode is {'ON' if self.demo_mode_active else 'OFF'}")
+        
         # Live data update
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_live_data)
@@ -745,7 +753,38 @@ class ExpandedLeadView(QDialog):
                         fontsize=16, color='gray')
             return
         
-        time = np.arange(len(self.ecg_data)) / self.sampling_rate
+        # Calculate time axis based on demo mode or normal mode
+        if self.demo_mode_active and self.demo_manager:
+            # Demo mode: use time window from demo manager
+            try:
+                time_window = self.demo_manager.time_window
+                num_samples = len(self.ecg_data)
+                time = np.linspace(0, time_window, num_samples)
+            except Exception as e:
+                print(f"⚠️ Error getting demo time window in setup: {e}")
+                time = np.arange(len(self.ecg_data)) / self.sampling_rate
+        else:
+            # Normal mode: calculate time window based on wave speed (same as 12-lead view)
+            try:
+                parent = self.parent()
+                if parent and hasattr(parent, 'settings_manager'):
+                    wave_speed = float(parent.settings_manager.get_wave_speed())
+                    # Calculate time window based on wave speed (same logic as 12-lead view)
+                    baseline_seconds = 10.0
+                    seconds_scale = (25.0 / max(1e-6, wave_speed))
+                    time_window = baseline_seconds * seconds_scale
+                    
+                    # Create time axis that matches the time window
+                    num_samples = len(self.ecg_data)
+                    time = np.linspace(0, time_window, num_samples)
+                else:
+                    # Fallback: use sampling rate if settings not available
+                    time = np.arange(len(self.ecg_data)) / self.sampling_rate
+            except Exception as e:
+                print(f"⚠️ Error calculating time window in setup: {e}")
+                # Fallback: use sampling rate
+                time = np.arange(len(self.ecg_data)) / self.sampling_rate
+        
         # Plot at 1.0x to establish baseline
         scaled = self.ecg_data * self.display_gain * 1.0  # Use 1.0x for baseline
         
@@ -756,7 +795,23 @@ class ExpandedLeadView(QDialog):
         
         self.ax.set_xlabel('Time (seconds)', fontsize=14, fontweight='bold', color='#34495e')
         self.ax.set_ylabel('Amplitude (mV)', fontsize=14, fontweight='bold', color='#34495e')
-        self.ax.set_title(f'Lead {self.lead_name} - PQRST Analysis', fontsize=18, fontweight='bold', color='#2c3e50')
+        
+        # Add demo mode or wave speed info to title
+        if self.demo_mode_active and self.demo_manager:
+            mode_text = f" [{self.demo_manager.current_wave_speed}mm/s]"
+        else:
+            # Show wave speed for normal mode too
+            try:
+                parent = self.parent()
+                if parent and hasattr(parent, 'settings_manager'):
+                    wave_speed = float(parent.settings_manager.get_wave_speed())
+                    mode_text = f" [{wave_speed:.1f}mm/s]"
+                else:
+                    mode_text = ""
+            except Exception:
+                mode_text = ""
+        self.ax.set_title(f'Lead {self.lead_name} - PQRST Analysis{mode_text}', 
+                         fontsize=18, fontweight='bold', color='#2c3e50')
         
         self.ax.grid(True, which='both', linestyle='--', linewidth=0.5, color='#bdc3c7')
         self.ax.spines['top'].set_visible(False)
@@ -868,6 +923,35 @@ class ExpandedLeadView(QDialog):
         """Start live data updates"""
         self.is_live = True
         self.timer.start(100)  # Update every 100ms
+    
+    def on_wave_speed_changed(self):
+        """Handle wave speed changes in both demo mode and normal mode"""
+        try:
+            parent = self.parent()
+            if not parent:
+                return
+            
+            if self.demo_mode_active and self.demo_manager:
+                # Demo mode: update demo manager's wave speed settings
+                try:
+                    self.demo_manager._update_wave_speed_settings()
+                    # Force an update to reflect the new wave speed
+                    self.update_plot()
+                    print(f"🎬 Expanded view: Wave speed updated to {self.demo_manager.current_wave_speed}mm/s")
+                except Exception as e:
+                    print(f"⚠️ Error updating wave speed in expanded view (demo mode): {e}")
+            else:
+                # Normal mode: force an update to reflect the new wave speed
+                try:
+                    if hasattr(parent, 'settings_manager'):
+                        wave_speed = float(parent.settings_manager.get_wave_speed())
+                        # Force update to apply new wave speed
+                        self.update_plot()
+                        print(f"📊 Expanded view: Wave speed updated to {wave_speed:.1f}mm/s")
+                except Exception as e:
+                    print(f"⚠️ Error updating wave speed in expanded view (normal mode): {e}")
+        except Exception as e:
+            print(f"⚠️ Error updating wave speed in expanded view: {e}")
 
     def resizeEvent(self, event):
         """Respond to window resizing by scaling fonts and components."""
@@ -891,13 +975,20 @@ class ExpandedLeadView(QDialog):
         self.timer.stop()
     
     def update_live_data(self):
-        """Update ECG data from parent (hardware)"""
+        """Update ECG data from parent (hardware or demo)"""
         if not self.is_live or not hasattr(self, 'parent') or self.parent() is None:
             return
         
         try:
             # Get current data from parent ECG test page
             parent = self.parent()
+            
+            # Check if demo mode is active - update flag
+            if hasattr(parent, 'demo_toggle'):
+                self.demo_mode_active = parent.demo_toggle.isChecked()
+                if hasattr(parent, 'demo_manager'):
+                    self.demo_manager = parent.demo_manager
+            
             # Align sampling rate with parent so HR/RR match dashboard
             try:
                 if hasattr(parent, 'sampler') and getattr(parent.sampler, 'sampling_rate', 0):
@@ -910,13 +1001,103 @@ class ExpandedLeadView(QDialog):
                     self.arrhythmia_detector.fs = self.sampling_rate
             except Exception:
                 pass
+            
             if hasattr(parent, 'data') and len(parent.data) > 0:
                 # Find the lead index for this lead
                 lead_index = self.get_lead_index()
                 if lead_index is not None and lead_index < len(parent.data):
                     new_data = parent.data[lead_index]
                     if len(new_data) > 0:
-                        self.ecg_data = np.array(new_data)
+                        # In demo mode, apply wave speed and gain adjustments
+                        if self.demo_mode_active and self.demo_manager:
+                            # Get wave speed settings from demo manager
+                            try:
+                                current_wave_speed = self.demo_manager.current_wave_speed
+                                time_window = self.demo_manager.time_window
+                                samples_per_second = self.demo_manager.samples_per_second
+                                
+                                # Calculate number of samples to show based on wave speed
+                                num_samples_to_show = max(1, int(time_window * samples_per_second))
+                                
+                                # Get the most recent samples matching the time window
+                                # This ensures R peaks align with main view
+                                data_array = np.array(new_data)
+                                total_len = len(data_array)
+                                
+                                if total_len > 0:
+                                    # Use the same data pointer logic as demo mode for consistency
+                                    data_ptr = getattr(self.demo_manager, 'data_ptr', 0)
+                                    start = int(data_ptr % total_len)
+                                    idx = (start + np.arange(num_samples_to_show)) % total_len
+                                    data_slice = data_array[idx]
+                                    
+                                    # Apply wave gain from demo settings (same as main view)
+                                    try:
+                                        if hasattr(parent, 'settings_manager'):
+                                            current_gain = float(parent.settings_manager.get_wave_gain()) / 10.0
+                                            
+                                            # Reduce amplification for 20mm/mV to prevent clipping in expanded view (demo mode only)
+                                            if current_gain >= 2.0:  # 20mm/mV or higher
+                                                reduction_factor = 0.55  # Reduce to 55% to prevent clipping
+                                                current_gain = current_gain * reduction_factor
+                                                print(f"🎬 Expanded view: Reduced gain to {current_gain:.2f}x (from 2.0x) to prevent clipping at 20mm/mV")
+                                        else:
+                                            current_gain = 0.5
+                                        
+                                        # Apply the gain to the data slice
+                                        self.ecg_data = data_slice * current_gain
+                                        print(f"🎬 Expanded view: Applied wave gain={current_gain:.2f}x to demo data")
+                                    except Exception as gain_err:
+                                        print(f"⚠️ Error applying wave gain in expanded view: {gain_err}")
+                                        self.ecg_data = data_slice
+                                    
+                                    # Update sampling rate to match demo
+                                    self.sampling_rate = samples_per_second
+                                    self.analyzer.fs = self.sampling_rate
+                                    self.arrhythmia_detector.fs = self.sampling_rate
+                                    
+                                    print(f"🎬 Expanded view demo: wave_speed={current_wave_speed}, time_window={time_window:.1f}s, samples={num_samples_to_show}, gain={current_gain:.2f}x")
+                                else:
+                                    self.ecg_data = np.array(new_data)
+                            except Exception as e:
+                                print(f"⚠️ Error applying demo settings in expanded view: {e}")
+                                self.ecg_data = np.array(new_data)
+                        else:
+                            # Normal mode (serial data) - apply wave speed-based time window
+                            try:
+                                # Get wave speed from settings manager (same as 12-lead view)
+                                if hasattr(parent, 'settings_manager'):
+                                    wave_speed = float(parent.settings_manager.get_wave_speed())
+                                else:
+                                    wave_speed = 25.0  # Default
+                                
+                                # Calculate time window based on wave speed (same logic as 12-lead view)
+                                # 12.5 mm/s → 20 s window (more peaks visible - compressed)
+                                # 25 mm/s → 10 s window (default)
+                                # 50 mm/s → 5 s window (fewer peaks visible - stretched)
+                                baseline_seconds = 10.0
+                                seconds_scale = (25.0 / max(1e-6, wave_speed))
+                                seconds_to_show = baseline_seconds * seconds_scale
+                                
+                                # Calculate number of samples to show based on wave speed
+                                sampling_rate = 80.0  # Hardware sampling rate (same as 12-lead view)
+                                samples_to_show = int(sampling_rate * seconds_to_show)
+                                
+                                # Take only the most recent samples_to_show from the buffer
+                                data_array = np.array(new_data)
+                                if len(data_array) > samples_to_show:
+                                    data_slice = data_array[-samples_to_show:]
+                                else:
+                                    data_slice = data_array
+                                
+                                # Do NOT apply wave gain for real serial data - amplification is available instead
+                                self.ecg_data = data_slice
+                                print(f"📊 Expanded view serial: wave_speed={wave_speed:.1f}mm/s, time_window={seconds_to_show:.1f}s, samples={len(data_slice)}")
+                            except Exception as e:
+                                print(f"⚠️ Error applying wave speed in expanded view (normal mode): {e}")
+                                # Fallback: use all data if calculation fails
+                                self.ecg_data = np.array(new_data)
+                        
                         self.update_plot()
                         self.analyze_ecg()
 
@@ -946,7 +1127,40 @@ class ExpandedLeadView(QDialog):
             
             # Apply amplification around the baseline, not around 0
             # This keeps the signal centered during zoom
-            time = np.arange(len(self.ecg_data)) / self.sampling_rate
+            
+            # Calculate time axis based on demo mode or normal mode
+            if self.demo_mode_active and self.demo_manager:
+                # Demo mode: use time window from demo manager for correct wave speed display
+                try:
+                    time_window = self.demo_manager.time_window
+                    num_samples = len(self.ecg_data)
+                    # Create time axis that matches the time window
+                    time = np.linspace(0, time_window, num_samples)
+                except Exception as e:
+                    print(f"⚠️ Error getting demo time window: {e}")
+                    time = np.arange(len(self.ecg_data)) / self.sampling_rate
+            else:
+                # Normal mode: calculate time window based on wave speed (same as 12-lead view)
+                try:
+                    parent = self.parent()
+                    if parent and hasattr(parent, 'settings_manager'):
+                        wave_speed = float(parent.settings_manager.get_wave_speed())
+                        # Calculate time window based on wave speed (same logic as 12-lead view)
+                        baseline_seconds = 10.0
+                        seconds_scale = (25.0 / max(1e-6, wave_speed))
+                        time_window = baseline_seconds * seconds_scale
+                        
+                        # Create time axis that matches the time window
+                        num_samples = len(self.ecg_data)
+                        time = np.linspace(0, time_window, num_samples)
+                    else:
+                        # Fallback: use sampling rate if settings not available
+                        time = np.arange(len(self.ecg_data)) / self.sampling_rate
+                except Exception as e:
+                    print(f"⚠️ Error calculating time window for normal mode: {e}")
+                    # Fallback: use sampling rate
+                    time = np.arange(len(self.ecg_data)) / self.sampling_rate
+            
             base_scaled = self.ecg_data * self.display_gain
             
             # Update baseline if data changed
@@ -960,9 +1174,23 @@ class ExpandedLeadView(QDialog):
             # Update labels and styling
             self.ax.set_xlabel('Time (seconds)', fontsize=14, fontweight='bold', color='#34495e')
             self.ax.set_ylabel('Amplitude (mV)', fontsize=14, fontweight='bold', color='#34495e')
-            # Show amplification in title
+            
+            # Show amplification and wave speed info in title
             amp_text = f" (Zoom: {self.amplification:.2f}x)" if self.amplification != 1.0 else ""
-            self.ax.set_title(f'Lead {self.lead_name} - Live PQRST Analysis{amp_text}', 
+            if self.demo_mode_active and self.demo_manager:
+                mode_text = f" [{self.demo_manager.current_wave_speed}mm/s]"
+            else:
+                # Show wave speed for normal mode too
+                try:
+                    parent = self.parent()
+                    if parent and hasattr(parent, 'settings_manager'):
+                        wave_speed = float(parent.settings_manager.get_wave_speed())
+                        mode_text = f" [{wave_speed:.1f}mm/s]"
+                    else:
+                        mode_text = ""
+                except Exception:
+                    mode_text = ""
+            self.ax.set_title(f'Lead {self.lead_name} - Live PQRST Analysis{amp_text}{mode_text}', 
                             fontsize=18, fontweight='bold', color='#2c3e50')
             
             # Grid and styling

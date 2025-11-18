@@ -23,6 +23,8 @@ class DemoManager:
         # Thread coordination
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        # Track previous user-selected wave speed to restore after demo
+        self._previous_wave_speed = None
         
         # Wave speed control variables (like divyansh.py)
         self.current_wave_speed = 25.0  # mm/s (default)
@@ -44,6 +46,8 @@ class DemoManager:
         # Track demo start time for live time metric
         self._demo_started_at = None
         self._demo_paused_time = None  # Track paused time for resume
+        # Smooth Y-range targets per lead so axes react gently to gain changes
+        self._demo_lead_ranges = {}
         # Stop threads if the page is destroyed
         try:
             self.ecg_test_page.destroyed.connect(self._on_page_destroyed)
@@ -106,6 +110,18 @@ class DemoManager:
             # current_gain removed from recent changes
 
             print("🟢 Demo mode ON - Starting demo data...")
+
+            # Force demo start to 50mm/s regardless of previous selection (demo-only behavior)
+            try:
+                sm = self.ecg_test_page.settings_manager
+                # Preserve previous string value to restore later
+                self._previous_wave_speed = str(sm.get_setting("wave_speed", "25"))
+                if self._previous_wave_speed != "50":
+                    sm.set_setting("wave_speed", "50")
+                # Ensure UI reacts immediately to the forced setting
+                self.ecg_test_page.on_settings_changed("wave_speed", "50")
+            except Exception as e:
+                print(f"⚠️ Could not enforce demo wave speed: {e}")
             
             # Update wave speed settings before starting (like divyansh.py)
             self._update_wave_speed_settings()
@@ -113,6 +129,7 @@ class DemoManager:
             # Reset fixed metrics for new demo session
             self._demo_fixed_metrics = None
             self._running_demo = True
+            self._demo_lead_ranges.clear()
             
             # Don't start the dashboard timer here - it will be handled by start_demo_data()
             # which resets _demo_started_at and the dashboard will sync via session_paused_time
@@ -161,6 +178,23 @@ class DemoManager:
             # Demo is being turned OFF - enable hardware controls
             self.ecg_test_page.demo_toggle.setText("Demo Mode: OFF")
             print("🔴 Demo mode OFF - Stopping demo data...")
+
+            try:
+                if hasattr(self.ecg_test_page, 'hide_demo_wave_gain'):
+                    self.ecg_test_page.hide_demo_wave_gain()
+            except Exception as hide_err:
+                print(f"⚠️ Could not hide demo wave gain display: {hide_err}")
+
+            # Restore user's previous wave speed selection after demo
+            try:
+                if self._previous_wave_speed is not None:
+                    sm = self.ecg_test_page.settings_manager
+                    sm.set_setting("wave_speed", self._previous_wave_speed)
+                    self.ecg_test_page.on_settings_changed("wave_speed", self._previous_wave_speed)
+            except Exception as e:
+                print(f"⚠️ Could not restore wave speed after demo: {e}")
+            finally:
+                self._previous_wave_speed = None
             
             # Save paused time for resume - sync with dashboard
             if self._demo_started_at is not None:
@@ -182,6 +216,7 @@ class DemoManager:
             # Stop demo data generation
             self.stop_demo_data()
             self._enable_hardware_controls()
+            self._demo_lead_ranges.clear()
     
     def _disable_hardware_controls(self):
         """Disable hardware control buttons when demo mode is ON"""
@@ -567,11 +602,11 @@ class DemoManager:
         
         print(f"🎛️ update_demo_plots: time_window={time_window}, num_samples_to_show={num_samples_to_show}")
         
-        # Get current gain (REVERSED: 2.5mm → 2.0x, 20mm → 0.25x)
+        # Get current gain (match real-time serial behaviour: 10mm/mV baseline)
         try:
             wave_gain = float(self.ecg_test_page.settings_manager.get_wave_gain())
-            current_gain = 5.0 / wave_gain  # Reversed: 2.5mm → 2.0x, 20mm → 0.25x
-            print(f"🎛️ Demo gain: {current_gain:.2f} (from settings: {wave_gain}mm/mV, reversed)")
+            current_gain = wave_gain / 10.0  # 10mm/mV = 1.0x, 20mm/mV = 2.0x, 2.5mm/mV = 0.25x
+            print(f"🎛️ Demo gain: {current_gain:.2f} (from settings: {wave_gain}mm/mV)")
         except Exception:
             current_gain = 1.0
             print(f"🎛️ Demo gain: {current_gain:.2f} (fallback)")
@@ -590,6 +625,8 @@ class DemoManager:
 
         print(f"🎛️ update_demo_plots: Applied gain={effective_gain}")
         
+        peak_amplitude = None
+
         # 2. For each lead, slice and update (exactly like divyansh.py)
         for i, lead in enumerate(self.ecg_test_page.leads):
             if i < len(self.ecg_test_page.data_lines) and i < len(self.ecg_test_page.data):
@@ -603,9 +640,48 @@ class DemoManager:
                 start = int(self.data_ptr % total_len)
                 idx = (start + np.arange(num_samples_to_show)) % total_len
                 data_slice = lead_data[idx]
-                
-                # Apply gain exactly like divyansh.py (with warmup ramp)
-                display_data = data_slice * effective_gain
+                if data_slice.size == 0:
+                    continue
+
+                # Center the slice to keep baseline around zero in demo mode
+                centered_slice = np.array(data_slice, dtype=float)
+                slice_center = np.nanmedian(centered_slice)
+                if np.isfinite(slice_center):
+                    centered_slice = centered_slice - slice_center
+
+                finite_mask = np.isfinite(centered_slice)
+                if not np.any(finite_mask):
+                    continue
+
+                stats_slice = centered_slice[finite_mask]
+                abs_stats = np.abs(stats_slice)
+                try:
+                    baseline_envelope = float(np.percentile(abs_stats, 97.5))
+                except Exception:
+                    baseline_envelope = float(np.max(abs_stats)) if abs_stats.size else 0.0
+                if not np.isfinite(baseline_envelope) or baseline_envelope <= 0.0:
+                    baseline_envelope = float(np.max(abs_stats)) if abs_stats.size else 1.0
+                baseline_envelope = max(1.0, baseline_envelope)
+
+                # Apply gain after centering
+                display_data = centered_slice * effective_gain
+                display_data = np.nan_to_num(display_data, copy=False)
+
+                # Track peak amplitude across visible leads for demo display
+                lead_peak = None
+                try:
+                    finite_display = display_data[finite_mask]
+                    if finite_display.size:
+                        lead_peak = float(np.max(np.abs(finite_display)))
+                        if np.isfinite(lead_peak):
+                            if peak_amplitude is None:
+                                peak_amplitude = lead_peak
+                            else:
+                                peak_amplitude = max(peak_amplitude, lead_peak)
+                        else:
+                            lead_peak = None
+                except Exception:
+                    lead_peak = None
                 
                 # Build time axis exactly matching window length for this speed
                 n = num_samples_to_show
@@ -614,13 +690,27 @@ class DemoManager:
                 # Update curve with time axis (like divyansh.py)
                 self.ecg_test_page.data_lines[i].setData(time_axis, display_data)
                 
-                # Update Y range dynamically based on gain (exactly like divyansh.py)
-                max_amp = max(1.5 * current_gain, float(np.max(np.abs(display_data))) * 1.2 + 1e-6)
-                self.ecg_test_page.plot_widgets[i].setYRange(-max_amp, max_amp)
+                # Update Y range using percentile baseline so gain affects visual height
+                base_span = max(200.0, baseline_envelope * 1.25)
+                if lead_peak is not None and lead_peak > base_span:
+                    overshoot = lead_peak - base_span
+                    base_span += overshoot * 0.35
+                    if lead_peak > base_span:
+                        base_span = lead_peak * 1.05
+
+                prev_span = self._demo_lead_ranges.get(i)
+                if prev_span is not None:
+                    smoothed_span = 0.65 * prev_span + 0.35 * base_span
+                else:
+                    smoothed_span = base_span
+                smoothed_span = max(150.0, smoothed_span)
+                self._demo_lead_ranges[i] = smoothed_span
+                self.ecg_test_page.plot_widgets[i].setYRange(-smoothed_span, smoothed_span)
                 
                 # Debug gain effect for first few leads
                 if i < 3 and hasattr(self, '_debug_counter') and self._debug_counter % 200 == 0:
-                    print(f"🎛️ Demo Lead {i}: gain={current_gain:.2f}, max_amp={max_amp:.2f}, data_range={np.max(np.abs(display_data)):.2f}")
+                    lead_peak_dbg = lead_peak if lead_peak is not None else float(np.max(np.abs(display_data[finite_mask])))
+                    print(f"🎛️ Demo Lead {i}: gain={current_gain:.2f}, y_span={smoothed_span:.2f}, peak={lead_peak_dbg:.2f}")
                 
                 # X range matches current time window (exactly like divyansh.py)
                 self.ecg_test_page.plot_widgets[i].setXRange(0, time_window)
@@ -631,6 +721,17 @@ class DemoManager:
             any_len = len(self.ecg_test_page.data[0])
             if any_len > 0:
                 self.data_ptr = (self.data_ptr + step) % any_len
+
+        # Update demo wave gain display in the outer metrics frame
+        try:
+            gain_mm_per_mv = float(self.ecg_test_page.settings_manager.get_wave_gain())
+        except Exception:
+            gain_mm_per_mv = effective_gain * 10.0
+        if hasattr(self.ecg_test_page, 'update_demo_wave_gain'):
+            try:
+                self.ecg_test_page.update_demo_wave_gain(effective_gain, gain_mm_per_mv, peak_amplitude)
+            except Exception as gain_ui_err:
+                print(f"⚠️ Unable to update demo wave gain display: {gain_ui_err}")
         
         print(f"🎛️ update_demo_plots: Completed successfully")
         

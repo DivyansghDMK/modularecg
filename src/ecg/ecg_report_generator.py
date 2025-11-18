@@ -174,26 +174,73 @@ def capture_real_ecg_graphs_from_dashboard(dashboard_instance=None, ecg_test_pag
         "V1": 6, "V2": 7, "V3": 8, "V4": 9, "V5": 10, "V6": 11
     }
     
+    # Check if demo mode is active and get time window for filtering
+    is_demo_mode = False
+    time_window_seconds = None
+    samples_per_second = 150  # Default demo sampling rate
+    
+    if ecg_test_page and hasattr(ecg_test_page, 'demo_toggle'):
+        is_demo_mode = ecg_test_page.demo_toggle.isChecked()
+        if is_demo_mode:
+            # Get time window from demo manager
+            if hasattr(ecg_test_page, 'demo_manager') and ecg_test_page.demo_manager:
+                time_window_seconds = getattr(ecg_test_page.demo_manager, 'time_window', None)
+                samples_per_second = getattr(ecg_test_page.demo_manager, 'samples_per_second', 150)
+                print(f"🔍 DEMO MODE ON - Wave speed window: {time_window_seconds}s, Sampling rate: {samples_per_second}Hz")
+            else:
+                # Fallback: calculate from wave speed setting
+                try:
+                    from utils.settings_manager import SettingsManager
+                    sm = SettingsManager()
+                    wave_speed = float(sm.get_wave_speed())
+                    # Calculate time window: 12.5mm/s → 20s, 25mm/s → 10s, 50mm/s → 5s
+                    baseline_time_window = 10.0
+                    time_window_seconds = baseline_time_window * (25.0 / wave_speed)
+                    print(f"🔍 DEMO MODE ON - Calculated window from wave speed {wave_speed}mm/s: {time_window_seconds}s")
+                except Exception as e:
+                    print(f"⚠️ Could not get demo time window: {e}")
+                    time_window_seconds = None
+    
     # Try to get REAL ECG data from the test page
     real_ecg_data = {}
     if ecg_test_page and hasattr(ecg_test_page, 'data'):
+        
+        # Calculate number of samples to capture based on demo mode
+        if is_demo_mode and time_window_seconds is not None:
+            # In demo mode: only capture data visible in one window frame
+            num_samples_to_capture = int(time_window_seconds * samples_per_second)
+            print(f"📊 DEMO MODE: Capturing only {num_samples_to_capture} samples ({time_window_seconds}s window)")
+        else:
+            # Normal mode: capture maximum data (10 seconds or 10000 points, whichever is smaller)
+            num_samples_to_capture = 10000
+            print(f"📊 NORMAL MODE: Capturing up to {num_samples_to_capture} samples")
         
         for lead in ordered_leads:
             if lead == "-aVR":
                 # For -aVR, we need to invert aVR data
                 if hasattr(ecg_test_page, 'data') and len(ecg_test_page.data) > 3:
                     avr_data = np.array(ecg_test_page.data[3])  # aVR is at index 3
-                    # MAXIMUM data for 7+ heartbeats - NO LIMITS!
-                    real_ecg_data[lead] = -avr_data[-10000:]  # Last 10000 points (20 seconds = plenty of heartbeats)
-                    print(f" Captured REAL -aVR data: {len(real_ecg_data[lead])} points (MAXIMUM for 7+ heartbeats)")
+                    if is_demo_mode and time_window_seconds is not None:
+                        # Demo mode: only capture window frame data
+                        real_ecg_data[lead] = -avr_data[-num_samples_to_capture:]
+                        print(f"📈 Captured DEMO -aVR data: {len(real_ecg_data[lead])} points ({time_window_seconds}s window)")
+                    else:
+                        # Normal mode: capture maximum data
+                        real_ecg_data[lead] = -avr_data[-num_samples_to_capture:]
+                        print(f"📈 Captured REAL -aVR data: {len(real_ecg_data[lead])} points")
             else:
                 lead_index = lead_to_index.get(lead)
                 if lead_index is not None and len(ecg_test_page.data) > lead_index:
-                    # MAXIMUM data for 7+ heartbeats - NO LIMITS!
                     lead_data = np.array(ecg_test_page.data[lead_index])
                     if len(lead_data) > 0:
-                        real_ecg_data[lead] = lead_data[-10000:]  # Last 10000 points (20 seconds = plenty of heartbeats)
-                        print(f"📈 Captured REAL {lead} data: {len(real_ecg_data[lead])} points (MAXIMUM for 7+ heartbeats)")
+                        if is_demo_mode and time_window_seconds is not None:
+                            # Demo mode: only capture window frame data
+                            real_ecg_data[lead] = lead_data[-num_samples_to_capture:]
+                            print(f"📈 Captured DEMO {lead} data: {len(real_ecg_data[lead])} points ({time_window_seconds}s window)")
+                        else:
+                            # Normal mode: capture maximum data
+                            real_ecg_data[lead] = lead_data[-num_samples_to_capture:]
+                            print(f"📈 Captured REAL {lead} data: {len(real_ecg_data[lead])} points")
                     else:
                         print(f"⚠️ No data found for {lead}")
                 else:
@@ -223,7 +270,10 @@ def capture_real_ecg_graphs_from_dashboard(dashboard_instance=None, ecg_test_pag
             import traceback
             traceback.print_exc()
     
-    print(f" Successfully created {len(lead_drawings)}/12 ECG drawings with MAXIMUM heartbeats!")
+    if is_demo_mode and time_window_seconds is not None:
+        print(f"✅ Successfully created {len(lead_drawings)}/12 ECG drawings with DEMO window filtering ({time_window_seconds}s window - visible peaks only)!")
+    else:
+        print(f"✅ Successfully created {len(lead_drawings)}/12 ECG drawings with MAXIMUM heartbeats!")
     return lead_drawings
 
 def create_reportlab_ecg_drawing_with_real_data(lead_name, ecg_data, width=460, height=45):
@@ -968,11 +1018,44 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
     # STEP 3: Draw ALL ECG content directly in master drawing
     successful_graphs = 0
     
-    # Check if demo mode is active
+    # Check if demo mode is active and get time window for filtering
     is_demo_mode = False
+    time_window_seconds = None
+    samples_per_second = 150  # Default demo sampling rate
+    
     if ecg_test_page and hasattr(ecg_test_page, 'demo_toggle'):
         is_demo_mode = ecg_test_page.demo_toggle.isChecked()
-        print(f"🔍 Report Generator: Demo mode is {'ON' if is_demo_mode else 'OFF'}")
+        if is_demo_mode:
+            # Get time window from demo manager
+            if hasattr(ecg_test_page, 'demo_manager') and ecg_test_page.demo_manager:
+                time_window_seconds = getattr(ecg_test_page.demo_manager, 'time_window', None)
+                samples_per_second = getattr(ecg_test_page.demo_manager, 'samples_per_second', 150)
+                print(f"🔍 Report Generator: Demo mode ON - Wave speed window: {time_window_seconds}s, Sampling rate: {samples_per_second}Hz")
+            else:
+                # Fallback: calculate from wave speed setting
+                try:
+                    from utils.settings_manager import SettingsManager
+                    sm = SettingsManager()
+                    wave_speed = float(sm.get_wave_speed())
+                    # Calculate time window: 12.5mm/s → 20s, 25mm/s → 10s, 50mm/s → 5s
+                    baseline_time_window = 10.0
+                    time_window_seconds = baseline_time_window * (25.0 / wave_speed)
+                    print(f"🔍 Report Generator: Demo mode ON - Calculated window from wave speed {wave_speed}mm/s: {time_window_seconds}s")
+                except Exception as e:
+                    print(f"⚠️ Could not get demo time window: {e}")
+                    time_window_seconds = None
+        else:
+            print(f"🔍 Report Generator: Demo mode is OFF")
+    
+    # Calculate number of samples to capture based on demo mode
+    if is_demo_mode and time_window_seconds is not None:
+        # In demo mode: only capture data visible in one window frame
+        num_samples_to_capture = int(time_window_seconds * samples_per_second)
+        print(f"📊 DEMO MODE: Master drawing will capture only {num_samples_to_capture} samples ({time_window_seconds}s window)")
+    else:
+        # Normal mode: capture maximum data (8000 points = 16 seconds at 500Hz)
+        num_samples_to_capture = 8000
+        print(f"📊 NORMAL MODE: Master drawing will capture up to {num_samples_to_capture} samples")
     
     for pos_info in lead_positions:
         lead = pos_info["lead"]
@@ -986,7 +1069,7 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
                               fontSize=10, fontName="Helvetica-Bold", fillColor=colors.black)
             master_drawing.add(lead_label)
             
-            # STEP 3B: Get ALL AVAILABLE REAL ECG data for this lead
+            # STEP 3B: Get REAL ECG data for this lead (filtered by demo mode window if applicable)
             real_data_available = False
             if ecg_test_page and hasattr(ecg_test_page, 'data'):
                 lead_to_index = {
@@ -995,25 +1078,31 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
                 }
                 
                 if lead == "-aVR" and len(ecg_test_page.data) > 3:
-                    # For -aVR, use ALL available inverted aVR data
-                    raw_data = ecg_test_page.data[3][-8000:]
+                    # For -aVR, use filtered inverted aVR data
+                    raw_data = ecg_test_page.data[3][-num_samples_to_capture:]
                     # Check if data is not all zeros or flat
                     if len(raw_data) > 0 and np.std(raw_data) > 0.01:
-                        real_ecg_data = -np.array(raw_data)  # Last 8000 points = 16 seconds
+                        real_ecg_data = -np.array(raw_data)
                         real_data_available = True
-                        print(f"✅ Using ALL available -aVR data: {len(real_ecg_data)} points (std: {np.std(real_ecg_data):.2f})")
+                        if is_demo_mode and time_window_seconds is not None:
+                            print(f"✅ Using DEMO -aVR data: {len(real_ecg_data)} points ({time_window_seconds}s window, std: {np.std(real_ecg_data):.2f})")
+                        else:
+                            print(f"✅ Using ALL available -aVR data: {len(real_ecg_data)} points (std: {np.std(real_ecg_data):.2f})")
                     else:
                         print(f"⚠️ -aVR data is flat or empty (std: {np.std(raw_data) if len(raw_data) > 0 else 0:.4f})")
                 elif lead in lead_to_index and len(ecg_test_page.data) > lead_to_index[lead]:
-                    # Get ALL available real data for this lead
+                    # Get filtered real data for this lead
                     lead_index = lead_to_index[lead]
                     if len(ecg_test_page.data[lead_index]) > 0:
-                        raw_data = ecg_test_page.data[lead_index][-8000:]  # Last 8000 points = 16 seconds
+                        raw_data = ecg_test_page.data[lead_index][-num_samples_to_capture:]
                         # Check if data has variation (not all zeros or flat line)
                         if len(raw_data) > 0 and np.std(raw_data) > 0.01:
                             real_ecg_data = np.array(raw_data)
                             real_data_available = True
-                            print(f"✅ Using ALL available {lead} data: {len(real_ecg_data)} points (std: {np.std(real_ecg_data):.2f})")
+                            if is_demo_mode and time_window_seconds is not None:
+                                print(f"✅ Using DEMO {lead} data: {len(real_ecg_data)} points ({time_window_seconds}s window, std: {np.std(real_ecg_data):.2f})")
+                            else:
+                                print(f"✅ Using ALL available {lead} data: {len(real_ecg_data)} points (std: {np.std(real_ecg_data):.2f})")
                         else:
                             print(f"⚠️ Lead {lead} data is flat or empty (std: {np.std(raw_data) if len(raw_data) > 0 else 0:.4f})")
                     else:
@@ -1052,7 +1141,10 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
                 # Add path to master drawing
                 master_drawing.add(ecg_path)
                 
-                print(f"✅ Added ALL REAL ECG data for Lead {lead}: {len(real_ecg_data)} points (MAXIMUM heartbeats)")
+                if is_demo_mode and time_window_seconds is not None:
+                    print(f"✅ Added DEMO ECG data for Lead {lead}: {len(real_ecg_data)} points ({time_window_seconds}s window - visible peaks only)")
+                else:
+                    print(f"✅ Added ALL REAL ECG data for Lead {lead}: {len(real_ecg_data)} points (MAXIMUM heartbeats)")
             else:
                 print(f"📋 No real data for Lead {lead} - showing grid only")
             
