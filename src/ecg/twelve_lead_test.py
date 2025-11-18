@@ -884,7 +884,8 @@ class ECGTestPage(QWidget):
 
         self.test_name = test_name
         self.leads = self.LEADS_MAP[test_name]
-        self.buffer_size = 2000  # Increased buffer size for all leads
+        self.base_buffer_size = 2000  # Base buffer used for speed scaling
+        self.buffer_size = self.base_buffer_size  # Increased buffer size for all leads
         # Use GitHub version data structure: list of numpy arrays for all 12 leads
         # Initialize data buffers with memory management
         self.data = [np.zeros(HISTORY_LENGTH, dtype=np.float32) for _ in range(12)]
@@ -2487,9 +2488,8 @@ class ECGTestPage(QWidget):
         wave_speed = self.settings_manager.get_wave_speed()
         wave_gain = self.settings_manager.get_wave_gain()
         
-        # Update buffer size based on wave speed
         # Higher speed = more samples per second = larger buffer for same time window
-        base_buffer = 2000
+        base_buffer = getattr(self, "base_buffer_size", 2000)
         speed_factor = wave_speed / 50.0  # 50mm/s is baseline
         self.buffer_size = int(base_buffer * speed_factor)
         
@@ -3742,8 +3742,12 @@ class ECGTestPage(QWidget):
             # Get the data for this plot
             if data_override is not None:
                 data = np.asarray(data_override)
+                # Data is already scaled with gain, so don't apply gain again
+                data_already_scaled = True
             else:
                 data = self.data[plot_index]
+                # Data is not scaled, will need to apply gain
+                data_already_scaled = False
             
             # Remove NaN values and large outliers (robust)
             valid_data = data[~np.isnan(data)]
@@ -5089,10 +5093,52 @@ class ECGTestPage(QWidget):
         self._overlay_timer.timeout.connect(self._update_overlay_plots)
         self._overlay_timer.start(100)
 
+    def _get_overlay_target_buffer_len(self, is_demo_mode):
+        """
+        Calculate buffer length for overlay modes based on wave speed.
+        For real serial data, calculate based on wave speed to ensure peaks align.
+        For demo mode, swap the visual wave-speed behaviour between 12.5mm/s and 50mm/s.
+        """
+        try:
+            wave_speed = float(self.settings_manager.get_wave_speed())
+        except Exception:
+            wave_speed = 25.0
+
+        if not is_demo_mode:
+            # For real serial data, calculate buffer length based on wave speed
+            # Same logic as in update_plots() for serial data
+            baseline_seconds = 10.0
+            seconds_scale = (25.0 / max(1e-6, wave_speed))
+            seconds_to_show = baseline_seconds * seconds_scale
+            
+            # Use hardware sampling rate (80 Hz)
+            sampling_rate = 80.0
+            samples_to_show = int(sampling_rate * seconds_to_show)
+            
+            # Return the calculated samples (same as main plots - no buffer size limit)
+            # The data selection will handle cases where data is smaller
+            return max(1, samples_to_show)
+
+        # Demo mode: Map overlay speeds: 12.5 ⇄ 50, keep others unchanged.
+        if wave_speed <= 13.0:
+            mapped_speed = 50.0
+        elif wave_speed >= 49.0:
+            mapped_speed = 12.5
+        else:
+            mapped_speed = wave_speed
+
+        base_buffer = getattr(self, "base_buffer_size", 2000)
+        target = int(base_buffer * (mapped_speed / 50.0))
+        return max(1, target)
+
     def _update_overlay_plots(self):
         
         if not hasattr(self, '_overlay_lines') or not self._overlay_lines:
             return
+        
+        # Check if demo mode is active
+        is_demo_mode = hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked()
+        target_buffer_len = self._get_overlay_target_buffer_len(is_demo_mode)
         
         for idx, lead in enumerate(self.leads):
             if idx < len(self._overlay_lines):
@@ -5102,30 +5148,80 @@ class ECGTestPage(QWidget):
                     data = np.array([])
                 line = self._overlay_lines[idx]
                 ax = self._overlay_axes[idx]
+
+                # Ensure overlay line length matches current buffer size
+                buffer_len = target_buffer_len
+                try:
+                    xdata = line.get_xdata()
+                    current_len = len(xdata) if xdata is not None else 0
+                    if current_len != buffer_len:
+                        new_x = np.arange(buffer_len)
+                        line.set_xdata(new_x)
+                        current_len = buffer_len
+                    if current_len:
+                        buffer_len = current_len
+                except Exception as e:
+                    print(f"⚠️ Overlay line sync error (12-lead): {e}")
+                    buffer_len = target_buffer_len
                 
-                plot_data = np.full(self.buffer_size, np.nan)
+                plot_data = np.full(buffer_len, np.nan)
                 
                 if data is not None and len(data) > 0:
-                    n = min(len(data), self.buffer_size)
-                    centered = np.array(data[-n:]) - np.mean(data[-n:])
+                    # Take exactly buffer_len samples from the end (same as main plots)
+                    # This ensures overlay matches main view for all wave speeds
+                    if len(data) >= buffer_len:
+                        data_segment = data[-buffer_len:]
+                    else:
+                        data_segment = data
                     
-                    # Apply current gain setting
-                    gain_factor = 5.0 / self.settings_manager.get_wave_gain()  # Reversed: 2.5mm → 2.0x, 20mm → 0.25x
-                    centered = centered * gain_factor
+                    # Center data around baseline before applying gain
+                    centered_raw = np.array(data_segment, dtype=float)
+                    if centered_raw.size:
+                        finite_mask = np.isfinite(centered_raw)
+                        if np.any(finite_mask):
+                            baseline = np.nanmedian(centered_raw[finite_mask])
+                            if np.isfinite(baseline):
+                                centered_raw = centered_raw - baseline
+                        centered_raw = np.nan_to_num(centered_raw, copy=False)
+                    else:
+                        centered_raw = np.zeros(buffer_len, dtype=float)
+
+                    # Apply current gain setting (match main 12-lead grid)
+                    gain_factor = float(self.settings_manager.get_wave_gain()) / 10.0  # 10mm/mV baseline
                     
-                    if n < self.buffer_size:
+                    # Reduce amplification for 20mm/mV to prevent clipping in 12:1 overlay mode
+                    if gain_factor >= 2.0:  # 20mm/mV or higher
+                        if is_demo_mode:
+                            reduction_factor = 0.75  # Reduce to 75% for demo mode
+                        else:
+                            reduction_factor = 0.75  # Reduce to 75% for real mode to prevent clipping
+                        gain_factor = gain_factor * reduction_factor
+                    
+                    centered = centered_raw * gain_factor
+                    centered = np.nan_to_num(centered, copy=False)
+                    
+                    # Debug logging for first lead in demo mode
+                    if is_demo_mode and idx == 1:  # Lead II
+                        print(f"🎨 Overlay demo mode: Lead {lead}, gain={gain_factor:.2f}, raw_range={np.max(np.abs(centered_raw)):.1f}, gained_range={np.max(np.abs(centered)):.1f}")
+                    
+                    # Match main plots: if we have enough data, take exactly buffer_len samples
+                    # If not enough data, stretch what we have to fill buffer_len
+                    n = len(centered)
+                    if n < buffer_len:
+                        # Stretch available data to fill buffer_len
                         stretched = np.interp(
-                            np.linspace(0, n-1, self.buffer_size),
+                            np.linspace(0, n-1, buffer_len),
                             np.arange(n),
                             centered
                         )
                         plot_data[:] = stretched
                     else:
-                        plot_data[-n:] = centered
+                        # Take exactly buffer_len samples from the end (same as main plots)
+                        plot_data[:] = centered[-buffer_len:]
                     
-                    # Set dynamic y-limits based on data using robust statistics
-                    # Remove NaN values and large outliers (robust)
-                    valid_data = centered[~np.isnan(centered)]
+                    # Set Y-limits based on UN-GAINED data for both demo and real mode, so gain actually affects visual size
+                    # Use raw data for Y-axis calculation, so gain changes visual size
+                    valid_data = centered_raw[np.isfinite(centered_raw)]
                     
                     if len(valid_data) > 0:
                         # Use percentiles to avoid spikes from clipping the view
@@ -5166,7 +5262,7 @@ class ECGTestPage(QWidget):
                     ax.set_ylim(-500, 500)
                 
                 # Set x-limits
-                ax.set_xlim(0, self.buffer_size-1)
+                ax.set_xlim(0, max(buffer_len - 1, 1))
                 line.set_ydata(plot_data)
         
         if hasattr(self, '_overlay_canvas'):
@@ -5701,6 +5797,10 @@ class ECGTestPage(QWidget):
         if not hasattr(self, '_overlay_lines') or not self._overlay_lines:
             return
         
+        # Check if demo mode is active
+        is_demo_mode = hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked()
+        target_buffer_len = self._get_overlay_target_buffer_len(is_demo_mode)
+        
         # Define the two columns of leads
         left_leads = ["I", "II", "III", "aVR", "aVL", "aVF"]
         right_leads = ["V1", "V2", "V3", "V4", "V5", "V6"]
@@ -5719,29 +5819,79 @@ class ECGTestPage(QWidget):
                 line = self._overlay_lines[idx]
                 ax = self._overlay_axes[idx]
                 
-                plot_data = np.full(self.buffer_size, np.nan)
+                # Ensure overlay line length matches current buffer size
+                buffer_len = target_buffer_len
+                try:
+                    xdata = line.get_xdata()
+                    current_len = len(xdata) if xdata is not None else 0
+                    if current_len != buffer_len:
+                        new_x = np.arange(buffer_len)
+                        line.set_xdata(new_x)
+                        current_len = buffer_len
+                    if current_len:
+                        buffer_len = current_len
+                except Exception as e:
+                    print(f"⚠️ Overlay line sync error (6-lead): {e}")
+                    buffer_len = target_buffer_len
+
+                plot_data = np.full(buffer_len, np.nan)
                 
                 if data is not None and len(data) > 0:
-                    n = min(len(data), self.buffer_size)
-                    centered = np.array(data[-n:]) - np.mean(data[-n:])
+                    # Take exactly buffer_len samples from the end (same as main plots)
+                    # This ensures overlay matches main view for all wave speeds
+                    if len(data) >= buffer_len:
+                        data_segment = data[-buffer_len:]
+                    else:
+                        data_segment = data
                     
-                    # Apply current gain setting
-                    gain_factor = 5.0 / self.settings_manager.get_wave_gain()  # Reversed: 2.5mm → 2.0x, 20mm → 0.25x
-                    centered = centered * gain_factor
+                    # Center data around baseline before applying gain
+                    centered_raw = np.array(data_segment, dtype=float)
+                    if centered_raw.size:
+                        finite_mask = np.isfinite(centered_raw)
+                        if np.any(finite_mask):
+                            baseline = np.nanmedian(centered_raw[finite_mask])
+                            if np.isfinite(baseline):
+                                centered_raw = centered_raw - baseline
+                        centered_raw = np.nan_to_num(centered_raw, copy=False)
+                    else:
+                        centered_raw = np.zeros(buffer_len, dtype=float)
+
+                    # Apply current gain setting (match main 12-lead grid)
+                    gain_factor = float(self.settings_manager.get_wave_gain()) / 10.0  # 10mm/mV baseline
                     
-                    if n < self.buffer_size:
+                    # Reduce amplification for 20mm/mV to prevent clipping in 6:2 overlay mode
+                    if gain_factor >= 2.0:  # 20mm/mV or higher
+                        if is_demo_mode:
+                            reduction_factor = 0.75  # Reduce to 75% for demo mode
+                        else:
+                            reduction_factor = 0.75  # Reduce to 75% for real mode to prevent clipping
+                        gain_factor = gain_factor * reduction_factor
+                    
+                    centered = centered_raw * gain_factor
+                    centered = np.nan_to_num(centered, copy=False)
+                    
+                    # Debug logging for first lead in demo mode
+                    if is_demo_mode and idx == 1:  # Lead II
+                        print(f"🎨 6:2 Overlay demo mode: Lead {lead}, gain={gain_factor:.2f}, raw_range={np.max(np.abs(centered_raw)):.1f}, gained_range={np.max(np.abs(centered)):.1f}")
+                    
+                    # Match main plots: if we have enough data, take exactly buffer_len samples
+                    # If not enough data, stretch what we have to fill buffer_len
+                    n = len(centered)
+                    if n < buffer_len:
+                        # Stretch available data to fill buffer_len
                         stretched = np.interp(
-                            np.linspace(0, n-1, self.buffer_size),
+                            np.linspace(0, n-1, buffer_len),
                             np.arange(n),
                             centered
                         )
                         plot_data[:] = stretched
                     else:
-                        plot_data[-n:] = centered
+                        # Take exactly buffer_len samples from the end (same as main plots)
+                        plot_data[:] = centered[-buffer_len:]
                     
-                    # Set dynamic y-limits based on data using robust statistics
-                    # Remove NaN values and large outliers (robust)
-                    valid_data = centered[~np.isnan(centered)]
+                    # Set Y-limits based on UN-GAINED data for both demo and real mode, so gain actually affects visual size
+                    # Use raw data for Y-axis calculation, so gain changes visual size
+                    valid_data = centered_raw[np.isfinite(centered_raw)]
                     
                     if len(valid_data) > 0:
                         # Use percentiles to avoid spikes from clipping the view
@@ -5782,7 +5932,7 @@ class ECGTestPage(QWidget):
                     ax.set_ylim(-500, 500)
                 
                 # Set x-limits
-                ax.set_xlim(0, self.buffer_size-1)
+                ax.set_xlim(0, max(buffer_len - 1, 1))
                 line.set_ydata(plot_data)
         
         if hasattr(self, '_overlay_canvas'):
@@ -5813,7 +5963,7 @@ class ECGTestPage(QWidget):
                             raw = np.asarray(self.data[i])
                             gain = 1.0
                             try:
-                                gain = 5.0 / float(self.settings_manager.get_wave_gain())  # Reversed: 2.5mm → 2.0x, 20mm → 0.25x
+                                gain = float(self.settings_manager.get_wave_gain()) / 10.0  # 10mm/mV baseline
                             except Exception:
                                 pass
                             raw = (raw - np.nanmean(raw)) * gain
@@ -5920,9 +6070,25 @@ class ECGTestPage(QWidget):
                             # 50 mm/s → 5s window (show less data, stretched)
                             samples_to_show = int(sampling_rate * seconds_to_show)
                             
-                            # Take only the most recent samples_to_show from the buffer
-                            if len(scaled_data) > samples_to_show:
-                                scaled_data = scaled_data[-samples_to_show:]
+                            # Take only the most recent samples_to_show from the buffer (before gain application)
+                            raw_data = self.data[i]
+                            if len(raw_data) > samples_to_show:
+                                data_slice = raw_data[-samples_to_show:]
+                            else:
+                                data_slice = raw_data
+                            
+                            # Apply wave gain similar to demo mode: center first, then multiply by gain
+                            gain_factor = self.settings_manager.get_wave_gain() / 10.0
+                            
+                            # Center the slice to keep baseline around zero (same as demo mode)
+                            centered_slice = np.array(data_slice, dtype=float)
+                            slice_center = np.nanmedian(centered_slice)
+                            if np.isfinite(slice_center):
+                                centered_slice = centered_slice - slice_center
+                            
+                            # Apply gain after centering (same as demo mode)
+                            scaled_data = centered_slice * gain_factor
+                            scaled_data = np.nan_to_num(scaled_data, copy=False)
                             
                             n = len(scaled_data)
                             time_axis = np.arange(n, dtype=float) / sampling_rate
