@@ -184,6 +184,9 @@ class Dashboard(QWidget):
         self.dark_mode = False
         self.medical_mode = False
         
+        # Flag to track if we've warned about missing ECG data (to avoid spam)
+        self._ecg_data_warning_shown = False
+        
         self.setWindowTitle("ECG Monitor Dashboard")
         self.setGeometry(100, 100, 1300, 900)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
@@ -890,6 +893,8 @@ class Dashboard(QWidget):
                     self.title = title
                     self.parent = parent
                     self.dashboard_callback = None
+                    # Initialize data structure with 12 leads (empty arrays)
+                    self.data = [[] for _ in range(12)]
                     layout = QVBoxLayout()
                     label = QLabel("ECG Test Page - Import Error")
                     label.setAlignment(Qt.AlignCenter)
@@ -1737,7 +1742,9 @@ class Dashboard(QWidget):
                 try:
                     # Validate ECG test page data structure
                     if not hasattr(self.ecg_test_page, 'data') or not self.ecg_test_page.data:
-                        print("❌ ECG test page has no data")
+                        if not self._ecg_data_warning_shown:
+                            print("❌ ECG test page has no data (using fallback wave)")
+                            self._ecg_data_warning_shown = True
                         return self._fallback_wave_update(frame)
                     
                     if len(self.ecg_test_page.data) <= 1:
