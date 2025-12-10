@@ -1,12 +1,14 @@
 {
-  "timestamp": "2025-12-05 12:44:50",
+  "timestamp": "2025-12-10 17:33:30",
   "findings": [
     "Severe Bradycardia",
     "Normal PR interval",
-    "Normal QRS duration",
-    "Moderate HRV"
+    "Borderline QRS duration",
+    "Low HRV"
   ],
   "recommendations": [
-    "Immediate medical evaluation recommended"
+    "Immediate medical evaluation recommended",
+    "Monitor for progression, follow-up ECG if symptoms develop",
+    "Ensure adequate rest and stress management"
   ]
 }

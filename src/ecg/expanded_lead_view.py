@@ -988,11 +988,14 @@ class ExpandedLeadView(QDialog):
             return
         
         time = np.arange(len(self.ecg_data)) / self.sampling_rate
-        # Plot at 1.0x to establish baseline
-        scaled = self.ecg_data * self.display_gain * 1.0  # Use 1.0x for baseline
+        # Apply display gain and center the signal
+        base_scaled = self.ecg_data * self.display_gain
+        baseline = np.nanmedian(base_scaled)
+        centered = base_scaled - baseline
+        scaled = centered * 1.0  # Use 1.0x for initial display
         
-        # Calculate and store the baseline (mean) for proper zooming
-        self.signal_baseline = np.mean(scaled)
+        # Calculate and store the baseline for reference
+        self.signal_baseline = baseline
         
         self.ax.plot(time, scaled, color='#0984e3', linewidth=1.0, label='ECG Signal')
         
@@ -1006,12 +1009,16 @@ class ExpandedLeadView(QDialog):
         
         self.ax.set_xlim(0, max(time) if len(time) > 0 else 1)
         
-        # Store fixed y-limits based on original data (1.0x amplification)
-        if len(self.ecg_data) > 0:
-            y_margin = (np.max(scaled) - np.min(scaled)) * 0.1
-            y_min = np.min(scaled) - y_margin
-            y_max = np.max(scaled) + y_margin
-            self.fixed_ylim = (y_min, y_max)
+        # Calculate y-limits centered around zero for proper visualization
+        if len(scaled) > 0:
+            y_range = np.max(scaled) - np.min(scaled)
+            y_margin = max(y_range * 0.15, 0.5) if y_range > 0 else 1.0
+            max_abs = max(abs(np.max(scaled)), abs(np.min(scaled))) + y_margin
+            y_min = -max_abs
+            y_max = max_abs
+        else:
+            y_min, y_max = -1.0, 1.0
+        
             self.ax.set_ylim(y_min, y_max)
 
         if hasattr(self, 'canvas'):
@@ -1150,13 +1157,15 @@ class ExpandedLeadView(QDialog):
                     self.arrhythmia_detector.fs = self.sampling_rate
             except Exception:
                 pass
+            
             if hasattr(parent, 'data') and len(parent.data) > 0:
                 # Find the lead index for this lead
                 lead_index = self.get_lead_index()
                 if lead_index is not None and lead_index < len(parent.data):
                     new_data = parent.data[lead_index]
                     if len(new_data) > 0:
-                        self.ecg_data = np.array(new_data)
+                        # Convert to numpy array if needed
+                        self.ecg_data = np.asarray(new_data, dtype=np.float32)
                         # Only auto-advance if user hasn't manually positioned the slider
                         if not self.manual_view and not self.history_slider_active:
                             total_duration = len(self.ecg_data) / max(1.0, self.sampling_rate)
@@ -1168,9 +1177,23 @@ class ExpandedLeadView(QDialog):
                         # Update button states to reflect parent's status
                         if hasattr(self, 'expanded_start_btn'):
                             self.update_button_states()
+                    else:
+                        # Data array is empty - still update plot to show "waiting" message
+                        self.ecg_data = np.array([])
+                        self.update_plot()
+                else:
+                    # Lead index not found - still update plot
+                    if len(self.ecg_data) == 0:
+                        self.update_plot()
+            else:
+                # No parent data - show waiting message
+                if len(self.ecg_data) == 0:
+                    self.update_plot()
 
         except Exception as e:
-            print(f"Error updating live data: {e}")
+            print(f"❌ Error updating live data in expanded lead view ({self.lead_name}): {e}")
+            import traceback
+            traceback.print_exc()
     
     def get_lead_index(self):
         """Get the lead index for this lead name"""
@@ -1183,6 +1206,15 @@ class ExpandedLeadView(QDialog):
     def update_plot(self):
         """Update the ECG plot with new data"""
         if len(self.ecg_data) == 0:
+            print(f"⚠️ Expanded Lead View ({self.lead_name}): No ECG data available")
+            # Show message on plot
+            self.ax.clear()
+            self.ax.text(0.5, 0.5, 'No ECG Data Available\nWaiting for data...', 
+                        transform=self.ax.transAxes, ha='center', va='center',
+                        fontsize=16, color='gray')
+            self.ax.set_ylim(-1, 1)
+            self.ax.set_xlim(0, 1)
+            self.canvas.draw()
             return
         
         try:
@@ -1206,17 +1238,27 @@ class ExpandedLeadView(QDialog):
 
             window_signal = self.ecg_data[start_idx:end_idx]
             time = np.arange(start_idx, end_idx) / self.sampling_rate
+
+            # Baseline-wander removal: center by median to keep the isoelectric line flat
             base_scaled = window_signal * self.display_gain
-            self.signal_baseline = np.mean(base_scaled)
-            scaled = self.signal_baseline + (base_scaled - self.signal_baseline) * self.amplification
+            baseline = np.nanmedian(base_scaled)
+            centered = base_scaled - baseline
+            scaled = centered * self.amplification
+            self.signal_baseline = baseline
             
-            # Determine y-limits once based on entire dataset for consistent scaling
-            if self.fixed_ylim is None and len(self.ecg_data) > 0:
-                baseline_full = self.ecg_data * self.display_gain
-                y_margin = (np.max(baseline_full) - np.min(baseline_full)) * 0.15 if np.max(baseline_full) != np.min(baseline_full) else 1.0
-                y_min = np.min(baseline_full) - y_margin
-                y_max = np.max(baseline_full) + y_margin
-                self.fixed_ylim = (y_min, y_max)
+            # Calculate y-limits based on the centered and scaled window signal to ensure proper centering
+            if len(scaled) > 0:
+                y_range = np.max(scaled) - np.min(scaled)
+                y_margin = max(y_range * 0.15, 0.5) if y_range > 0 else 1.0
+                y_center = (np.max(scaled) + np.min(scaled)) / 2.0
+                y_min = y_center - (y_range / 2.0 + y_margin)
+                y_max = y_center + (y_range / 2.0 + y_margin)
+                # Ensure symmetric limits around center for better visualization
+                max_abs = max(abs(y_min), abs(y_max))
+                y_min = -max_abs
+                y_max = max_abs
+            else:
+                y_min, y_max = -1.0, 1.0
 
             self.ax.clear()
 
@@ -1285,12 +1327,21 @@ class ExpandedLeadView(QDialog):
             self.ax.spines['right'].set_visible(False)
             self.ax.set_xlim(time[0], time[-1])
             
-            if self.fixed_ylim is not None:
-                self.ax.set_ylim(self.fixed_ylim[0], self.fixed_ylim[1])
+            # Always use the calculated y-limits for the current window to ensure centering
+            self.ax.set_ylim(y_min, y_max)
 
             self.canvas.draw()
+            
+            # Debug output (only print occasionally to avoid spam)
+            if not hasattr(self, '_plot_update_counter'):
+                self._plot_update_counter = 0
+            self._plot_update_counter += 1
+            if self._plot_update_counter % 50 == 0:  # Print every 50th update
+                print(f"✅ Expanded Lead View ({self.lead_name}): Plot updated - {len(window_signal)} samples, y-range: [{y_min:.2f}, {y_max:.2f}]")
         except Exception as e:
-            print(f"Error updating plot: {e}")
+            print(f"❌ Error updating plot in expanded lead view ({self.lead_name}): {e}")
+            import traceback
+            traceback.print_exc()
     
     def closeEvent(self, event):
         """Handle window close event"""
