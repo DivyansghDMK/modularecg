@@ -56,7 +56,8 @@ from PyQt5.QtWidgets import QGraphicsDropShadowEffect
 from functools import partial # For plot clicking
 
 # --- Configuration ---
-HISTORY_LENGTH = 5000  # Increased from 1000 to 5000 for report generation 
+# Keep enough history to honor slow wave speeds (e.g., 12.5mm/s ≈ 20s window @500Hz → ~10,000 samples)
+HISTORY_LENGTH = 10000
 LEAD_LABELS = [
     "I", "II", "III", "aVR", "aVL", "aVF",
     "V1", "V2", "V3", "V4", "V5", "V6"
@@ -1111,17 +1112,9 @@ class ECGTestPage(QWidget):
         # Initialize data buffers with memory management
         self.data = [np.zeros(HISTORY_LENGTH, dtype=np.float32) for _ in range(12)]
         
-        # Wave speed slow-down counters (main grid + overlay modes)
-        self._grid_speed_slow_counter = 0
-        self._overlay_speed_slow_counter = 0
-        self._two_column_overlay_slow_counter = 0
         # Track overlay state and current layout (12:1 vs 6:2)
         self._overlay_active = False
         self._current_overlay_layout = None
-        # Slow factors (higher = slower visual movement at 50 mm/s)
-        self._grid_speed_slow_factor = 3
-        self._overlay_speed_slow_factor = 5
-        self._two_column_overlay_slow_factor = 5
         
         # Memory management
         self.max_buffer_size = 10000  # Maximum buffer size to prevent memory issues
@@ -2057,7 +2050,24 @@ class ECGTestPage(QWidget):
         qt_interval = self.calculate_qt_interval(lead_ii_data)
         
         # Calculate QTc (corrected QT using Bazett's formula)
-        qtc_interval = self.calculate_qtc_interval(heart_rate, qt_interval)
+        # Ensure we have valid inputs before calculating
+        if heart_rate and heart_rate > 0 and qt_interval and qt_interval > 0:
+            qtc_interval = self.calculate_qtc_interval(heart_rate, qt_interval)
+        else:
+            qtc_interval = 0
+            print(f"⚠️ Cannot calculate QTc: HR={heart_rate}, QT={qt_interval}")
+        
+        # Debug output for QT/QTc calculation
+        if hasattr(self, '_qt_debug_counter'):
+            self._qt_debug_counter += 1
+        else:
+            self._qt_debug_counter = 1
+        
+        if self._qt_debug_counter % 10 == 0:  # Print every 10th calculation
+            print(f"📊 ECG Metrics: HR={heart_rate:.1f} BPM, QT={qt_interval}ms, QTc={qtc_interval}ms")
+            if heart_rate != 60 and qt_interval > 0:
+                expected_qtc = (qt_interval / 1000.0) / np.sqrt(60.0 / heart_rate) * 1000
+                print(f"   Expected QTc at HR={heart_rate:.1f}: {expected_qtc:.0f}ms, Actual: {qtc_interval}ms")
         
         # Update UI metrics (pass both QT and QTc)
         self.update_ecg_metrics_display(heart_rate, pr_interval, qrs_duration, qrs_axis, st_segment, qt_interval, qtc_interval)
@@ -2236,20 +2246,28 @@ class ECGTestPage(QWidget):
                 heart_rate = 60000 / median_rr
                 # Extended: stable 10–300 BPM range
                 heart_rate = max(10, min(300, heart_rate))
+
                 # Extra guard: avoid falsely reporting very high BPM when real rate is very low
                 try:
                     window_sec = len(lead_data) / float(fs)
                 except Exception:
                     window_sec = 0
-                if heart_rate > 150 and window_sec >= 5.0:
-                    # How many beats would we expect at this BPM over the window?
+                if window_sec >= 4.0 and heart_rate > 120:
                     expected_peaks = (heart_rate * window_sec) / 60.0
-                    # If we have far fewer peaks than expected, this "high BPM" is likely noise
-                    if expected_peaks > len(peaks) * 3:
-                        # Treat as extreme bradycardia scenario and clamp to minimum (10 bpm)
-                        print(f"⚠️ Suspicious high BPM ({heart_rate:.1f}) with too few peaks "
-                              f"(expected≈{expected_peaks:.1f}, got={len(peaks)}). Clamping to 10 bpm.")
-                        heart_rate = 10.0
+                    if expected_peaks > len(peaks) * 2.5:
+                        alt_bpm = (len(peaks) * 60.0) / window_sec if window_sec > 0 else heart_rate
+                        if 10 <= alt_bpm <= 40:
+                            print(f"⚠️ High BPM ({heart_rate:.1f}) with few peaks ({len(peaks)}) in {window_sec:.1f}s; using count-based {alt_bpm:.1f} BPM")
+                            heart_rate = alt_bpm
+
+                # Clamp low-BPM spikes: if computed HR jumps far from last display at <40 BPM, hold last stable value
+                try:
+                    if heart_rate < 40 and hasattr(self, "_last_hr_display") and self._last_hr_display is not None:
+                        if abs(heart_rate - self._last_hr_display) > 5:
+                            print(f"⚠️ Low-BPM clamp: {heart_rate:.1f} → {self._last_hr_display:.1f} (spike suppressed)")
+                            heart_rate = self._last_hr_display
+                except Exception:
+                    pass
                 if np.isnan(heart_rate) or np.isinf(heart_rate):
                     print("❌ Invalid heart rate calculated")
                     return 60
@@ -2264,16 +2282,17 @@ class ECGTestPage(QWidget):
                 # Add current reading to buffer
                 self._bpm_smooth_buffer.append(hr_int)
                 
-                # Keep only last 5 readings for smoothing
-                if len(self._bpm_smooth_buffer) > 5:
+                # For low BPM (< 40), keep a slightly longer history to avoid jumps
+                max_len = 7 if hr_int < 40 else 5
+                if len(self._bpm_smooth_buffer) > max_len:
                     self._bpm_smooth_buffer.pop(0)
                 
-                # Return median of last 5 readings (very stable, no flickering)
                 smoothed_bpm = int(np.median(self._bpm_smooth_buffer))
                 
-                # Only update if changed by >= 2 bpm (prevents minor fluctuations)
+                # Only update if changed by a threshold
                 try:
-                    if self._last_hr_display is not None and abs(smoothed_bpm - self._last_hr_display) < 2:
+                    threshold = 3 if smoothed_bpm < 40 else 2
+                    if self._last_hr_display is not None and abs(smoothed_bpm - self._last_hr_display) < threshold:
                         return self._last_hr_display
                     self._last_hr_display = smoothed_bpm
                 except Exception:
@@ -2527,7 +2546,7 @@ class ECGTestPage(QWidget):
             
             # Apply bandpass filter to enhance R-peaks (0.5-40 Hz)
             from scipy.signal import butter, filtfilt, find_peaks
-            fs = 500  # Default: 500 Hz, but also supports 80 Hz via sampler
+            fs = 500
             if hasattr(self, 'sampler') and hasattr(self.sampler, 'sampling_rate') and self.sampler.sampling_rate:
                 fs = float(self.sampler.sampling_rate)
             
@@ -2570,22 +2589,72 @@ class ECGTestPage(QWidget):
             return 0  # Fallback to 0 when not computable
         except:
             return 0
-    
     def calculate_qrs_axis(self):
-        """Calculate QRS axis from leads I and aVF"""
+        """Estimate frontal QRS axis using leads I and aVF around recent R-peaks"""
         try:
-            if len(self.data) < 6:  # Need leads I and aVF
+            # Need at least Leads I, II, and aVF data
+            if len(self.data) < 6 or any(len(lead) == 0 for lead in self.data[:6]):
                 return 0
             
-            # Get current values from leads I and aVF
-            lead_i = self.data[0][-1] if len(self.data[0]) > 0 else 0
-            lead_avf = self.data[5][-1] if len(self.data[5]) > 0 else 0
-            
-            # Calculate QRS axis (simplified)
-            # Normal axis is between -30° and +90°
-            axis = int(np.arctan2(lead_avf, lead_i) * 180 / np.pi)
+            # Sampling rate: prefer sampler, otherwise fall back to class sampling_rate, then default 500 Hz
+            fs = 500.0
+            if hasattr(self, 'sampler') and getattr(self.sampler, 'sampling_rate', None):
+                try:
+                    fs = float(self.sampler.sampling_rate)
+                except Exception:
+                    pass
+            elif hasattr(self, 'sampling_rate') and self.sampling_rate:
+                try:
+                    fs = float(self.sampling_rate)
+                except Exception:
+                    pass
+
+            window_len = int(max(fs * 2, 200))  # last ~2 seconds
+            lead_i = np.asarray(self.data[0][-window_len:], dtype=float)
+            lead_ii = np.asarray(self.data[1][-window_len:], dtype=float)
+            lead_avf = np.asarray(self.data[5][-window_len:], dtype=float)
+
+            # Bandpass filter to isolate QRS
+            from scipy.signal import butter, filtfilt, find_peaks
+            nyq = fs / 2.0
+            b, a = butter(4, [0.5 / nyq, 40.0 / nyq], btype='band')
+            lead_i_f = filtfilt(b, a, lead_i) if len(lead_i) > 8 else lead_i
+            lead_ii_f = filtfilt(b, a, lead_ii) if len(lead_ii) > 8 else lead_ii
+            lead_avf_f = filtfilt(b, a, lead_avf) if len(lead_avf) > 8 else lead_avf
+
+            # Detect R-peaks on Lead II
+            if len(lead_ii_f) < 50:
+                return 0
+            r_peaks, _ = find_peaks(
+                lead_ii_f,
+                height=np.mean(lead_ii_f) + 0.4 * np.std(lead_ii_f),
+                distance=int(0.3 * fs),
+                prominence=np.std(lead_ii_f) * 0.2
+            )
+            if r_peaks.size == 0:
+                return 0
+
+            # Sample I and aVF at R-peaks and compute axis
+            i_vals = []
+            avf_vals = []
+            for rp in r_peaks[:min(5, len(r_peaks))]:
+                if rp < len(lead_i_f) and rp < len(lead_avf_f):
+                    i_vals.append(lead_i_f[rp])
+                    avf_vals.append(lead_avf_f[rp])
+
+            if not i_vals or not avf_vals:
+                return 0
+
+            mean_i = float(np.mean(i_vals))
+            mean_avf = float(np.mean(avf_vals))
+            axis = int(np.degrees(np.arctan2(mean_avf, mean_i)))
+            # Normalize to range [-180, 180]
+            if axis > 180:
+                axis -= 360
+            if axis < -180:
+                axis += 360
             return axis
-        except:
+        except Exception:
             return 0
 
     def calculate_st_interval(self, lead_data):
@@ -2601,7 +2670,7 @@ class ECGTestPage(QWidget):
             
             # Get sampling rate
             from scipy.signal import butter, filtfilt, find_peaks
-            fs = 80  # Default to hardware sampling rate
+            fs = 500  # Default to hardware sampling rate (override to current sampler if available)
             if hasattr(self, 'sampler') and hasattr(self.sampler, 'sampling_rate') and self.sampler.sampling_rate:
                 fs = float(self.sampler.sampling_rate)
             elif hasattr(self, 'sampling_rate') and self.sampling_rate:
@@ -2693,7 +2762,7 @@ class ECGTestPage(QWidget):
             
             # Get sampling rate
             from scipy.signal import butter, filtfilt, find_peaks
-            fs = 80
+            fs = 500
             if hasattr(self, 'sampler') and hasattr(self.sampler, 'sampling_rate') and self.sampler.sampling_rate:
                 fs = float(self.sampler.sampling_rate)
             elif hasattr(self, 'sampling_rate') and self.sampling_rate:
@@ -2756,11 +2825,18 @@ class ECGTestPage(QWidget):
     def calculate_qtc_interval(self, heart_rate, qt_interval):
         """Calculate QTc using Bazett's formula: QTc = QT / sqrt(RR)"""
         try:
+            # Validate inputs
             if not heart_rate or heart_rate <= 0:
+                print(f"⚠️ QTc: Invalid heart rate: {heart_rate}")
                 return 0
             
             if not qt_interval or qt_interval <= 0:
+                print(f"⚠️ QTc: Invalid QT interval: {qt_interval}")
                 return 0
+            
+            # Ensure numeric types
+            heart_rate = float(heart_rate)
+            qt_interval = float(qt_interval)
             
             # Calculate RR interval from heart rate (in seconds)
             rr_interval = 60.0 / heart_rate
@@ -2774,19 +2850,31 @@ class ECGTestPage(QWidget):
             # Convert back to milliseconds
             qtc_ms = int(round(qtc * 1000))
             
+            # Debug output to verify calculation
+            if hasattr(self, '_qtc_debug_counter'):
+                self._qtc_debug_counter += 1
+            else:
+                self._qtc_debug_counter = 1
+            
+            if self._qtc_debug_counter % 10 == 0:  # Print every 10th calculation
+                print(f"🔍 QTc calc: HR={heart_rate:.1f} BPM, QT={qt_interval:.0f}ms, RR={rr_interval:.3f}s, QTc={qtc_ms}ms")
+            
             return qtc_ms
             
         except Exception as e:
+            print(f"❌ Error calculating QTc: {e}, HR={heart_rate}, QT={qt_interval}")
+            import traceback
+            traceback.print_exc()
             return 0
 
     def update_ecg_metrics_display(self, heart_rate, pr_interval, qrs_duration, qrs_axis, st_interval, qt_interval=None, qtc_interval=None):
         """Update the ECG metrics display in the UI"""
         try:
-            # Throttle updates to every 5 seconds to avoid fast flicker
+            # Throttle updates to every 1 second to keep near real-time
             import time as _time
             if not hasattr(self, '_last_metric_update_ts'):
                 self._last_metric_update_ts = 0.0
-            if _time.time() - self._last_metric_update_ts < 5.0:
+            if _time.time() - self._last_metric_update_ts < 1.0:
                 return
             print(f"🔍 UI Update: HR={heart_rate}, PR={pr_interval}, QRS={qrs_duration}, Axis={qrs_axis}, ST={st_interval}, QT={qt_interval}, QTc={qtc_interval}")
             
@@ -2805,17 +2893,26 @@ class ECGTestPage(QWidget):
                     # Display both QT and QTc in the same metric (QT/QTc)
                     if qt_interval is not None and qtc_interval is not None:
                         try:
-                            qt_i = int(round(qt_interval))
-                            qtc_i = int(round(qtc_interval))
-                            self.metric_labels['qtc_interval'].setText(f"{qt_i}/{qtc_i}")
-                        except Exception:
+                            qt_i = int(round(qt_interval)) if qt_interval > 0 else 0
+                            qtc_i = int(round(qtc_interval)) if qtc_interval > 0 else 0
+                            # Only display if both values are valid
+                            if qt_i > 0 and qtc_i > 0:
+                                self.metric_labels['qtc_interval'].setText(f"{qt_i}/{qtc_i}")
+                            elif qt_i > 0:
+                                self.metric_labels['qtc_interval'].setText(f"{qt_i}/--")
+                            else:
+                                self.metric_labels['qtc_interval'].setText("--/--")
+                        except Exception as e:
+                            print(f"⚠️ Error formatting QT/QTc display: {e}")
                             self.metric_labels['qtc_interval'].setText(f"{qt_interval}/{qtc_interval}")
-                    elif qtc_interval is not None:
+                    elif qtc_interval is not None and qtc_interval > 0:
                         try:
                             qtc_i = int(round(qtc_interval))
                             self.metric_labels['qtc_interval'].setText(f"{qtc_i} ")
                         except Exception:
                             self.metric_labels['qtc_interval'].setText(f"{qtc_interval} ")
+                    else:
+                        self.metric_labels['qtc_interval'].setText("--/--")
             # mark last update time
             self._last_metric_update_ts = _time.time()
         except Exception as e:
@@ -2992,6 +3089,32 @@ class ECGTestPage(QWidget):
         base_buffer = getattr(self, "base_buffer_size", 2000)
         speed_factor = wave_speed / 50.0  # 50mm/s is baseline
         self.buffer_size = int(base_buffer * speed_factor)
+
+        # Ensure lead buffers are long enough for the visible time window derived from wave speed.
+        # 25mm/s → ~10s, 12.5mm/s → ~20s, 50mm/s → ~5s. Use 500 Hz as default hardware rate.
+        try:
+            seconds_scale = (25.0 / max(1e-6, wave_speed))
+            seconds_to_show = 10.0 * seconds_scale
+            desired_len = int(np.ceil(500.0 * seconds_to_show))
+            # Also respect the scaled buffer size and a minimum reasonable length
+            desired_len = max(desired_len, self.buffer_size, 1000)
+
+            if hasattr(self, "data") and isinstance(self.data, (list, tuple)):
+                for idx in range(len(self.data)):
+                    arr = self.data[idx]
+                    cur_len = len(arr) if hasattr(arr, "__len__") else 0
+                    if cur_len == desired_len:
+                        continue
+                    new_buf = np.zeros(desired_len, dtype=np.float32)
+                    if cur_len > 0:
+                        # Copy most recent samples into the tail of the new buffer
+                        take = min(cur_len, desired_len)
+                        new_buf[-take:] = np.asarray(arr, dtype=np.float32)[-take:]
+                    self.data[idx] = new_buf
+                # Keep the circular buffer size aligned with the target window
+                self.buffer_size = desired_len
+        except Exception as e:
+            print(f"⚠️ Could not resize buffers for wave speed {wave_speed}: {e}")
         
         # Update y-axis limits based on gain.
         # We keep a **minimum** vertical range so that for higher gains
@@ -5627,7 +5750,6 @@ class ECGTestPage(QWidget):
         self._overlay_timer = QTimer(self)
         self._overlay_timer.timeout.connect(self._update_overlay_plots)
         self._overlay_timer.start(100)
-        self._overlay_speed_slow_counter = 0
 
     def _get_overlay_target_buffer_len(self, is_demo_mode):
         """
@@ -5674,23 +5796,6 @@ class ECGTestPage(QWidget):
         
         # Check if demo mode is active
         is_demo_mode = hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked()
-        
-        # For real serial data at 50mm/s, slow down overlay updates so waves flow slower
-        using_real_serial = bool(self.serial_reader and getattr(self.serial_reader, 'running', False))
-        if not is_demo_mode and using_real_serial:
-            try:
-                wave_speed = float(self.settings_manager.get_wave_speed())
-            except Exception:
-                wave_speed = 25.0
-            if wave_speed >= 49.0:
-                factor = max(1, self._overlay_speed_slow_factor)
-                self._overlay_speed_slow_counter = (self._overlay_speed_slow_counter + 1) % factor
-                if self._overlay_speed_slow_counter != 0:
-                    return  # Skip frames to slow visual sweep
-            else:
-                self._overlay_speed_slow_counter = 0
-        else:
-            self._overlay_speed_slow_counter = 0
         
         target_buffer_len = self._get_overlay_target_buffer_len(is_demo_mode)
         
@@ -6348,7 +6453,6 @@ class ECGTestPage(QWidget):
         self._overlay_timer = QTimer(self)
         self._overlay_timer.timeout.connect(self._update_two_column_plots)
         self._overlay_timer.start(100)
-        self._two_column_overlay_slow_counter = 0
 
     def _update_two_column_plots(self):
         if not hasattr(self, '_overlay_lines') or not self._overlay_lines:
@@ -6356,24 +6460,6 @@ class ECGTestPage(QWidget):
         
         # Check if demo mode is active
         is_demo_mode = hasattr(self, 'demo_toggle') and self.demo_toggle.isChecked()
-        
-        # Slow down 6:2 overlay at 50mm/s for real serial data
-        using_real_serial = bool(self.serial_reader and getattr(self.serial_reader, 'running', False))
-        if not is_demo_mode and using_real_serial:
-            try:
-                wave_speed = float(self.settings_manager.get_wave_speed())
-            except Exception:
-                wave_speed = 25.0
-            if wave_speed >= 49.0:
-                factor = max(1, self._two_column_overlay_slow_factor)
-                self._two_column_overlay_slow_counter = (self._two_column_overlay_slow_counter + 1) % factor
-                if self._two_column_overlay_slow_counter != 0:
-                    return
-            else:
-                self._two_column_overlay_slow_counter = 0
-        else:
-            self._two_column_overlay_slow_counter = 0
-        
         target_buffer_len = self._get_overlay_target_buffer_len(is_demo_mode)
         
         # Define the two columns of leads
@@ -6528,7 +6614,7 @@ class ECGTestPage(QWidget):
                 except Exception:
                     wave_speed = 25.0
 
-                baseline_seconds = 10.0
+                baseline_seconds = 5.0
                 seconds_scale = (25.0 / max(1e-6, wave_speed))
                 seconds_to_show = baseline_seconds * seconds_scale
 
@@ -6674,81 +6760,71 @@ class ECGTestPage(QWidget):
                     wave_speed = float(self.settings_manager.get_wave_speed())
                 except Exception:
                     wave_speed = 25.0
-                
-                skip_grid_update = False
-                if wave_speed >= 49.0:
-                    self._grid_speed_slow_counter = (self._grid_speed_slow_counter + 1) % max(1, self._grid_speed_slow_factor)
-                    if self._grid_speed_slow_counter != 0:
-                        skip_grid_update = True
-                else:
-                    self._grid_speed_slow_counter = 0
-                
                 # Calculate time scaling based on wave speed (same logic as demo mode)
                 baseline_seconds = 10.0
                 seconds_scale = (25.0 / max(1e-6, wave_speed))
                 seconds_to_show = baseline_seconds * seconds_scale
                 
-                if not skip_grid_update:
-                    for i in range(len(self.leads)):
-                        try:
-                            if i >= len(self.data_lines):
-                                continue
-                            has_data = (i < len(self.data) and len(self.data[i]) > 0)
-                            if has_data:
-                                gain_factor = 5.0 / self.settings_manager.get_wave_gain()  # Reversed: 2.5mm → 2.0x, 20mm → 0.25x
-                                scaled_data = self.apply_adaptive_gain(self.data[i], signal_source, gain_factor)
-
-                                # Build time axis and apply wave-speed scaling
-                                sampling_rate = 80.0  # Hardware sampling rate
-                                
-                                # Calculate how many samples to show based on wave speed
-                                # 25 mm/s → 10s window
-                                # 12.5 mm/s → 20s window (show more data, compressed)
-                                # 50 mm/s → 5s window (show less data, stretched)
-                                samples_to_show = int(sampling_rate * seconds_to_show)
-                                
-                                # Take only the most recent samples_to_show from the buffer (before gain application)
-                                raw_data = self.data[i]
-                                if len(raw_data) > samples_to_show:
-                                    data_slice = raw_data[-samples_to_show:]
-                                else:
-                                    data_slice = raw_data
-                                
-                                # Apply wave gain similar to demo mode: center first, then multiply by gain
-                                gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                                
-                                # Center the slice to keep baseline around zero (same as demo mode)
-                                centered_slice = np.array(data_slice, dtype=float)
-                                slice_center = np.nanmedian(centered_slice)
-                                if np.isfinite(slice_center):
-                                    centered_slice = centered_slice - slice_center
-                                
-                                # Apply gain after centering (same as demo mode)
-                                scaled_data = centered_slice * gain_factor
-                                scaled_data = np.nan_to_num(scaled_data, copy=False)
-                                
-                                n = len(scaled_data)
-                                time_axis = np.arange(n, dtype=float) / sampling_rate
-                                
-                                # Avoid cropping: small padding and explicit x-range
-                                try:
-                                    vb = self.plot_widgets[i].getViewBox()
-                                    if vb is not None:
-                                        vb.setRange(xRange=(time_axis[0], time_axis[-1]), padding=0)
-                                except Exception:
-                                    pass
-
-                                self.data_lines[i].setData(time_axis, scaled_data)
-                                self.update_plot_y_range_adaptive(i, signal_source, data_override=scaled_data)
-
-                                if i < 3 and hasattr(self, '_debug_counter') and self._debug_counter % 200 == 0:
-                                    print(f"🎛️ Serial Lead {i}: speed={wave_speed:.1f}mm/s, scale={seconds_scale:.2f}, time_range={time_axis[-1]:.2f}s")
-                            else:
-                                self.data_lines[i].setData(self.data[i] if i < len(self.data) else [])
-                                self.update_plot_y_range(i)
-                        except Exception as e:
-                            print(f"❌ Error updating plot {i}: {e}")
+                for i in range(len(self.leads)):
+                    try:
+                        if i >= len(self.data_lines):
                             continue
+                        has_data = (i < len(self.data) and len(self.data[i]) > 0)
+                        if has_data:
+                            gain_factor = 5.0 / self.settings_manager.get_wave_gain()  # Reversed: 2.5mm → 2.0x, 20mm → 0.25x
+                            scaled_data = self.apply_adaptive_gain(self.data[i], signal_source, gain_factor)
+
+                            # Build time axis and apply wave-speed scaling
+                            sampling_rate = 500  # Hardware sampling rate
+                            
+                            # Calculate how many samples to show based on wave speed
+                            # 25 mm/s → 5s window
+                            # 12.5 mm/s → 10s window (show more data, compressed)
+                            # 50 mm/s → 2.5s window (show less data, stretched)
+                            samples_to_show = int(sampling_rate * seconds_to_show)
+                            
+                            # Take only the most recent samples_to_show from the buffer (before gain application)
+                            raw_data = self.data[i]
+                            if len(raw_data) > samples_to_show:
+                                data_slice = raw_data[-samples_to_show:]
+                            else:
+                                data_slice = raw_data
+                            
+                            # Apply wave gain similar to demo mode: center first, then multiply by gain
+                            gain_factor = self.settings_manager.get_wave_gain() / 10.0
+                            
+                            # Center the slice to keep baseline around zero (same as demo mode)
+                            centered_slice = np.array(data_slice, dtype=float)
+                            slice_center = np.nanmedian(centered_slice)
+                            if np.isfinite(slice_center):
+                                centered_slice = centered_slice - slice_center
+                            
+                            # Apply gain after centering (same as demo mode)
+                            scaled_data = centered_slice * gain_factor
+                            scaled_data = np.nan_to_num(scaled_data, copy=False)
+                            
+                            n = len(scaled_data)
+                            time_axis = np.arange(n, dtype=float) / sampling_rate
+                            
+                            # Avoid cropping: small padding and explicit x-range
+                            try:
+                                vb = self.plot_widgets[i].getViewBox()
+                                if vb is not None:
+                                    vb.setRange(xRange=(time_axis[0], time_axis[-1]), padding=0)
+                            except Exception:
+                                pass
+
+                            self.data_lines[i].setData(time_axis, scaled_data)
+                            self.update_plot_y_range_adaptive(i, signal_source, data_override=scaled_data)
+
+                            if i < 3 and hasattr(self, '_debug_counter') and self._debug_counter % 200 == 0:
+                                print(f"🎛️ Serial Lead {i}: speed={wave_speed:.1f}mm/s, scale={seconds_scale:.2f}, time_range={time_axis[-1]:.2f}s")
+                        else:
+                            self.data_lines[i].setData(self.data[i] if i < len(self.data) else [])
+                            self.update_plot_y_range(i)
+                    except Exception as e:
+                        print(f"❌ Error updating plot {i}: {e}")
+                        continue
                 # Calculate ECG metrics every 5 updates for good responsiveness
                 if self.update_count % 5 == 0:
                     try:
