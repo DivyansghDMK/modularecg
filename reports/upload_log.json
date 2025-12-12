@@ -327,5 +327,28 @@
       "file_size": 397,
       "file_type": ".json"
     }
+  },
+  {
+    "local_path": "/Users/deckmount/Downloads/modularecg-main/ECG_Report_20251212_123527.pdf",
+    "uploaded_at": "2025-12-12T12:35:33.350234",
+    "service": "s3",
+    "result": {
+      "status": "success",
+      "service": "s3",
+      "url": "https://ecg-reports-deckmount-new.s3.us-east-1.amazonaws.com/ecg-reports/2025/12/12/ECG_Report_20251212_123527.pdf",
+      "key": "ecg-reports/2025/12/12/ECG_Report_20251212_123527.pdf",
+      "bucket": "ecg-reports-deckmount-new"
+    },
+    "metadata": {
+      "filename": "ECG_Report_20251212_123527.pdf",
+      "uploaded_at": "2025-12-12T12:35:30.563508",
+      "file_size": 311627,
+      "file_type": ".pdf",
+      "patient_name": "Unknown",
+      "patient_age": "",
+      "report_date": "",
+      "machine_serial": "",
+      "heart_rate": ""
+    }
   }
 ]

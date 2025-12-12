@@ -8,7 +8,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QGridLayout,
     QSizePolicy, QScrollArea, QGroupBox, QFormLayout, QLineEdit, QComboBox,
-    QMessageBox, QApplication, QDialog, QGraphicsDropShadowEffect, QSlider
+    QMessageBox, QApplication, QDialog, QGraphicsDropShadowEffect, QSlider, QCheckBox
 )
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtCore import Qt, QTimer
@@ -55,14 +55,66 @@ class PQRSTAnalyzer:
             return {'r_peaks': [], 'p_peaks': [], 'q_peaks': [], 's_peaks': [], 't_peaks': []}
     
     def _filter_signal(self, signal):
-        """Apply bandpass filter to ECG signal"""
+        """Apply enhanced noise reduction for human body signals while preserving sharp peaks"""
         try:
+            from scipy.signal import savgol_filter, medfilt, iirnotch
+            from scipy.ndimage import gaussian_filter1d
+            
+            # 1. Power line interference removal (50/60 Hz notch filter)
             nyq = 0.5 * self.fs
-            low = 0.5 / nyq
-            high = 40 / nyq
-            b, a = butter(4, [low, high], btype='band')
-            return filtfilt(b, a, signal)
-        except:
+            for freq in [50, 60]:
+                if freq < nyq * 0.9:  # Only apply if frequency is below Nyquist
+                    try:
+                        Q = 30.0
+                        w0 = freq / nyq
+                        b_notch, a_notch = iirnotch(w0, Q)
+                        signal = filtfilt(b_notch, a_notch, signal)
+                    except Exception:
+                        pass
+            
+            # 2. Aggressive high-pass filter (1.0 Hz) to remove baseline wander
+            highpass_cutoff = max(0.001, 1.0 / nyq)
+            b_high, a_high = butter(4, highpass_cutoff, btype='high')
+            filtered = filtfilt(b_high, a_high, signal)
+            
+            # 3. Low-pass filter (35 Hz) - more aggressive to reduce high-frequency noise
+            lowpass_cutoff = min(0.999, 35.0 / nyq)
+            b_low, a_low = butter(6, lowpass_cutoff, btype='low')
+            filtered = filtfilt(b_low, a_low, filtered)
+            
+            # 4. Enhanced spike removal (more aggressive)
+            if len(filtered) > 5:
+                # Remove extreme spikes first (lower threshold)
+                signal_std = np.std(filtered)
+                if signal_std > 0:
+                    spike_threshold = 3.5 * signal_std
+                    spikes = np.abs(filtered) > spike_threshold
+                    if np.any(spikes):
+                        signal_med = medfilt(filtered, kernel_size=9)
+                        filtered[spikes] = signal_med[spikes]
+                
+                # Medium median filter for remaining spikes
+                filtered = medfilt(filtered, kernel_size=7)
+            
+            # 5. Multi-stage smoothing to reduce noise while preserving sharp peaks
+            if len(filtered) >= 11:
+                filtered = savgol_filter(filtered, min(11, len(filtered) if len(filtered) % 2 == 1 else len(filtered) - 1), 3)
+            
+            # 6. Moderate Gaussian smoothing (increased for better noise reduction)
+            filtered = gaussian_filter1d(filtered, sigma=0.8)
+            
+            # 7. Additional smoothing for high noise
+            signal_std = np.std(filtered)
+            signal_mean_abs = np.mean(np.abs(filtered))
+            if signal_std > 0 and signal_mean_abs > 0:
+                noise_ratio = signal_std / signal_mean_abs if signal_mean_abs > 0 else 0
+                if noise_ratio > 0.25:
+                    filtered = medfilt(filtered, kernel_size=5)
+                    filtered = gaussian_filter1d(filtered, sigma=0.4)
+            
+            return filtered
+        except Exception as e:
+            print(f"⚠️ Filtering error in PQRST analyzer: {e}")
             return signal
     
     def _detect_r_peaks(self, signal):
@@ -520,6 +572,9 @@ class ExpandedLeadView(QDialog):
 
         # Store the baseline (mean) of the signal for proper zooming
         self.signal_baseline = 0.0
+        
+        # Baseline wander removal toggle (enabled by default)
+        self.baseline_wander_removal = True
 
         # Store detected arrhythmia events as (time_seconds, label)
         self.arrhythmia_events = []
@@ -802,6 +857,43 @@ class ExpandedLeadView(QDialog):
         reset_btn.clicked.connect(self.reset_amplification)
         control_layout.addWidget(reset_btn)
         
+        # Add spacer
+        control_layout.addSpacing(20)
+        
+        # Baseline Wander Removal Toggle
+        self.baseline_wander_checkbox = QCheckBox("Remove Baseline Wander")
+        self.baseline_wander_checkbox.setChecked(True)  # Enabled by default
+        self.baseline_wander_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #2c3e50;
+                font-weight: bold;
+                font-size: 11pt;
+                background: transparent;
+                padding: 5px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #3498db;
+                border-radius: 4px;
+                background: white;
+            }
+            QCheckBox::indicator:checked {
+                background: #3498db;
+                border: 2px solid #2980b9;
+            }
+            QCheckBox::indicator:checked::after {
+                content: "✓";
+                color: white;
+                font-weight: bold;
+            }
+            QCheckBox:hover {
+                color: #2980b9;
+            }
+        """)
+        self.baseline_wander_checkbox.stateChanged.connect(self.toggle_baseline_wander)
+        control_layout.addWidget(self.baseline_wander_checkbox)
+        
         # Info label
         info_label = QLabel("💡 Use mouse scroll to zoom")
         info_label.setStyleSheet("""
@@ -979,6 +1071,13 @@ class ExpandedLeadView(QDialog):
         self.update_plot()
         print("✅ Amplification reset to 1.00x")
     
+    def toggle_baseline_wander(self, state):
+        """Toggle baseline wander removal on/off"""
+        self.baseline_wander_removal = (state == Qt.Checked)
+        status = "enabled" if self.baseline_wander_removal else "disabled"
+        print(f"🔄 Baseline wander removal {status}")
+        self.update_plot()
+    
     def setup_ecg_plot(self):
         """Setup the ECG plot with proper styling"""
         if len(self.ecg_data) == 0:
@@ -988,14 +1087,18 @@ class ExpandedLeadView(QDialog):
             return
         
         time = np.arange(len(self.ecg_data)) / self.sampling_rate
-        # Apply display gain and center the signal
+        # Apply display gain and center the signal (if baseline wander removal is enabled)
         base_scaled = self.ecg_data * self.display_gain
-        baseline = np.nanmedian(base_scaled)
-        centered = base_scaled - baseline
+        if self.baseline_wander_removal:
+            baseline = np.nanmedian(base_scaled)
+            centered = base_scaled - baseline
+            self.signal_baseline = baseline
+        else:
+            # No baseline correction - use signal as-is
+            baseline = 0.0
+            centered = base_scaled
+            self.signal_baseline = np.nanmean(base_scaled)  # Store mean for reference
         scaled = centered * 1.0  # Use 1.0x for initial display
-        
-        # Calculate and store the baseline for reference
-        self.signal_baseline = baseline
         
         self.ax.plot(time, scaled, color='#0984e3', linewidth=1.0, label='ECG Signal')
         
@@ -1239,12 +1342,82 @@ class ExpandedLeadView(QDialog):
             window_signal = self.ecg_data[start_idx:end_idx]
             time = np.arange(start_idx, end_idx) / self.sampling_rate
 
-            # Baseline-wander removal: center by median to keep the isoelectric line flat
+            # Baseline-wander removal: center by median to keep the isoelectric line flat (if enabled)
             base_scaled = window_signal * self.display_gain
-            baseline = np.nanmedian(base_scaled)
-            centered = base_scaled - baseline
+            if self.baseline_wander_removal:
+                baseline = np.nanmedian(base_scaled)
+                centered = base_scaled - baseline
+                self.signal_baseline = baseline
+            else:
+                # No baseline correction - use signal as-is
+                baseline = 0.0
+                centered = base_scaled
+                self.signal_baseline = np.nanmean(base_scaled)  # Store mean for reference
+            
+            # Apply enhanced noise reduction filtering for sharp peaks
+            try:
+                from scipy.signal import butter, filtfilt, savgol_filter, medfilt, iirnotch
+                from scipy.ndimage import gaussian_filter1d
+                
+                nyq = 0.5 * self.sampling_rate
+                
+                # 1. Power line interference removal (50/60 Hz notch filter)
+                for freq in [50, 60]:
+                    if freq < nyq * 0.9:
+                        try:
+                            Q = 30.0
+                            w0 = freq / nyq
+                            b_notch, a_notch = iirnotch(w0, Q)
+                            centered = filtfilt(b_notch, a_notch, centered)
+                        except Exception:
+                            pass
+                
+                # 2. Aggressive high-pass filter (1.0 Hz) to remove baseline wander
+                highpass_cutoff = max(0.001, 1.0 / nyq)
+                b_high, a_high = butter(4, highpass_cutoff, btype='high')
+                filtered = filtfilt(b_high, a_high, centered)
+                
+                # 3. Low-pass filter (35 Hz) - more aggressive to reduce high-frequency noise
+                lowpass_cutoff = min(0.999, 35.0 / nyq)
+                b_low, a_low = butter(6, lowpass_cutoff, btype='low')
+                filtered = filtfilt(b_low, a_low, filtered)
+                
+                # 4. Enhanced spike removal (more aggressive)
+                if len(filtered) > 5:
+                    signal_std = np.std(filtered)
+                    if signal_std > 0:
+                        # Remove extreme spikes first (lower threshold)
+                        spike_threshold = 3.5 * signal_std
+                        spikes = np.abs(filtered) > spike_threshold
+                        if np.any(spikes):
+                            signal_med = medfilt(filtered, kernel_size=9)
+                            filtered[spikes] = signal_med[spikes]
+                    
+                    # Medium median filter for remaining spikes
+                    filtered = medfilt(filtered, kernel_size=7)
+                
+                # 5. Multi-stage smoothing to reduce noise while preserving peaks
+                if len(filtered) >= 11:
+                    filtered = savgol_filter(filtered, min(11, len(filtered) if len(filtered) % 2 == 1 else len(filtered) - 1), 3)
+                
+                # 6. Moderate Gaussian smoothing (increased for better noise reduction)
+                filtered = gaussian_filter1d(filtered, sigma=0.8)
+                
+                # 7. Additional smoothing for high noise
+                signal_std = np.std(filtered)
+                signal_mean_abs = np.mean(np.abs(filtered))
+                if signal_std > 0 and signal_mean_abs > 0:
+                    noise_ratio = signal_std / signal_mean_abs if signal_mean_abs > 0 else 0
+                    if noise_ratio > 0.25:
+                        filtered = medfilt(filtered, kernel_size=5)
+                        filtered = gaussian_filter1d(filtered, sigma=0.4)
+                
+                centered = filtered
+            except Exception as e:
+                print(f"⚠️ Filtering error in expanded view: {e}")
+                # Continue with unfiltered signal if filtering fails
+            
             scaled = centered * self.amplification
-            self.signal_baseline = baseline
             
             # Calculate y-limits based on the centered and scaled window signal to ensure proper centering
             if len(scaled) > 0:

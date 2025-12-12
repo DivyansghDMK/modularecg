@@ -1,5 +1,12 @@
 [
   {
+    "filename": "ECG_Report_20251212_123527.pdf",
+    "title": "ECG Report",
+    "patient": "",
+    "date": "2025-12-12",
+    "time": "12:35:34"
+  },
+  {
     "filename": "ECG_Report_20251210_102142.pdf",
     "title": "ECG Report",
     "patient": "",
@@ -32,6 +39,35 @@
       "RV5_SV1_mV": [
         1.84,
         0.66
+      ]
+    }
+  },
+  {
+    "timestamp": "2025-12-12 12:35:30",
+    "file": "/Users/deckmount/Downloads/modularecg-main/ECG_Report_20251212_123527.pdf",
+    "patient": {
+      "name": "",
+      "age": "",
+      "gender": "",
+      "date_time": "2025-12-12 12:35:30"
+    },
+    "metrics": {
+      "HR_bpm": 68,
+      "PR_ms": 150,
+      "QRS_ms": 105,
+      "QT_ms": 474,
+      "QTc_ms": 494,
+      "ST_ms": -3,
+      "RR_ms": 882,
+      "Sokolow_Lyon_mV": 2.57,
+      "P_QRS_T_axes_deg": [
+        "--",
+        "26",
+        "--"
+      ],
+      "RV5_SV1_mV": [
+        1.78,
+        0.79
       ]
     }
   }

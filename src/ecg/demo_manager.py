@@ -78,14 +78,14 @@ class DemoManager:
         # Get current wave speed from settings
         self.current_wave_speed = self.ecg_test_page.settings_manager.get_wave_speed()
         
-        # EXACT SAME LOGIC AS DIVYANSH.PY:
-        # 12.5 mm/s → 20 s window (more peaks visible - compressed)
-        # 25 mm/s → 10 s window (default)
-        # 50 mm/s → 5 s window (fewer peaks visible - stretched)
-        baseline_time_window = 10.0
-        self.time_window = baseline_time_window * (25.0 / float(self.current_wave_speed))
+        # Fixed 10-second window with variable data density
+        # 12.5 mm/s → 2x data points (compressed in 10s)
+        # 25 mm/s → normal data points (10s)
+        # 50 mm/s → 0.5x data points (stretched in 10s)
+        self.time_window = 10.0  # Always 10 seconds
+        self.data_density_scale = 25.0 / float(self.current_wave_speed)
         
-        print(f"🌊 Wave speed updated: {self.current_wave_speed}mm/s (time window: {self.time_window:.1f}s)")
+        print(f"🌊 Wave speed updated: {self.current_wave_speed}mm/s (fixed 10s window, density: {self.data_density_scale:.2f}x)")
 
     
     
@@ -362,6 +362,7 @@ class DemoManager:
             # Running in PyInstaller bundle
             bundle_dir = sys._MEIPASS
             candidates = [
+                os.path.join(project_root, 'reports', 'dummycsv.csv'),  # Primary location: reports/dummycsv.csv
                 os.path.join(bundle_dir, 'dummycsv.csv'),
                 os.path.join(bundle_dir, '_internal', 'dummycsv.csv'),
                 os.path.join(os.path.dirname(sys.executable), 'dummycsv.csv'),
@@ -372,6 +373,7 @@ class DemoManager:
         else:
             # Running as script
             candidates = [
+                os.path.join(project_root, 'reports', 'dummycsv.csv'),  # Primary location: reports/dummycsv.csv
                 os.path.join(ecg_dir, 'dummycsv.csv'),
                 os.path.join(project_root, 'dummycsv.csv'),
                 os.path.abspath('dummycsv.csv')
@@ -384,6 +386,7 @@ class DemoManager:
         if not csv_path:
             msg = (
                 "dummycsv.csv not found. Place it in one of these locations:\n"
+                f"- {os.path.join(project_root, 'reports', 'dummycsv.csv')}\n"
                 f"- {os.path.join(ecg_dir, 'dummycsv.csv')}\n"
                 f"- {os.path.join(project_root, 'dummycsv.csv')}\n"
                 f"- {os.path.abspath('dummycsv.csv')}"
@@ -621,11 +624,12 @@ class DemoManager:
         except Exception as e:
             print(f"⚠️ Could not apply display settings: {e}")
         
-        # --- EXACT SAME LOGIC AS DIVYANSH.PY ---
-        time_window = getattr(self, 'time_window', 10.0)  # Fallback to 10s if not set
-        num_samples_to_show = max(1, int(time_window * self.samples_per_second))
+        # Fixed 10-second window with variable data density
+        time_window = 10.0  # Always 10 seconds
+        data_density_scale = getattr(self, 'data_density_scale', 1.0)  # 12.5mm/s=2x, 25mm/s=1x, 50mm/s=0.5x
+        num_samples_to_show = max(1, int(time_window * self.samples_per_second * data_density_scale))
         
-        self._debug(f"time_window={time_window}, samples={num_samples_to_show}")
+        self._debug(f"time_window={time_window}s (fixed), density={data_density_scale:.2f}x, samples={num_samples_to_show}")
         
         # Get current gain (match real-time serial behaviour: 10mm/mV baseline)
         try:
@@ -729,7 +733,7 @@ class DemoManager:
                     lead_peak_dbg = lead_peak if lead_peak is not None else float(np.max(np.abs(display_data[finite_mask])))
                     self._debug(f"lead {lead} gain={current_gain:.2f} span={smoothed_span:.1f} peak={lead_peak_dbg:.1f}")
                 
-                self.ecg_test_page.plot_widgets[i].setXRange(0, time_window)
+                self.ecg_test_page.plot_widgets[i].setXRange(0, 10.0)  # Always 10 seconds
         
         step = 8
         if len(self.ecg_test_page.data) > 0:

@@ -3090,12 +3090,16 @@ class ECGTestPage(QWidget):
         speed_factor = wave_speed / 50.0  # 50mm/s is baseline
         self.buffer_size = int(base_buffer * speed_factor)
 
-        # Ensure lead buffers are long enough for the visible time window derived from wave speed.
-        # 25mm/s → ~10s, 12.5mm/s → ~20s, 50mm/s → ~5s. Use 500 Hz as default hardware rate.
+        # Fixed 10-second window with variable data density based on wave speed.
+        # 12.5mm/s → 2x data points (compressed), 25mm/s → normal, 50mm/s → 0.5x data points (stretched).
+        # Use 500 Hz as default hardware rate. Buffer must hold max samples for 12.5mm/s (10000 samples).
         try:
-            seconds_scale = (25.0 / max(1e-6, wave_speed))
-            seconds_to_show = 10.0 * seconds_scale
-            desired_len = int(np.ceil(500.0 * seconds_to_show))
+            # Always use 10 seconds window
+            seconds_to_show = 10.0
+            # Calculate data density: 12.5mm/s = 2x, 25mm/s = 1x, 50mm/s = 0.5x
+            data_density_scale = (25.0 / max(1e-6, wave_speed))
+            desired_len = int(np.ceil(500.0 * seconds_to_show * data_density_scale))
+            # Ensure buffer is large enough for maximum density (12.5mm/s needs 10000 samples)
             # Also respect the scaled buffer size and a minimum reasonable length
             desired_len = max(desired_len, self.buffer_size, 1000)
 
@@ -3107,9 +3111,17 @@ class ECGTestPage(QWidget):
                         continue
                     new_buf = np.zeros(desired_len, dtype=np.float32)
                     if cur_len > 0:
-                        # Copy most recent samples into the tail of the new buffer
+                        # Copy existing data to the new buffer
+                        # For larger buffers (e.g., 12.5mm/s → 20s), center the data to avoid delay
                         take = min(cur_len, desired_len)
-                        new_buf[-take:] = np.asarray(arr, dtype=np.float32)[-take:]
+                        arr_data = np.asarray(arr, dtype=np.float32)
+                        if desired_len > cur_len:
+                            # New buffer is larger: center the existing data to show it immediately
+                            start_idx = (desired_len - take) // 2
+                            new_buf[start_idx:start_idx + take] = arr_data[-take:]
+                        else:
+                            # New buffer is smaller: take the most recent samples
+                            new_buf[:] = arr_data[-take:]
                     self.data[idx] = new_buf
                 # Keep the circular buffer size aligned with the target window
                 self.buffer_size = desired_len
@@ -4490,7 +4502,7 @@ class ECGTestPage(QWidget):
             print(f"Error updating ECG lead {lead_index}: {str(e)}")
     
     def apply_ecg_filtering(self, signal_data):
-        """Apply medical-grade ECG filtering for smooth, clean waves like professional devices"""
+        """Apply enhanced noise reduction for human body signals while preserving sharp peaks"""
         try:
             from scipy.signal import butter, filtfilt, savgol_filter, medfilt, wiener
             from scipy.ndimage import gaussian_filter1d
@@ -4508,12 +4520,17 @@ class ECGTestPage(QWidget):
             
             # 2. Apply AC/EMG/DFT filters based on user settings from SettingsManager
             # This applies filters in correct order: DFT -> EMG -> AC
-            sampling_rate = getattr(self, 'demo_fs', 500)  # Get sampling rate, default 500Hz
-            if hasattr(self, 'sampler') and hasattr(self.sampler, 'sampling_rate'):
+            # Get sampling rate from multiple sources, prioritize actual hardware rate
+            sampling_rate = 500  # Default fallback
+            if hasattr(self, 'sampling_rate') and self.sampling_rate is not None:
+                sampling_rate = float(self.sampling_rate)
+            elif hasattr(self, 'sampler') and hasattr(self.sampler, 'sampling_rate'):
                 try:
                     sampling_rate = float(self.sampler.sampling_rate)
                 except:
                     pass
+            elif hasattr(self, 'demo_fs'):
+                sampling_rate = float(self.demo_fs)
             
             # Apply user-configured AC/EMG/DFT filters
             signal = apply_ecg_filters_from_settings(
@@ -4522,47 +4539,70 @@ class ECGTestPage(QWidget):
                 settings_manager=self.settings_manager
             )
             
-            # 3. Medical-grade bandpass filter (0.5-30 Hz) - tighter range for cleaner signal
+            # 3. Power line interference removal (50/60 Hz notch filter)
             fs = sampling_rate  # Use actual sampling rate
             nyquist = fs / 2
             
-            # Low-pass filter to remove high-frequency noise (>30 Hz) - more aggressive
-            low_cutoff = 30 / nyquist  # Reduced from 40 to 30 Hz
-            b_low, a_low = butter(6, low_cutoff, btype='low')  # Increased order to 6
+            # Detect and remove 50 Hz (Europe/Asia) or 60 Hz (Americas) interference
+            from scipy.signal import iirnotch
+            for freq in [50, 60]:
+                if freq < nyquist * 0.9:  # Only apply if frequency is below Nyquist
+                    try:
+                        # Design notch filter with Q=30 for sharp rejection
+                        Q = 30.0
+                        w0 = freq / nyquist
+                        b_notch, a_notch = iirnotch(w0, Q)
+                        signal = filtfilt(b_notch, a_notch, signal)
+                    except Exception:
+                        pass  # Skip if notch filter fails
+            
+            # 4. Aggressive high-pass filter to remove baseline wander and low-frequency noise
+            # Use higher cutoff (1.0 Hz) to remove more low-frequency noise
+            highpass_cutoff = max(0.001, 1.0 / nyquist)  # High-pass at 1.0 Hz (more aggressive)
+            b_high, a_high = butter(4, highpass_cutoff, btype='high')
+            signal = filtfilt(b_high, a_high, signal)
+            
+            # 5. Medical-grade low-pass filter (40 Hz) - preserve R-peak sharpness
+            # Keep at 40 Hz to preserve sharp peaks while removing noise
+            lowpass_cutoff = min(0.999, 40.0 / nyquist)  # Low-pass at 40 Hz (preserves sharp peaks)
+            b_low, a_low = butter(4, lowpass_cutoff, btype='low')  # Lower order to preserve peaks
             signal = filtfilt(b_low, a_low, signal)
             
-            # Note: High-pass filter is now handled by DFT filter, so we skip it here
-            
-            # 3. Wiener filter for medical-grade noise reduction
+            # 6. Enhanced spike removal with adaptive median filter (balanced for peak preservation)
             if len(signal) > 5:
-                signal = wiener(signal, noise=0.05)  # Lower noise parameter for smoother result
+                # First pass: remove only extreme spikes to preserve peak sharpness
+                signal_std = np.std(signal)
+                if signal_std > 0:
+                    # Higher threshold (5.0 std dev) to preserve sharp peaks
+                    spike_threshold = 5.0 * signal_std
+                    spikes = np.abs(signal) > spike_threshold
+                    if np.any(spikes):
+                        # Replace spikes with median-filtered values (smaller kernel to preserve peaks)
+                        signal_med = medfilt(signal, kernel_size=5)
+                        signal[spikes] = signal_med[spikes]
+                
+                # Second pass: light median filter for remaining small spikes
+                signal = medfilt(signal, kernel_size=5)  # Smaller kernel to preserve sharp transitions
             
-            # 4. Gaussian smoothing for medical-grade smoothness
-            signal = gaussian_filter1d(signal, sigma=1.2)
+            # 7. Light Savitzky-Golay filtering to preserve peak sharpness (smaller window)
+            if len(signal) >= 9:
+                # Use smaller window (9 instead of 11) to preserve peak sharpness
+                window_length = min(9, len(signal) if len(signal) % 2 == 1 else len(signal) - 1)
+                signal = savgol_filter(signal, window_length, 3)  # Low order preserves peaks
             
-            # 5. Savitzky-Golay filter with optimized parameters for ECG
-            if len(signal) >= 15:  # Increased minimum window size
-                window_length = min(15, len(signal) if len(signal) % 2 == 1 else len(signal) - 1)
-                signal = savgol_filter(signal, window_length, 4)  # Increased polynomial order to 4
+            # 8. Light Gaussian smoothing to preserve peak sharpness (reduced from 0.8)
+            signal = gaussian_filter1d(signal, sigma=0.5)  # Reduced to preserve sharp peaks
             
-            # 6. Adaptive median filter for spike removal
-            signal = medfilt(signal, kernel_size=7)  # Increased kernel size for better smoothing
-            
-            # 7. Multi-stage moving average for ultra-smooth baseline
-            # Stage 1: Short-term smoothing
-            window1 = min(7, len(signal))
-            if window1 > 1:
-                kernel1 = np.ones(window1) / window1
-                signal = np.convolve(signal, kernel1, mode='same')
-            
-            # Stage 2: Medium-term smoothing for baseline stability
-            window2 = min(5, len(signal))
-            if window2 > 1:
-                kernel2 = np.ones(window2) / window2
-                signal = np.convolve(signal, kernel2, mode='same')
-            
-            # 8. Final Gaussian smoothing for medical device quality
-            signal = gaussian_filter1d(signal, sigma=0.8)
+            # 9. Additional smoothing pass for high noise (only if very noisy)
+            signal_std = np.std(signal)
+            signal_mean_abs = np.mean(np.abs(signal))
+            if signal_std > 0 and signal_mean_abs > 0:
+                noise_ratio = signal_std / signal_mean_abs if signal_mean_abs > 0 else 0
+                if noise_ratio > 0.4:  # Higher threshold - only apply for very noisy signals
+                    # Apply additional light median filter for very high noise
+                    signal = medfilt(signal, kernel_size=3)  # Smaller kernel to preserve peaks
+                    # Additional very light Gaussian smoothing
+                    signal = gaussian_filter1d(signal, sigma=0.3)
             
             return signal
             
@@ -5763,15 +5803,14 @@ class ECGTestPage(QWidget):
             wave_speed = 25.0
 
         if not is_demo_mode:
-            # For real serial data, calculate buffer length based on wave speed
-            # Same logic as in update_plots() for serial data
-            baseline_seconds = 10.0
-            seconds_scale = (25.0 / max(1e-6, wave_speed))
-            seconds_to_show = baseline_seconds * seconds_scale
+            # Fixed 10-second window with variable data density
+            # 12.5mm/s → 2x data points, 25mm/s → normal, 50mm/s → 0.5x data points
+            seconds_to_show = 10.0  # Always 10 seconds
+            data_density_scale = (25.0 / max(1e-6, wave_speed))
             
             # Use hardware sampling rate (80 Hz)
             sampling_rate = 80.0
-            samples_to_show = int(sampling_rate * seconds_to_show)
+            samples_to_show = int(sampling_rate * seconds_to_show * data_density_scale)
             
             # Return the calculated samples (same as main plots - no buffer size limit)
             # The data selection will handle cases where data is smaller
@@ -5845,6 +5884,9 @@ class ECGTestPage(QWidget):
                     else:
                         centered_raw = np.zeros(buffer_len, dtype=float)
                     
+                    # Apply noise reduction filtering (same as main plots and expanded view)
+                    filtered_raw = self.apply_ecg_filtering(centered_raw)
+                    
                     # Apply current gain setting (match main 12-lead grid)
                     gain_factor = float(self.settings_manager.get_wave_gain()) / 10.0  # 10mm/mV baseline
                     
@@ -5856,7 +5898,7 @@ class ECGTestPage(QWidget):
                             reduction_factor = 0.75  # Reduce to 75% for real mode to prevent clipping
                         gain_factor = gain_factor * reduction_factor
                     
-                    centered = centered_raw * gain_factor
+                    centered = filtered_raw * gain_factor
                     centered = np.nan_to_num(centered, copy=False)
                     
                     # Debug logging for first lead in demo mode
@@ -6517,6 +6559,9 @@ class ECGTestPage(QWidget):
                     else:
                         centered_raw = np.zeros(buffer_len, dtype=float)
                     
+                    # Apply noise reduction filtering (same as main plots and expanded view)
+                    filtered_raw = self.apply_ecg_filtering(centered_raw)
+                    
                     # Apply current gain setting (match main 12-lead grid)
                     gain_factor = float(self.settings_manager.get_wave_gain()) / 10.0  # 10mm/mV baseline
                     
@@ -6528,7 +6573,7 @@ class ECGTestPage(QWidget):
                             reduction_factor = 0.75  # Reduce to 75% for real mode to prevent clipping
                         gain_factor = gain_factor * reduction_factor
                     
-                    centered = centered_raw * gain_factor
+                    centered = filtered_raw * gain_factor
                     centered = np.nan_to_num(centered, copy=False)
                     
                     # Debug logging for first lead in demo mode
@@ -6614,20 +6659,26 @@ class ECGTestPage(QWidget):
                 except Exception:
                     wave_speed = 25.0
 
-                baseline_seconds = 5.0
-                seconds_scale = (25.0 / max(1e-6, wave_speed))
-                seconds_to_show = baseline_seconds * seconds_scale
+                # Fixed 10-second window with variable data density
+                seconds_to_show = 10.0  # Always 10 seconds
+                data_density_scale = (25.0 / max(1e-6, wave_speed))
 
                 for i in range(len(self.data_lines)):
                     try:
                         if i < len(self.data):
                             raw = np.asarray(self.data[i])
+                            # Center the signal first
+                            centered = raw - np.nanmean(raw)
+                            
+                            # Apply noise reduction filtering (same as serial data)
+                            filtered = self.apply_ecg_filtering(centered)
+                            
                             gain = 1.0
                             try:
                                 gain = float(self.settings_manager.get_wave_gain()) / 10.0  # 10mm/mV baseline
                             except Exception:
                                 pass
-                            raw = (raw - np.nanmean(raw)) * gain
+                            raw = filtered * gain
 
                             fs = 500
                             if hasattr(self, 'sampler') and getattr(self.sampler, 'sampling_rate', None):
@@ -6635,7 +6686,8 @@ class ECGTestPage(QWidget):
                                     fs = float(self.sampler.sampling_rate)
                                 except Exception:
                                     fs = 500
-                            window_len = int(max(50, min(len(raw), seconds_to_show * fs)))
+                            # Calculate window length with data density scaling
+                            window_len = int(max(50, min(len(raw), seconds_to_show * fs * data_density_scale)))
                             src = raw[-window_len:]
 
                             display_len = self.buffer_size if hasattr(self, 'buffer_size') else 1000
@@ -6760,10 +6812,10 @@ class ECGTestPage(QWidget):
                     wave_speed = float(self.settings_manager.get_wave_speed())
                 except Exception:
                     wave_speed = 25.0
-                # Calculate time scaling based on wave speed (same logic as demo mode)
-                baseline_seconds = 10.0
-                seconds_scale = (25.0 / max(1e-6, wave_speed))
-                seconds_to_show = baseline_seconds * seconds_scale
+                # Fixed 10-second window with variable data density
+                # 12.5mm/s → 2x data points (compressed), 25mm/s → normal, 50mm/s → 0.5x data points (stretched)
+                seconds_to_show = 10.0  # Always 10 seconds
+                data_density_scale = (25.0 / max(1e-6, wave_speed))
                 
                 for i in range(len(self.leads)):
                     try:
@@ -6771,46 +6823,56 @@ class ECGTestPage(QWidget):
                             continue
                         has_data = (i < len(self.data) and len(self.data[i]) > 0)
                         if has_data:
-                            gain_factor = 5.0 / self.settings_manager.get_wave_gain()  # Reversed: 2.5mm → 2.0x, 20mm → 0.25x
-                            scaled_data = self.apply_adaptive_gain(self.data[i], signal_source, gain_factor)
-
-                            # Build time axis and apply wave-speed scaling
-                            sampling_rate = 500  # Hardware sampling rate
+                            # Build time axis - always 10 seconds
+                            # Get actual sampling rate from sampler if available
+                            sampling_rate = 500  # Default fallback
+                            if hasattr(self, 'sampler') and hasattr(self.sampler, 'sampling_rate'):
+                                try:
+                                    sampling_rate = float(self.sampler.sampling_rate)
+                                    if sampling_rate <= 0 or sampling_rate > 1000:
+                                        sampling_rate = 500  # Sanity check
+                                except:
+                                    sampling_rate = 500
                             
-                            # Calculate how many samples to show based on wave speed
-                            # 25 mm/s → 5s window
-                            # 12.5 mm/s → 10s window (show more data, compressed)
-                            # 50 mm/s → 2.5s window (show less data, stretched)
-                            samples_to_show = int(sampling_rate * seconds_to_show)
+                            # Calculate how many samples to show based on data density
+                            # 12.5mm/s → 10000 samples (2x, compressed in 10s)
+                            # 25mm/s → 5000 samples (normal in 10s)
+                            # 50mm/s → 2500 samples (0.5x, stretched in 10s)
+                            samples_to_show = int(sampling_rate * seconds_to_show * data_density_scale)
                             
-                            # Take only the most recent samples_to_show from the buffer (before gain application)
+                            # Take only the most recent samples_to_show from the buffer (before processing)
                             raw_data = self.data[i]
                             if len(raw_data) > samples_to_show:
                                 data_slice = raw_data[-samples_to_show:]
                             else:
                                 data_slice = raw_data
                             
-                            # Apply wave gain similar to demo mode: center first, then multiply by gain
-                            gain_factor = self.settings_manager.get_wave_gain() / 10.0
-                            
-                            # Center the slice to keep baseline around zero (same as demo mode)
+                            # Center the slice to keep baseline around zero (same as expanded view)
                             centered_slice = np.array(data_slice, dtype=float)
                             slice_center = np.nanmedian(centered_slice)
                             if np.isfinite(slice_center):
                                 centered_slice = centered_slice - slice_center
                             
-                            # Apply gain after centering (same as demo mode)
-                            scaled_data = centered_slice * gain_factor
+                            # Apply noise reduction filtering for sharp peaks (before gain)
+                            # Ensure sampling rate is set for proper filtering
+                            if not hasattr(self, 'sampling_rate') or self.sampling_rate is None:
+                                self.sampling_rate = sampling_rate
+                            filtered_slice = self.apply_ecg_filtering(centered_slice)
+                            
+                            # Apply wave gain after filtering (same as expanded view)
+                            gain_factor = self.settings_manager.get_wave_gain() / 10.0
+                            scaled_data = filtered_slice * gain_factor
                             scaled_data = np.nan_to_num(scaled_data, copy=False)
                             
                             n = len(scaled_data)
-                            time_axis = np.arange(n, dtype=float) / sampling_rate
+                            # Time axis always spans 10 seconds, regardless of number of samples
+                            time_axis = np.linspace(0, seconds_to_show, n)
                             
-                            # Avoid cropping: small padding and explicit x-range
+                            # Avoid cropping: small padding and explicit x-range (always 0-10 seconds)
                             try:
                                 vb = self.plot_widgets[i].getViewBox()
                                 if vb is not None:
-                                    vb.setRange(xRange=(time_axis[0], time_axis[-1]), padding=0)
+                                    vb.setRange(xRange=(0.0, seconds_to_show), padding=0)
                             except Exception:
                                 pass
 
@@ -6818,7 +6880,7 @@ class ECGTestPage(QWidget):
                             self.update_plot_y_range_adaptive(i, signal_source, data_override=scaled_data)
 
                             if i < 3 and hasattr(self, '_debug_counter') and self._debug_counter % 200 == 0:
-                                print(f"🎛️ Serial Lead {i}: speed={wave_speed:.1f}mm/s, scale={seconds_scale:.2f}, time_range={time_axis[-1]:.2f}s")
+                                print(f"🎛️ Serial Lead {i}: speed={wave_speed:.1f}mm/s, density={data_density_scale:.2f}x, samples={n}, time_range={time_axis[-1]:.2f}s")
                         else:
                             self.data_lines[i].setData(self.data[i] if i < len(self.data) else [])
                             self.update_plot_y_range(i)
