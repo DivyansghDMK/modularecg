@@ -1,9 +1,13 @@
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image, PageBreak
+    SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image, PageBreak,
+    PageTemplate, Frame, NextPageTemplate, BaseDocTemplate
 )
+from reportlab.graphics.shapes import Drawing, Line, Rect, Path, String
+from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 import os
 import json
 import matplotlib.pyplot as plt  
@@ -386,7 +390,7 @@ def capture_real_ecg_graphs_from_dashboard(dashboard_instance=None, ecg_test_pag
         "V1": 6, "V2": 7, "V3": 8, "V4": 9, "V5": 10, "V6": 11
     }
     
-# Check if demo mode is active and get time window for filtering
+    # Check if demo mode is active and get time window for filtering
     is_demo_mode = False
     time_window_seconds = None
     samples_per_second = samples_per_second or 150
@@ -561,12 +565,7 @@ def create_reportlab_ecg_drawing_with_real_data(lead_name, ecg_data, width=460, 
         # Create time array for ALL the data
         t = np.linspace(0, width, len(ecg_data))
         
-        # Apply wave_gain from ecg_settings.json (amplitude scaling)
-        # IMPORTANT: Match dashboard behavior - center first, then apply gain
         
-        # Step 1: Apply baseline 2000 and wave_gain-based ADC per box scaling
-        # LEAD-SPECIFIC ADC PER BOX CONFIGURATION
-        # Each lead can have different ADC per box multiplier (will be divided by wave_gain)
         adc_per_box_config = {
             'I': 5500.0,
             'II': 4955.0,  
@@ -597,7 +596,6 @@ def create_reportlab_ecg_drawing_with_real_data(lead_name, ecg_data, width=460, 
         
         # Convert ADC offset to boxes (vertical units)
         # Direct calculation: boxes_offset = centered_adc / adc_per_box
-        # Example: 2000 ADC offset / 750 ADC per box = 2.6666 boxes
         boxes_offset = centered_adc / adc_per_box
         
         # Convert boxes to Y position
@@ -1432,9 +1430,9 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
         #   - Beats = (BPM / 60) × time_window
         #   - Maximum clamp: 20 seconds (NO minimum clamp)
         calculated_time_window, _ = calculate_time_window_from_bpm_and_wave_speed(
-            hr_bpm_value,  # From metrics.json (priority) - for calculation-based beats
-            wave_speed_mm_s,  # From ecg_settings.json - for calculation-based beats
-            desired_beats=6  # Default: 6 beats desired
+            hr_bpm_value,      # 90 bpm
+            wave_speed_mm_s,   # 25 mm/s (current)
+            desired_beats=15   
         )
         
         # Recalculate with actual sampling rate
@@ -1730,501 +1728,6 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
                 # Example: 2000 ADC offset / 750 ADC per box = 2.6666 boxes
                 # BUT: If actual ADC values are smaller (e.g., 375 ADC), then:
                 # 375 ADC / 750 ADC per box = 0.5 boxes (which matches what user sees!)
-                boxes_offset = centered_adc / adc_per_box
-                
-                # Log boxes offset for verification
-                
-                # Step 5: Convert boxes to Y position
-                center_y = y_pos + (ecg_height / 2.0)  # Center of the graph in points
-                # IMPORTANT: Standard ECG paper uses 5mm per box
-                # 5mm = 5 * 2.834645669 points = 14.17 points per box
-                from reportlab.lib.units import mm
-                box_height_points = 5.0 * mm  # Standard ECG: 5mm = 14.17 points per box
-                major_spacing_y = box_height_points  # Use standard ECG spacing (5mm)
-                
-                # Convert boxes offset to Y position
-                ecg_normalized = center_y + (boxes_offset * box_height_points)
-                
-                # DEBUG: Verify Y position calculation
-                
-                
-                # Draw ALL REAL ECG data points
-                from reportlab.graphics.shapes import Path
-                ecg_path = Path(fillColor=None, 
-                               strokeColor=colors.HexColor("#000000"), 
-                               strokeWidth=0.4,
-                               strokeLineCap=1,
-                               strokeLineJoin=1)
-                
-                # DEBUG: Verify actual plotted values
-                actual_min_y = np.min(ecg_normalized)
-                actual_max_y = np.max(ecg_normalized)
-                actual_span_points = actual_max_y - actual_min_y
-                actual_span_boxes = actual_span_points / box_height_points
-                
-                # Start path
-                ecg_path.moveTo(t[0], ecg_normalized[0])
-                
-                # Add ALL points
-                for i in range(1, len(t)):
-                    ecg_path.lineTo(t[i], ecg_normalized[i])
-                
-                # Add path to master drawing
-                master_drawing.add(ecg_path)
-                
-                print(f"✅ Drew {len(real_ecg_data)} ECG data points for Lead {lead}")
-            else:
-                print(f"📋 No real data for Lead {lead} - showing grid only")
-            
-            successful_graphs += 1
-            
-        except Exception as e:
-            print(f"❌ Error adding Lead {lead}: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    # STEP 4: Add Patient Info, Date/Time and Vital Parameters to master drawing
-    # POSITIONED ABOVE ECG GRAPH (not mixed inside graph)
-    from reportlab.graphics.shapes import String
-
-    # LEFT SIDE: Patient Info (ABOVE ECG GRAPH - shifted further up)
-    patient_name_label = String(-30, 740, f"Name: {full_name}",  # Moved up from 700 to 710
-                           fontSize=10, fontName="Helvetica", fillColor=colors.black)
-    master_drawing.add(patient_name_label)
-
-    patient_age_label = String(-30, 720, f"Age: {age}",  # Moved up from 680 to 690
-                          fontSize=10, fontName="Helvetica", fillColor=colors.black)
-    master_drawing.add(patient_age_label)
-
-    patient_gender_label = String(-30, 700, f"Gender: {gender}",  # Moved up from 660 to 670
-                             fontSize=10, fontName="Helvetica", fillColor=colors.black)
-    master_drawing.add(patient_gender_label)
-    
-    # RIGHT SIDE: Date/Time (ABOVE ECG GRAPH - shifted further up)
-    if date_time_str:
-        parts = date_time_str.split()
-        date_part = parts[0] if parts else ""
-        time_part = parts[1] if len(parts) > 1 else ""
-    else:
-        date_part, time_part = "____", "____"
-    
-    date_label = String(400, 710, f"Date: {date_part}",  # Moved up from 700 to 710
-                       fontSize=10, fontName="Helvetica", fillColor=colors.black)
-    master_drawing.add(date_label)
-    
-    time_label = String(400, 695, f"Time: {time_part}",  # Moved up from 680 to 690
-                       fontSize=10, fontName="Helvetica", fillColor=colors.black)
-    master_drawing.add(time_label)
-
-    # RIGHT SIDE: Vital Parameters at SAME LEVEL as patient info (ABOVE ECG GRAPH)
-    # Get real ECG data from dashboard
-    HR = data.get('HR_avg', 70)
-    PR = data.get('PR', 192) 
-    QRS = data.get('QRS', 93)
-    QT = data.get('QT', 354)
-    QTc = data.get('QTc', 260)
-    ST = data.get('ST', 114)
-    # DYNAMIC RR interval calculation from heart rate (instead of hard-coded 857)
-    RR = int(60000 / HR) if HR and HR > 0 else 0  # RR interval in ms from heart rate
-   
-
-    # Create table data: 2 rows × 2 columns (as per your changes)
-    vital_table_data = [
-        [f"HR : {HR} bpm", f"QT: {QT} ms"],
-        [f"PR : {PR} ms", f"QTc: {QTc} ms"],
-        [f"QRS: {QRS} ms", f"ST: {ST} ms"],
-        [f"RR : {RR} ms", ""]  
-    ]
-
-    # Create vital parameters table with MORE LEFT and TOP positioning
-    vital_params_table = Table(vital_table_data, colWidths=[100, 100])  # Even smaller widths for more left
-
-    vital_params_table.setStyle(TableStyle([
-        # Transparent background to show pink grid
-        ("BACKGROUND", (0, 0), (-1, -1), colors.Color(0, 0, 0, alpha=0)),
-        ("GRID", (0, 0), (-1, -1), 0, colors.Color(0, 0, 0, alpha=0)),
-        ("BOX", (0, 0), (-1, -1), 0, colors.Color(0, 0, 0, alpha=0)),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),  # Left align
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),  # Normal font
-        ("FONTSIZE", (0, 0), (-1, -1), 10),  # Same size as Name, Age, Gender
-        ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),  # Zero left padding for extreme left
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),  # Zero right padding too
-        ("TOPPADDING", (0, 0), (-1, -1), 0),   # Zero top padding for top shift
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-
-   
-
-    #  CREATE SINGLE MASSIVE DRAWING with ALL ECG content (NO individual drawings)
-    print("Creating SINGLE drawing with all ECG content...")
-    
-    # Single drawing dimensions - ADJUSTED HEIGHT to fit within page frame (max ~770)
-    total_width = 520   # Full page width
-    total_height = 720  
-    
-    # Create ONE master drawing
-    master_drawing = Drawing(total_width, total_height)
-    
-    # STEP 1: NO background rectangle - let page pink grid show through
-    
-    # STEP 2: Define positions for all 12 leads based on selected sequence (SHIFTED UP by 80 points total: 40+25+15)
-    y_positions = [580, 530, 480, 430, 380, 330, 280, 230, 180, 130, 80, 30]  
-    6
-    lead_positions = []
-    
-    for i, lead in enumerate(lead_order):
-        lead_positions.append({
-            "lead": lead, 
-            "x": 60, 
-            "y": y_positions[i]
-        })
-    
-    print(f" Using lead positions in {lead_sequence} sequence: {[pos['lead'] for pos in lead_positions]}")
-    
-    # STEP 3: Draw ALL ECG content directly in master drawing
-    successful_graphs = 0
-    
-    # Check if demo mode is active and get time window for filtering
-    is_demo_mode = False
-    time_window_seconds = None
-    samples_per_second = computed_sampling_rate
-    
-    if ecg_test_page and hasattr(ecg_test_page, 'demo_toggle'):
-        is_demo_mode = ecg_test_page.demo_toggle.isChecked()
-        if is_demo_mode:
-            # Get time window from demo manager
-            if hasattr(ecg_test_page, 'demo_manager') and ecg_test_page.demo_manager:
-                time_window_seconds = getattr(ecg_test_page.demo_manager, 'time_window', None)
-                samples_per_second = getattr(ecg_test_page.demo_manager, 'samples_per_second', samples_per_second)
-                print(f"🔍 Report Generator: Demo mode ON - Wave speed window: {time_window_seconds}s, Sampling rate: {samples_per_second}Hz")
-            else:
-                # Fallback: calculate from wave speed setting
-                try:
-                    from utils.settings_manager import SettingsManager
-                    sm = SettingsManager()
-                    wave_speed = float(sm.get_wave_speed())
-                    # NEW LOGIC: Time window = 165mm / wave_speed (33 boxes × 5mm = 165mm)
-                    ecg_graph_width_mm = 33 * 5  # 165mm
-                    time_window_seconds = ecg_graph_width_mm / wave_speed
-                    print(f"🔍 Report Generator: Demo mode ON - Calculated window using NEW LOGIC: 165mm / {wave_speed}mm/s = {time_window_seconds}s")
-                except Exception as e:
-                    print(f"⚠️ Could not get demo time window: {e}")
-                    time_window_seconds = None
-        else:
-            print(f"🔍 Report Generator: Demo mode is OFF")
-    
-    # Calculate number of samples to capture based on demo mode OR BPM + wave_speed
-    calculated_time_window = None  # Initialize for use in data loading section
-    if is_demo_mode and time_window_seconds is not None:
-        # In demo mode: only capture data visible in one window frame
-        calculated_time_window = time_window_seconds
-        num_samples_to_capture = int(time_window_seconds * samples_per_second)
-        print(f"📊 DEMO MODE: Master drawing will capture only {num_samples_to_capture} samples ({time_window_seconds}s window)")
-    else:
-        # Normal mode: Calculate time window based on wave_speed ONLY (NEW LOGIC)
-        # This ensures proper number of beats are displayed based on graph width
-        # Formula: 
-        #   - Time window = 165mm / wave_speed ONLY (33 boxes × 5mm = 165mm)
-        #   - BPM window is NOT used - only wave speed determines time window
-        #   - Beats = (BPM / 60) × time_window
-        #   - Maximum clamp: 20 seconds (NO minimum clamp)
-        calculated_time_window, _ = calculate_time_window_from_bpm_and_wave_speed(
-            hr_bpm_value,  # From metrics.json (priority) - for calculation-based beats
-            wave_speed_mm_s,  # From ecg_settings.json - for calculation-based beats
-            desired_beats=6  # Default: 6 beats desired
-        )
-        
-        # Recalculate with actual sampling rate
-        num_samples_to_capture = int(calculated_time_window * computed_sampling_rate)
-        print(f"📊 NORMAL MODE: Calculated time window: {calculated_time_window:.2f}s")
-        print(f"   Based on BPM={hr_bpm_value} and wave_speed={wave_speed_mm_s}mm/s")
-        print(f"   Will capture {num_samples_to_capture} samples (at {computed_sampling_rate}Hz)")
-        if hr_bpm_value > 0:
-            expected_beats = int((calculated_time_window * hr_bpm_value) / 60)
-            print(f"   Expected beats shown: ~{expected_beats} beats")
-    
-    for pos_info in lead_positions:
-        lead = pos_info["lead"]
-        x_pos = pos_info["x"]
-        y_pos = pos_info["y"]
-        
-        try:
-            # STEP 3A: Add lead label directly
-            from reportlab.graphics.shapes import String
-            lead_label = String(10, y_pos + 20, f"{lead}", 
-                              fontSize=10, fontName="Helvetica-Bold", fillColor=colors.black)
-            master_drawing.add(lead_label)
-            
-            # STEP 3B: Get REAL ECG data for this lead (ONLY from saved file - calculation-based)
-            # IMPORTANT: हमेशा saved file से data use करो, live dashboard से नहीं (calculation-based beats के लिए)
-            real_data_available = False
-            real_ecg_data = None
-            
-            # Helper function to calculate derived leads from I and II
-            def calculate_derived_lead(lead_name, lead_i_data, lead_ii_data):
-                """Calculate derived leads: III, aVR, aVL, aVF from I and II"""
-                lead_i = np.array(lead_i_data, dtype=float)
-                lead_ii = np.array(lead_ii_data, dtype=float)
-                
-                if lead_name == "III":
-                    return lead_ii - lead_i  # III = II - I
-                elif lead_name == "aVR":
-                    return -(lead_i + lead_ii) / 2.0  # aVR = -(I + II) / 2
-                elif lead_name == "aVL":
-                    # aVL = (Lead I - Lead III) / 2
-                    lead_iii = lead_ii - lead_i  # Calculate Lead III first
-                    return (lead_i - lead_iii) / 2.0  # aVL = (I - III) / 2
-                elif lead_name == "aVF":
-                    # aVF = (Lead II + Lead III) / 2
-                    lead_iii = lead_ii - lead_i  # Calculate Lead III first
-                    return (lead_ii + lead_iii) / 2.0  # aVF = (II + III) / 2
-                elif lead_name == "-aVR":
-                    return -(-(lead_i + lead_ii) / 2.0)  # -aVR = -aVR = (I + II) / 2
-                else:
-                    return None
-            
-            # Priority 1: Use saved_ecg_data (REQUIRED for calculation-based beats)
-            saved_data_samples = 0  # Initialize for comparison with live data
-            if saved_ecg_data and 'leads' in saved_ecg_data:
-                # For calculated leads, calculate from I and II
-                if lead in ["III", "aVR", "aVL", "aVF", "-aVR"]:
-                    if "I" in saved_ecg_data['leads'] and "II" in saved_ecg_data['leads']:
-                        lead_i_data = saved_ecg_data['leads']["I"]
-                        lead_ii_data = saved_ecg_data['leads']["II"]
-                        
-                        # Ensure same length
-                        min_len = min(len(lead_i_data), len(lead_ii_data))
-                        lead_i_data = lead_i_data[:min_len]
-                        lead_ii_data = lead_ii_data[:min_len]
-                        
-                        # IMPORTANT: Subtract baseline from Lead I and Lead II BEFORE calculating derived leads
-                        # This ensures calculated leads are centered around 0, not around baseline
-                        baseline_adc = 2000.0
-                        lead_i_centered = np.array(lead_i_data, dtype=float) - baseline_adc
-                        lead_ii_centered = np.array(lead_ii_data, dtype=float) - baseline_adc
-                        
-                        # Calculate derived lead from centered values
-                        calculated_data = calculate_derived_lead(lead, lead_i_centered, lead_ii_centered)
-                        if calculated_data is not None:
-                            raw_data = calculated_data.tolist() if isinstance(calculated_data, np.ndarray) else calculated_data
-                            print(f"✅ Calculated {lead} from saved I and II data (baseline-subtracted): {len(raw_data)} points")
-                        else:
-                            # Fallback to saved data if calculation fails
-                            lead_name_for_saved = lead.replace("-aVR", "aVR")
-                            if lead_name_for_saved in saved_ecg_data['leads']:
-                                raw_data = saved_ecg_data['leads'][lead_name_for_saved]
-                                if lead == "-aVR":
-                                    raw_data = [-x for x in raw_data]  # Invert for -aVR
-                            else:
-                                raw_data = []
-                    else:
-                        print(f"⚠️ Cannot calculate {lead}: I or II data missing in saved file")
-                        raw_data = []
-                else:
-                    # For non-calculated leads, use saved data directly
-                    lead_name_for_saved = lead.replace("-aVR", "aVR")  # Handle -aVR case
-                    if lead_name_for_saved in saved_ecg_data['leads']:
-                        raw_data = saved_ecg_data['leads'][lead_name_for_saved]
-                        if lead == "-aVR":
-                            raw_data = [-x for x in raw_data]  # Invert for -aVR
-                    else:
-                        raw_data = []
-                
-                if len(raw_data) > 0:
-                    # Check if saved data has enough samples for calculated time window
-                    saved_data_samples = len(raw_data)
-                    if saved_data_samples < num_samples_to_capture:
-                        print(f"⚠️ SAVED FILE {lead} has only {saved_data_samples} samples, need {num_samples_to_capture} for {calculated_time_window:.2f}s window")
-                        print(f"   Will use ALL saved data ({saved_data_samples} samples) - may show fewer beats than calculated")
-                        # Use all available saved data (don't filter)
-                        raw_data_to_use = raw_data
-                    else:
-                        # Apply time window filtering based on calculated window
-                        raw_data_to_use = raw_data[-num_samples_to_capture:]
-                    
-                    if len(raw_data_to_use) > 0 and np.std(raw_data_to_use) > 0.01:
-                        real_ecg_data = np.array(raw_data_to_use)
-                        real_data_available = True
-                        time_window_str = f"{calculated_time_window:.2f}s" if calculated_time_window else "auto"
-                        actual_time_window = len(real_ecg_data) / computed_sampling_rate if computed_sampling_rate > 0 else 0
-                        print(f"✅ Using SAVED FILE {lead} data: {len(real_ecg_data)} points (requested: {time_window_str}, actual: {actual_time_window:.2f}s, std: {np.std(real_ecg_data):.2f})")
-            
-            # Priority 2: Fallback to live dashboard data (if saved data not available OR has insufficient samples)
-            # Check if live data has MORE samples than saved data
-            if ecg_test_page and hasattr(ecg_test_page, 'data'):
-                lead_to_index = {
-                    "I": 0, "II": 1, "III": 2, "aVR": 3, "aVL": 4, "aVF": 5,
-                    "V1": 6, "V2": 7, "V3": 8, "V4": 9, "V5": 10, "V6": 11
-                }
-                
-                live_data_available = False
-                live_data_samples = 0
-                
-                # For calculated leads, calculate from live I and II
-                if lead in ["III", "aVR", "aVL", "aVF", "-aVR"]:
-                    if len(ecg_test_page.data) > 1:  # Need at least I and II
-                        lead_i_data = ecg_test_page.data[0]  # I
-                        lead_ii_data = ecg_test_page.data[1]  # II
-                        
-                        if len(lead_i_data) > 0 and len(lead_ii_data) > 0:
-                            # Ensure same length
-                            min_len = min(len(lead_i_data), len(lead_ii_data))
-                            lead_i_slice = lead_i_data[-min_len:] if len(lead_i_data) >= min_len else lead_i_data
-                            lead_ii_slice = lead_ii_data[-min_len:] if len(lead_ii_data) >= min_len else lead_ii_data
-                            
-                            # IMPORTANT: Subtract baseline from Lead I and Lead II BEFORE calculating derived leads
-                            # This ensures calculated leads are centered around 0, not around baseline
-                            baseline_adc = 2000.0
-                            lead_i_centered = np.array(lead_i_slice, dtype=float) - baseline_adc
-                            lead_ii_centered = np.array(lead_ii_slice, dtype=float) - baseline_adc
-                            
-                            # Calculate derived lead from centered values
-                            calculated_data = calculate_derived_lead(lead, lead_i_centered, lead_ii_centered)
-                            if calculated_data is not None:
-                                live_data_samples = len(calculated_data)
-                                use_live_data = False
-                                if not real_data_available:
-                                    use_live_data = True
-                                elif live_data_samples > saved_data_samples:
-                                    use_live_data = True
-                                
-                                if use_live_data:
-                                    raw_data = calculated_data
-                                    if len(raw_data) >= num_samples_to_capture:
-                                        raw_data = raw_data[-num_samples_to_capture:]
-                                    if len(raw_data) > 0 and np.std(raw_data) > 0.01:
-                                        real_ecg_data = np.array(raw_data)
-                                        real_data_available = True
-                                        actual_time_window = len(real_ecg_data) / computed_sampling_rate if computed_sampling_rate > 0 else 0
-                
-                # For non-calculated leads, use existing logic
-                if not real_data_available:
-                    if lead == "-aVR" and len(ecg_test_page.data) > 3:
-                        live_data_samples = len(ecg_test_page.data[3])
-                    elif lead in lead_to_index and len(ecg_test_page.data) > lead_to_index[lead]:
-                        live_data_samples = len(ecg_test_page.data[lead_to_index[lead]])
-                    
-                    # Use live data if: (1) saved data not available OR (2) live data has MORE samples
-                    use_live_data = False
-                    if not real_data_available:
-                        use_live_data = True
-                    elif live_data_samples > saved_data_samples:
-                        use_live_data = True
-                    
-                    if use_live_data:
-                        if lead == "-aVR" and len(ecg_test_page.data) > 3:
-                            # For -aVR, use filtered inverted aVR data
-                            raw_data = ecg_test_page.data[3]
-                            # Check if we have enough samples, otherwise use all available
-                            if len(raw_data) >= num_samples_to_capture:
-                                raw_data = raw_data[-num_samples_to_capture:]
-                            # Check if data is not all zeros or flat
-                            if len(raw_data) > 0 and np.std(raw_data) > 0.01:
-                                # STEP 1: Capture ORIGINAL dashboard data (NO gain applied)
-                                real_ecg_data = np.array(raw_data)
-                                
-                                real_data_available = True
-                                actual_time_window = len(real_ecg_data) / computed_sampling_rate if computed_sampling_rate > 0 else 0
-                                if is_demo_mode and time_window_seconds is not None:
-                                    pass
-                                else:
-                                    time_window_str = f"{calculated_time_window:.2f}s" if calculated_time_window else "auto"
-                            else:
-                                pass
-                        elif lead in lead_to_index and len(ecg_test_page.data) > lead_to_index[lead]:
-                            # Get filtered real data for this lead
-                            lead_index = lead_to_index[lead]
-                            if len(ecg_test_page.data[lead_index]) > 0:
-                                raw_data = ecg_test_page.data[lead_index]
-                                # Check if we have enough samples, otherwise use all available
-                                if len(raw_data) >= num_samples_to_capture:
-                                    raw_data = raw_data[-num_samples_to_capture:]
-                                # Check if data has variation (not all zeros or flat line)
-                                if len(raw_data) > 0 and np.std(raw_data) > 0.01:
-                                    # STEP 1: Capture ORIGINAL dashboard data (NO gain applied)
-                                    real_ecg_data = np.array(raw_data)
-                                    
-                                    real_data_available = True
-                                    actual_time_window = len(real_ecg_data) / computed_sampling_rate if computed_sampling_rate > 0 else 0
-                                    if is_demo_mode and time_window_seconds is not None:
-                                        pass
-                                    else:
-                                        time_window_str = f"{calculated_time_window:.2f}s" if calculated_time_window else "auto"
-                                else:
-                                    pass
-                            else:
-                                pass
-            
-            if real_data_available and len(real_ecg_data) > 0:
-                # Draw ALL REAL ECG data - NO LIMITS
-                ecg_width = 460
-                ecg_height = 45
-                
-                # Create time array for ALL data
-                t = np.linspace(x_pos, x_pos + ecg_width, len(real_ecg_data))
-                
-                
-                
-                # Step 1: Convert ADC data to numpy array
-                adc_data = np.array(real_ecg_data, dtype=float)
-                
-                # DEBUG: Check if data is already processed (baseline-subtracted)
-                # If data range is far from 2000 baseline, it might already be processed
-                data_mean = np.mean(adc_data)
-                data_std = np.std(adc_data)
-                
-                # Step 2: Apply baseline 2000 (subtract baseline from ADC values)
-                # IMPORTANT: For calculated leads (III, aVR, aVL, aVF), data is already calculated from processed I and II
-                # So it's already centered (mean ~0), but we still need to scale it properly
-                baseline_adc = 2000.0
-                is_calculated_lead = lead in ["III", "aVR", "aVL", "aVF", "-aVR"]
-                
-                if abs(data_mean - 2000.0) < 500:  # Data is close to baseline 2000 (raw ADC)
-                    centered_adc = adc_data - baseline_adc
-                elif is_calculated_lead:
-                    # For calculated leads, data is already centered from calculation (II - I, etc.)
-                    # The calculated value is already the difference, so it's centered around 0
-                    # We use it directly without baseline subtraction
-                    centered_adc = adc_data  # Use data as-is (already centered from calculation)
-                else:  # Data is already processed (baseline-subtracted or filtered)
-                    centered_adc = adc_data  # Use data as-is (already centered)
-                    
-                
-                # Step 3: Calculate ADC per box based on wave_gain and lead-specific multiplier
-                # LEAD-SPECIFIC ADC PER BOX CONFIGURATION
-                # Each lead can have different ADC per box multiplier (will be divided by wave_gain)
-                adc_per_box_config = {
-                    'I': 5500.0,
-                    'II': 4955.0,  
-                    'III': 5213.0,  
-                    'aVR': 5353.0, 
-                    'aVL': 5500.0,
-                    'aVF': 5353.0, 
-                    'V1': 5500.0,
-                    'V2': 5500.0,
-                    'V3': 5500.0,
-                    'V4': 7586.0,  
-                    'V5': 7586.0,
-                    'V6': 8209.0,  
-                    '-aVR': 5500.0,  # For Cabrera sequence
-                }
-                # Get lead-specific ADC per box multiplier (default: 5500)
-                adc_per_box_multiplier = adc_per_box_config.get(lead, 5500.0)
-                # Formula: ADC_per_box = adc_per_box_multiplier / wave_gain_mm_mv
-                # IMPORTANT: Each lead can have different ADC per box multiplier
-                # For 10mm/mV with multiplier 5500: 5500 / 10 = 550 ADC per box
-                # This means: 550 ADC offset = 1 box (5mm) vertical movement
-                adc_per_box = adc_per_box_multiplier / max(1e-6, wave_gain_mm_mv)  # Avoid division by zero
-                
-                # DEBUG: Log actual ADC values for troubleshooting
-                max_centered_adc = np.max(np.abs(centered_adc))
-                min_centered_adc = np.min(centered_adc)
-                max_centered_adc_abs = np.max(np.abs(centered_adc))
-                expected_boxes = max_centered_adc_abs / adc_per_box
-                
-                
                 boxes_offset = centered_adc / adc_per_box
                 
                 # Log boxes offset for verification
@@ -2660,7 +2163,7 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
                 # Create time array for ALL data
                 t = np.linspace(x_pos, x_pos + ecg_width, len(real_ecg_data))
                 
-               
+                
                 # Step 1: Convert ADC data to numpy array
                 adc_data = np.array(real_ecg_data, dtype=float)
                 
@@ -3149,7 +2652,7 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
                                         
                                         # Score: prefer values in normal range (0-75°)
                                         if 0 <= cand_normalized <= 75:
-                                            score = 100 - abs(cand_normalized - 37.5)  # Closer to middle (37.5°) is better
+                                            score = 100 - abs(cand_normalized - 37.5)  
                                         else:
                                             # For abnormal values, prefer closer to normal range
                                             if cand_normalized > 75:
@@ -3364,7 +2867,7 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
     
     # Create a rectangular box for conclusions (shifted right) - INCREASED HEIGHT (same position)
     # Height increased: bottom extended down (top position same). Length increased by 20 (x position fixed)
-    from reportlab.graphics.shapes import Rect
+    # Rect already imported at top
     conclusion_box = Rect(200, conclusion_y_start - 55, 355, 75,  # Width 325→345 (+20); height 65→75 (+10)
                          fillColor=None, strokeColor=colors.black, strokeWidth=1.5)
     master_drawing.add(conclusion_box)
@@ -3462,10 +2965,6 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
     # summary_para = Paragraph(f"ECG Report: {successful_graphs}/12 leads displayed", summary_style)
     # story.append(summary_para)
 
-    # Extract patient data for use in canvas drawing
-    patient_org = patient.get("Org.", "") if patient else ""
-    patient_doctor_mobile = patient.get("doctor_mobile", "") if patient else ""
-    
     # Helper: draw logo on every page AND ALIGNED pink grid background on Page 2
     def _draw_logo_and_footer(canvas, doc):
         import os
@@ -3484,17 +2983,20 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
             
             major_grid_color = colors.HexColor("#ffb3b3")   
             
-            # Draw minor grid lines (1mm spacing) - FULL PAGE
+            # Draw minor grid lines (1mm spacing) - 59 boxes complete (0 to 295mm)
             canvas.setStrokeColor(light_grid_color)
             canvas.setLineWidth(0.6)
             
             minor_spacing = 1 * mm
             
-            # Vertical minor lines - full page
+            # Vertical minor lines - Draw up to 295mm (includes 295mm line)
+            max_x_limit = 59 * 5 * mm  # 295mm = right edge of 59th box
             x = 0
-            while x <= page_width:
+            while x <= max_x_limit:  # Draw lines 0 to 295mm (complete 59 boxes)
                 canvas.line(x, 0, x, page_height)
                 x += minor_spacing
+                if x > max_x_limit:  # Stop immediately after 295mm
+                    break
             
             # Horizontal minor lines - full page
             y = 0
@@ -3514,19 +3016,19 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
             from reportlab.lib.units import mm
             major_spacing = 5 * mm  # Standard ECG: 5mm = 14.17 points per box
             
-            # DEBUG: Log actual grid spacing being used
-            from reportlab.lib.units import mm as mm_unit
-            
-            # Vertical major lines - full page
+            # Vertical major lines - Draw 60 lines (0, 5, 10...295mm) for 59 complete boxes
+            max_x_limit = 59 * 5 * mm  # 295mm = right edge of 59th box
             x = 0
-            while x <= page_width:
+            while x <= max_x_limit:  # Include 295mm line (completes 59 boxes)
                 canvas.line(x, 0, x, page_height)
                 x += major_spacing
+                if x > max_x_limit:  # Stop after 295mm
+                    break
             
-            # Horizontal major lines - full page
+            # Horizontal major lines - STRICT: Only up to 295mm width (not full page_width)
             y = 0
             while y <= page_height:
-                canvas.line(0, y, page_width, y)
+                canvas.line(0, y, max_x_limit, y)  # End at 295mm (not page_width) ✅
                 y += major_spacing
             
 
@@ -3732,13 +3234,1298 @@ def generate_ecg_report(filename="ecg_report.pdf", data=None, lead_images=None, 
         print(f"⚠️  Cloud upload error: {e}")
 
 
-# REMOVE ENTIRE create_sample_ecg_images function (lines ~1222-1257)
+# ==================== HYPERKALEMIA REPORT WRAPPER ====================
+def generate_hyperkalemia_report(filename, analysis_results, lead_ii_data, sampling_rate=250.0, ecg_data_file=None):
+    """
+    Reuse the main ECG report layout for the Hyperkalemia flow.
+    Expects:
+      - analysis_results: dict with keys like heart_rate, pr_interval_ms, qrs_duration_ms,
+        qt_interval_ms, qtc_ms, st_segment_ms, qrs_axis, patient (optional)
+      - lead_ii_data: sequence of ADC samples for Lead II or list of dicts with {"value": ..., "time": ...}
+      - ecg_data_file: Optional path to saved ECG data file with V1-V6 leads
+    """
+    if not lead_ii_data:
+        raise ValueError("No Lead II data provided for hyperkalemia report")
 
-# REMOVE ENTIRE main execution block (lines ~1260-1265)
-# if __name__ == "__main__":
-#     # Create sample images with transparency (force recreation)
-#     create_sample_ecg_images(force_recreate=True)
-#     
-#     # Generate report
-#     generate_ecg_report("test_ecg_report.pdf")
+    # Normalize Lead II samples to a numpy array
+    first_item = lead_ii_data[0]
+    if isinstance(first_item, dict) and "value" in first_item:
+        lead_ii_array = np.array([d.get("value", 0) for d in lead_ii_data], dtype=float)
+    else:
+        lead_ii_array = np.array(lead_ii_data, dtype=float)
 
+    # Minimal stub that mimics the ecg_test_page shape used by generate_ecg_report
+    class _Sampler:
+        def __init__(self, fs):
+            self.sampling_rate = fs
+
+    class _DummyECGPage:
+        def __init__(self, lead_ii, fs):
+            # 12 leads, only Lead II (index 1) populated
+            self.data = [np.zeros_like(lead_ii) for _ in range(12)]
+            self.data[1] = lead_ii
+            self.sampler = _Sampler(fs)
+
+    ecg_page = _DummyECGPage(lead_ii_array, sampling_rate)
+
+    # Map analysis results into the fields expected by the main report
+    hr = int(analysis_results.get("heart_rate", 0) or 0)
+    data = {
+        "HR": hr,
+        "beat": hr,
+        "PR": int(analysis_results.get("pr_interval_ms", 0) or 0),
+        "QRS": int(analysis_results.get("qrs_duration_ms", 0) or 0),
+        "QT": int(analysis_results.get("qt_interval_ms", 0) or 0),
+        "QTc": int(analysis_results.get("qtc_ms", 0) or 0),
+        "ST": int(analysis_results.get("st_segment_ms", 0) or 0),
+        "HR_max": hr,
+        "HR_min": hr,
+        "HR_avg": hr,
+        "Heart_Rate": hr,
+        "QRS_axis": analysis_results.get("qrs_axis", "--"),
+    }
+
+    # Optional patient info passthrough
+    patient = analysis_results.get("patient", {}) if isinstance(analysis_results, dict) else {}
+
+    # Convert lead_ii_data to the format expected by generate_hyperkalemia_ecg_report
+    # If it's already a list of dicts with 'time' and 'value', use as is
+    # Otherwise, create time-based dicts
+    if lead_ii_data and isinstance(lead_ii_data[0], dict) and "value" in lead_ii_data[0]:
+        # Already in correct format
+        formatted_lead_ii_data = lead_ii_data
+    else:
+        # Convert array to list of dicts with time and value
+        formatted_lead_ii_data = []
+        for i, value in enumerate(lead_ii_array):
+            formatted_lead_ii_data.append({
+                'time': i / sampling_rate,  # Time in seconds
+                'value': float(value)
+            })
+    
+    # Generate using the Hyperkalemia-specific report generator (with logging and landscape Page 2)
+    from utils.settings_manager import SettingsManager
+    settings_manager = SettingsManager()
+    
+    print(f"📤 Calling generate_hyperkalemia_ecg_report with ecg_data_file: {ecg_data_file}")
+    
+    return generate_hyperkalemia_ecg_report(
+        filename=filename,
+        lead_ii_data=formatted_lead_ii_data,
+        data=data,
+        patient=patient,
+        settings_manager=settings_manager,
+        ecg_data_file=ecg_data_file
+    )
+
+
+# ==================== Hyperkalemia ECG REPORT GENERATION ====================
+# COMPLETE ECG REPORT FORMAT - Same as generate_ecg_report() but with 5 one-minute Lead II graphs
+
+def generate_hyperkalemia_ecg_report(filename="hyperkalemia_ecg_report.pdf", lead_ii_data=None, data=None, patient=None, settings_manager=None, ecg_data_file=None):
+    """
+    Generate Hyperkalemia ECG report PDF with EXACT SAME format as main 12-lead ECG report
+    Only difference: Page 2 shows 5 one-minute Lead II graphs in LANDSCAPE mode instead of 12 leads
+    All Page 1 content, styling, formulas - EXACTLY SAME as generate_ecg_report()
+    
+    Parameters:
+        filename: Output PDF filename
+        lead_ii_data: List of {'time': seconds, 'value': adc_value} dictionaries (5 minutes of Lead II)
+        data: Metrics dictionary (HR, PR, QRS, etc.) - same format as main report
+        patient: Patient details dictionary
+        settings_manager: Settings manager for wave_speed, wave_gain, etc.
+        ecg_data_file: Optional path to saved ECG data file with V1-V6 leads
+    """
+    # ==================== SETUP REPORT PATHS ====================
+    from datetime import datetime
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    reports_dir = os.path.join(base_dir, 'reports')
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    if lead_ii_data is None or len(lead_ii_data) == 0:
+        print("⚠️ No Lead II data provided for Hyperkalemia ECG report")
+        return None
+    
+    # ==================== INITIALIZE (EXACT SAME AS MAIN REPORT) ====================
+    
+    if data is None:
+        data = {
+            "HR": 0, "beat": 0, "PR": 0, "QRS": 0, "QT": 0, "QTc": 0, "ST": 0,
+            "HR_max": 0, "HR_min": 0, "HR_avg": 0, "Heart_Rate": 0, "QRS_axis": "--"
+        }
+    
+    if settings_manager is None:
+        from utils.settings_manager import SettingsManager
+        settings_manager = SettingsManager()
+    
+    def _safe_float(value, default):
+        try:
+            return float(value)
+        except Exception:
+            return default
+    
+    def _safe_int(value, default=0):
+        try:
+            return int(float(value))
+        except Exception:
+            return default
+    
+    # ==================== STEP 1: Get HR_bpm from metrics.json (PRIORITY) - SAME AS MAIN REPORT ====================
+    latest_metrics = load_latest_metrics_entry(reports_dir)
+    
+    # If last entry has zero values, find last valid (non-zero) entry
+    if latest_metrics and latest_metrics.get("HR_bpm", 0) == 0:
+        try:
+            metrics_path = os.path.join(reports_dir, 'metrics.json')
+            if os.path.exists(metrics_path):
+                with open(metrics_path, 'r') as f:
+                    all_metrics = json.load(f)
+                if isinstance(all_metrics, list) and len(all_metrics) > 0:
+                    # Find last non-zero HR_bpm entry
+                    for i in range(len(all_metrics)-1, -1, -1):
+                        if all_metrics[i].get("HR_bpm", 0) > 0:
+                            latest_metrics = all_metrics[i]
+                            print(f"📊 Hyperkalemia Report: Found last valid metric entry (index {i}) with HR_bpm > 0")
+                            break
+        except Exception as e:
+            print(f"⚠️ Could not find last valid metric: {e}")
+    
+    hr_bpm_value = 0
+    
+    # Priority 1: metrics.json से latest HR_bpm
+    if latest_metrics:
+        hr_bpm_value = _safe_int(latest_metrics.get("HR_bpm"))
+        if hr_bpm_value > 0:
+            print(f"📊 Hyperkalemia Report: Using HR_bpm from metrics.json: {hr_bpm_value} bpm (timestamp: {latest_metrics.get('timestamp', 'N/A')})")
+    
+    # Priority 2: Fallback to data parameter
+    if hr_bpm_value == 0:
+        hr_candidate = data.get("HR_bpm") or data.get("Heart_Rate") or data.get("HR")
+        hr_bpm_value = _safe_int(hr_candidate)
+        if hr_bpm_value > 0:
+            print(f"📊 Hyperkalemia Report: Using HR_bpm from data parameter: {hr_bpm_value} bpm")
+    
+    # Priority 3: Fallback to HR_avg
+    if hr_bpm_value == 0 and data.get("HR_avg"):
+        hr_bpm_value = _safe_int(data.get("HR_avg"))
+        if hr_bpm_value > 0:
+            print(f"📊 Hyperkalemia Report: Using HR_bpm from HR_avg: {hr_bpm_value} bpm")
+    
+    # Save original HR_bpm from metrics.json (for reference - will NOT be changed)
+    original_hr_bpm_from_metrics = hr_bpm_value  # This is from metrics.json (12-lead ECG)
+    
+    # Update data dictionary (SAME AS MAIN REPORT)
+    data["HR_bpm"] = hr_bpm_value
+    data["Heart_Rate"] = hr_bpm_value
+    data["HR"] = hr_bpm_value
+    if hr_bpm_value > 0:
+        data["RR_ms"] = int(60000 / hr_bpm_value)
+    else:
+        data["RR_ms"] = data.get("RR_ms", 0)
+    
+    # ==================== STEP 2: Get ALL metrics from metrics.json (PRIORITY) - SAME AS MAIN REPORT ====================
+    # Save original metrics.json values BEFORE they might get overwritten by Hyperkalemia-calculated values
+    # These will be used on Page 2 (ECG waves) to show metrics.json values
+    original_metrics_from_json = {
+        "HR": 0, "PR": 0, "QRS": 0, "QT": 0, "QTc": 0, "ST": 0, "RR_ms": 0
+    }
+    if latest_metrics:
+        # ALWAYS save metrics.json values (for Page 2 - ECG waves)
+        original_metrics_from_json["HR"] = _safe_int(latest_metrics.get("HR_bpm", 0))
+        original_metrics_from_json["PR"] = _safe_int(latest_metrics.get("PR_ms", 0))
+        original_metrics_from_json["QRS"] = _safe_int(latest_metrics.get("QRS_ms", 0))
+        original_metrics_from_json["QT"] = _safe_int(latest_metrics.get("QT_ms", 0))
+        original_metrics_from_json["QTc"] = _safe_int(latest_metrics.get("QTc_ms", 0))
+        original_metrics_from_json["ST"] = _safe_int(latest_metrics.get("ST_ms", 0))
+        original_metrics_from_json["RR_ms"] = _safe_int(latest_metrics.get("RR_ms", 0))
+        if original_metrics_from_json["HR"] > 0 and original_metrics_from_json["RR_ms"] == 0:
+            original_metrics_from_json["RR_ms"] = int(60000 / original_metrics_from_json["HR"])
+        
+        print(f"📊 Hyperkalemia Report: Saved metrics.json values for Page 2 (ECG waves):")
+        print(f"   HR={original_metrics_from_json['HR']}, PR={original_metrics_from_json['PR']}, QRS={original_metrics_from_json['QRS']}")
+        print(f"   QT={original_metrics_from_json['QT']}, QTc={original_metrics_from_json['QTc']}, ST={original_metrics_from_json['ST']}, RR={original_metrics_from_json['RR_ms']}")
+        
+        # Get all available metrics from metrics.json (SAME AS MAIN REPORT)
+        if data.get("PR", 0) == 0:
+            data["PR"] = original_metrics_from_json["PR"]
+        if data.get("QRS", 0) == 0:
+            data["QRS"] = original_metrics_from_json["QRS"]
+        if data.get("QT", 0) == 0:
+            data["QT"] = original_metrics_from_json["QT"]
+        if data.get("QTc", 0) == 0:
+            data["QTc"] = original_metrics_from_json["QTc"]
+        if data.get("ST", 0) == 0:
+            data["ST"] = original_metrics_from_json["ST"]
+        
+        print(f"📊 Hyperkalemia Report: Loaded metrics from metrics.json: HR={data['HR']}, PR={data['PR']}, QRS={data['QRS']}, QT={data['QT']}, QTc={data['QTc']}, ST={data['ST']}")
+    
+    # Update beat value for observation table (SAME AS MAIN REPORT)
+    if data.get("beat", 0) == 0:
+        data["beat"] = data["HR"]
+    
+    # Get settings (SAME AS MAIN REPORT)
+    wave_speed_setting = settings_manager.get_setting("wave_speed", "25")
+    wave_gain_setting = settings_manager.get_setting("wave_gain", "10")
+    wave_speed_mm_s = _safe_float(wave_speed_setting, 25.0)
+    wave_gain_mm_mv = _safe_float(wave_gain_setting, 10.0)
+    filter_band = settings_manager.get_setting("filter_band", "0.5~35Hz")
+    ac_frequency = settings_manager.get_setting("ac_frequency", "50")
+    
+    print(f"📊 Hyperkalemia Report Settings: wave_speed={wave_speed_mm_s}mm/s, wave_gain={wave_gain_mm_mv}mm/mV")
+    print(f"📊 Hyperkalemia Report Final Metrics: HR={data['beat']}, PR={data['PR']}, QRS={data['QRS']}, QT={data['QT']}, QTc={data['QTc']}, ST={data['ST']}")
+    
+    # ==================== CALCULATE HEART RATE FROM 5 MINUTES (BEFORE REPORT GENERATION) ====================
+    # Calculate average Heart Rate from 5 minutes of data (to use in report)
+    hr_per_minute_for_report = []
+    segment_duration = 11.0  # Same as ECG graphs: 11 seconds per strip
+    num_segments = 5  # Always 5 strips
+    
+    # Helper function to calculate RR intervals from segment data
+    def calculate_rr_from_segment_early(segment_data, sampling_rate=250.0):
+        """Calculate ALL RR intervals from segment data by detecting R-peaks"""
+        if len(segment_data) < 100:
+            return None, None, []  # Return empty list for RR intervals
+        
+        try:
+            from scipy.signal import find_peaks
+            values = np.array([d['value'] for d in segment_data], dtype=float)
+            if np.std(values) < 1e-6:
+                return None, None, []
+            
+            values_norm = (values - np.mean(values)) / (np.std(values) + 1e-6)
+            min_distance = int(0.4 * sampling_rate)
+            peaks, _ = find_peaks(values_norm, distance=min_distance, height=0.3)
+            
+            if len(peaks) < 2:
+                return None, None, []
+            
+            rr_intervals = np.diff(peaks) * (1000.0 / sampling_rate)
+            rr_intervals = rr_intervals[(rr_intervals > 300) & (rr_intervals < 2000)]
+            
+            if len(rr_intervals) == 0:
+                return None, None, []
+            
+            avg_rr = float(np.mean(rr_intervals))
+            hr = 60000 / avg_rr if avg_rr > 0 else None
+            return avg_rr, hr, rr_intervals.tolist()  # Return all RR intervals as list
+            
+        except Exception as e:
+            return None, None, []
+    
+    # Get sampling rate from settings
+    sampling_rate = 250.0  # Default
+    if settings_manager:
+        try:
+            wave_speed = float(settings_manager.get_setting("wave_speed", "25"))
+            computed_sampling_rate = int(150 * (wave_speed / 25.0)) if wave_speed > 0 else 150
+            sampling_rate = max(80, min(computed_sampling_rate, 400))
+        except Exception:
+            pass
+    
+    # Calculate HR for each minute AND collect average RR per minute
+    avg_rr_per_minute = []  # Collect average RR for each of the 5 minutes
+    if lead_ii_data and len(lead_ii_data) > 100:
+        for seg_idx in range(num_segments):
+            minute_start = seg_idx * 60.0
+            seg_start = minute_start
+            seg_end = minute_start + segment_duration
+            seg_data = [d for d in lead_ii_data if seg_start <= d['time'] < seg_end]
+            
+            if len(seg_data) > 5500:
+                seg_data = seg_data[:5500]
+            
+            if len(seg_data) > 100:
+                avg_rr, hr_val, rr_intervals_list = calculate_rr_from_segment_early(seg_data, sampling_rate)
+                if avg_rr is not None and hr_val is not None:
+                    hr_per_minute_for_report.append(hr_val)
+                    # Collect average RR for this minute (not all individual intervals)
+                    avg_rr_per_minute.append(avg_rr)
+                else:
+                    hr_per_minute_for_report.append(data.get('HR_avg', 80))
+                    # Use fallback RR value
+                    fallback_rr = 60000 / data.get('HR_avg', 80) if data.get('HR_avg', 80) > 0 else 750
+                    avg_rr_per_minute.append(fallback_rr)
+            else:
+                hr_per_minute_for_report.append(data.get('HR_avg', 80))
+                # Use fallback RR value
+                fallback_rr = 60000 / data.get('HR_avg', 80) if data.get('HR_avg', 80) > 0 else 750
+                avg_rr_per_minute.append(fallback_rr)
+    else:
+        # Use default if no data
+        hr_per_minute_for_report = [data.get('HR_avg', 80)] * 5
+        fallback_rr = 60000 / data.get('HR_avg', 80) if data.get('HR_avg', 80) > 0 else 750
+        avg_rr_per_minute = [fallback_rr] * 5
+    
+    # Ensure we have 5 values
+    while len(hr_per_minute_for_report) < 5:
+        hr_per_minute_for_report.append(data.get('HR_avg', 80))
+        fallback_rr = 60000 / data.get('HR_avg', 80) if data.get('HR_avg', 80) > 0 else 750
+        avg_rr_per_minute.append(fallback_rr)
+    
+    # NEW CALCULATION: HR = 300000 / sum_of_avg_rr_per_minute
+    # Sum of 5 average RR values (one per minute)
+    if len(avg_rr_per_minute) >= 5:
+        sum_of_avg_rr = sum(avg_rr_per_minute[:5])  # Sum of 5 average RR values
+        # 5 minutes = 300 seconds = 300000 milliseconds
+        avg_hr_from_5_minutes = 300000 / sum_of_avg_rr if sum_of_avg_rr > 0 else data.get('HR_avg')
+        
+        print(f"📊 Hyperkalemia-Specific Heart Rate Calculation (NEW METHOD - 300000 / sum of avg RR per minute):")
+        print(f"   Original HR_bpm from metrics.json (12-lead ECG): {original_hr_bpm_from_metrics} bpm (NOT CHANGED)")
+        print(f"   ─────────────────────────────────────────────────────────────")
+        print(f"   Average RR per minute: {[round(r, 1) for r in avg_rr_per_minute[:5]]} ms")
+        print(f"   Sum of 5 average RR values: {sum_of_avg_rr:.2f} ms")
+        print(f"   ─────────────────────────────────────────────────────────────")
+        print(f"   NEW Formula: HR = 300000 / sum_of_avg_rr_per_minute")
+        print(f"   Calculation: 300000 / {sum_of_avg_rr:.2f} = {avg_hr_from_5_minutes:.2f} bpm")
+        print(f"   ─────────────────────────────────────────────────────────────")
+        print(f"   Per-minute HR values (for reference):")
+        for i, hr_val in enumerate(hr_per_minute_for_report):
+            print(f"   Min {i+1}: {hr_val:.2f} bpm")
+        print(f"   ─────────────────────────────────────────────────────────────")
+        print(f"   ✅ Hyperkalemia-Specific BPM: {round(avg_hr_from_5_minutes)} bpm (WILL BE SAVED to metrics.json as HR_bpm)")
+        print(f"   ✅ Original 12-lead ECG HR_bpm: {original_hr_bpm_from_metrics} bpm (saved as Original_HR_bpm for reference)\n")
+    else:
+        # Fallback to old method if no average RR values found
+        if len(avg_rr_per_minute) >= 5:
+            sum_of_avg_rr = sum(avg_rr_per_minute[:5])
+            avg_hr_from_5_minutes = 300000 / sum_of_avg_rr if sum_of_avg_rr > 0 else data.get('HR_avg', 80)
+        else:
+            avg_hr_from_5_minutes = np.mean(hr_per_minute_for_report) if len(hr_per_minute_for_report) > 0 else data.get('HR_avg', 80)
+        print(f"⚠️ Using fallback method: {avg_hr_from_5_minutes:.2f} bpm")
+        print(f"   Original HR_bpm from metrics.json (12-lead ECG): {original_hr_bpm_from_metrics} bpm (NOT CHANGED)")
+        print(f"   ─────────────────────────────────────────────────────────────")
+        for i, hr_val in enumerate(hr_per_minute_for_report):
+            print(f"   Min {i+1}: {hr_val:.2f} bpm")
+        print(f"   ─────────────────────────────────────────────────────────────")
+        print(f"   Hyperkalemia Average HR (fallback): {avg_hr_from_5_minutes:.2f} bpm")
+        print(f"   Calculation: ({hr_per_minute_for_report[0]:.1f} + {hr_per_minute_for_report[1]:.1f} + {hr_per_minute_for_report[2]:.1f} + {hr_per_minute_for_report[3]:.1f} + {hr_per_minute_for_report[4]:.1f}) / 5 = {avg_hr_from_5_minutes:.2f} bpm")
+        print(f"   ─────────────────────────────────────────────────────────────")
+        print(f"   ✅ Hyperkalemia-Specific BPM: {round(avg_hr_from_5_minutes)} bpm (WILL BE SAVED to metrics.json as HR_bpm)")
+        print(f"   ✅ Original 12-lead ECG HR_bpm: {original_hr_bpm_from_metrics} bpm (saved as Original_HR_bpm for reference)\n")
+    
+    # Save Hyperkalemia-specific BPM separately (for Page 3 only)
+    hyperkalemia_specific_bpm = round(avg_hr_from_5_minutes)
+    
+    # Use original HR_bpm from metrics.json (saved earlier, NOT to change it)
+    # original_hr_bpm_from_metrics was already saved above from metrics.json
+    
+    # Keep data dictionary with metrics.json values for Page 1 and Page 2
+    # Only Page 3 will use Hyperkalemia-specific values
+    # DO NOT overwrite data["HR_avg"], data["beat"] here - keep original metrics.json values
+    
+    # ==================== PAGE SETUP (MIXED: Page 1 Portrait, Page 2 Landscape) ====================
+    
+    # Patient org and phone for logo/footer callback
+    patient_org = patient.get("Org.", "") if patient else ""
+    patient_doctor_mobile = patient.get("doctor_mobile", "") if patient else ""
+    
+    # Define callback function for headers/footers BEFORE creating templates
+    def _draw_logo_and_footer_callback(canvas, doc_obj):
+        from reportlab.lib.units import mm
+        
+        # STEP 1: Draw pink ECG grid background ONLY on Page 2 (57 BOXES IN FULL 297MM WIDTH)
+        if canvas.getPageNumber() == 2:
+            page_width, page_height = canvas._pagesize
+            
+            # ========== 57 BOXES IN FULL 297MM PAGE WIDTH ==========
+            # Page width: 297mm (full A4 landscape)
+            # Number of boxes: 57
+            # Box size: 297mm / 57 = 5.2105mm per box
+            num_boxes_width = 57
+            page_width_mm = 297.0
+            box_width_mm = page_width_mm / num_boxes_width  # 297/57 = 5.2105mm per box
+            box_width_pts = box_width_mm * mm
+            
+            # Pink background - FULL PAGE (297mm width, no white space)
+            canvas.setFillColor(colors.HexColor("#ffe6e6"))
+            canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
+            
+            # Grid colors
+            light_grid_color = colors.HexColor("#ffd1d1")
+            major_grid_color = colors.HexColor("#ffb3b3")
+            
+            # Minor grid lines - 1mm spacing (scaled proportionally)
+            # In each box of 5.2105mm, we want 5 minor divisions (1mm each)
+            # So minor spacing = box_width / 5 = 5.2105 / 5 = 1.042mm
+            minor_spacing_mm = box_width_mm / 5.0  # 1.042mm per minor division
+            minor_spacing_pts = minor_spacing_mm * mm
+            
+            canvas.setStrokeColor(light_grid_color)
+            canvas.setLineWidth(0.6)  # Minor grid lines (1mm spacing) - keep original thickness
+            
+            # Vertical minor lines - full page width (297mm)
+            x = 0
+            while x <= page_width:
+                canvas.line(x, 0, x, page_height)
+                x += minor_spacing_pts
+                if x > page_width:
+                    break
+            
+            # Horizontal minor lines - full page height
+            minor_spacing_y = 1.0 * mm  # 1mm vertical spacing
+            y = 0
+            while y <= page_height:
+                canvas.line(0, y, page_width, y)
+                y += minor_spacing_y
+            
+            # Major grid lines - exactly 57 boxes across full 297mm width
+            canvas.setStrokeColor(major_grid_color)
+            canvas.setLineWidth(0.6)  # Thinner major grid lines (5mm spacing) - was 1.2
+            
+            # Vertical major lines - 57 boxes (297mm width, 5.2105mm per box)
+            x = 0
+            for i in range(num_boxes_width + 1):  # 58 lines for 57 boxes
+                canvas.line(x, 0, x, page_height)
+                x += box_width_pts
+            
+            # Horizontal major lines - 40 boxes (210mm height, 5.25mm per box)
+            num_boxes_height = 40
+            page_height_mm = 210.0
+            box_height_mm = page_height_mm / num_boxes_height  # 210/40 = 5.25mm per box
+            box_height_pts = box_height_mm * mm
+            y = 0
+            for i in range(num_boxes_height + 1):  # 41 lines for 40 boxes
+                canvas.line(0, y, page_width, y)
+                y += box_height_pts
+        
+        # STEP 1.5: Draw Org. and Phone No. on Page 1 (REPOSITIONED - slightly higher, more left)
+        if canvas.getPageNumber() == 1:
+            canvas.saveState()
+            # Portrait A4 height = 842 points, position very close to top
+            page_height = 842  # A4 portrait height
+            x_pos = 15  # More to the left (was 30, now 15)
+            y_pos = page_height - 30  \
+            
+            canvas.setFont("Helvetica-Bold", 10)
+            canvas.setFillColor(colors.black)
+            org_label = "Org:"
+            canvas.drawString(x_pos, y_pos, org_label)
+            
+            org_label_width = canvas.stringWidth(org_label, "Helvetica-Bold", 10)
+            canvas.setFont("Helvetica", 10)
+            canvas.drawString(x_pos + org_label_width + 5, y_pos, patient_org if patient_org else "")
+            
+            y_pos -= 15
+            
+            canvas.setFont("Helvetica-Bold", 10)
+            phone_label = "Phone No:"
+            canvas.drawString(x_pos, y_pos, phone_label)
+            
+            phone_label_width = canvas.stringWidth(phone_label, "Helvetica-Bold", 10)
+            canvas.setFont("Helvetica", 10)
+            canvas.drawString(x_pos + phone_label_width + 5, y_pos, patient_doctor_mobile if patient_doctor_mobile else "")
+            
+            canvas.restoreState()
+        
+        # STEP 2: Draw logo (REPOSITIONED - lower from top)
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        png_path = os.path.join(base_dir, "assets", "Deckmountimg.png")
+        webp_path = os.path.join(base_dir, "assets", "Deckmount.webp")
+        logo_path = png_path if os.path.exists(png_path) else webp_path
+        
+        if os.path.exists(logo_path):
+            canvas.saveState()
+            if canvas.getPageNumber() in [2, 3]:
+                # Page 2 & 3 are LANDSCAPE - logo at top right
+                logo_w, logo_h = 120, 40
+                page_width, page_height = canvas._pagesize
+                x = page_width - logo_w - 35
+                y = page_height - logo_h
+            else:
+                # Page 1 is PORTRAIT - position at top right (very close to top)
+                logo_w, logo_h = 120, 40
+                page_height = 842  # A4 portrait height
+                x = 595 - logo_w - 30  # 595 = A4 width, 30 = right margin
+                y = page_height - 35  # 35 points from top 
+            try:
+                canvas.drawImage(logo_path, x, y, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+            canvas.restoreState()
+        
+        # STEP 3: Footer
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.black)
+        footer_text = "Deckmount Electronic , Plot No. 260, Phase IV, Udyog Vihar, Sector 18, Gurugram, Haryana 122015"
+        text_width = canvas.stringWidth(footer_text, "Helvetica", 8)
+        
+        if canvas.getPageNumber() in [2, 3]:
+            # Page 2 & 3 are LANDSCAPE
+            page_width, page_height = canvas._pagesize
+            x = (page_width - text_width) / 2
+        else:
+            # Page 1 is PORTRAIT
+            x = (595 - text_width) / 2
+        
+        y = 10
+        canvas.drawString(x, y, footer_text)
+        canvas.restoreState()
+    
+    # Create BaseDocTemplate for mixed page orientations
+    doc = BaseDocTemplate(filename, pagesize=A4,
+                         rightMargin=30, leftMargin=30,
+                         topMargin=30, bottomMargin=30)
+    
+    # Define Portrait template (for Page 1) with onPage callback
+    portrait_frame = Frame(doc.leftMargin, doc.bottomMargin,
+                          doc.width, doc.height,
+                          id='portrait_frame')
+    portrait_template = PageTemplate(id='portrait', frames=[portrait_frame], 
+                                    pagesize=A4, onPage=_draw_logo_and_footer_callback)
+    
+    # Define Landscape template (for Page 2) with onPage callback
+    landscape_width, landscape_height = landscape(A4)
+    # Reduce margins to increase frame size (from 30 to 20 on each side)
+    landscape_frame = Frame(20, 20,  # reduced margins for landscape to fit taller drawing
+                           landscape_width - 40, landscape_height - 40,
+                           id='landscape_frame')
+    landscape_template = PageTemplate(id='landscape', frames=[landscape_frame], 
+                                     pagesize=landscape(A4), onPage=_draw_logo_and_footer_callback)
+    
+    # Add templates to document - portrait first (default for Page 1)
+    # IMPORTANT: First template becomes default, so portrait_template must be first
+    doc.addPageTemplates([portrait_template, landscape_template])
+    story = []
+    styles = getSampleStyleSheet()
+    
+    # HEADING STYLE (EXACT SAME AS MAIN REPORT)
+    heading = ParagraphStyle(
+        'Heading',
+        fontSize=16,
+        textColor=colors.HexColor("#000000"),
+        spaceAfter=12,
+        leading=20,
+        alignment=1,
+        bold=True
+    )
+    
+    # Title
+    story.append(Paragraph("<b>Hyperkalemia ECG Report </b>", heading))
+    story.append(Spacer(1, 12))
+    
+    # ==================== PATIENT DETAILS (EXACT SAME AS MAIN REPORT) ====================
+    
+    # Helper: load latest patient from all_patients.json (fallback data source)
+    def _load_latest_patient_from_file():
+        try:
+            patients_file = os.path.abspath(os.path.join(base_dir, "all_patients.json"))
+            if not os.path.exists(patients_file):
+                return {}
+            with open(patients_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            patients_list = data.get("patients", []) if isinstance(data, dict) else []
+            if not patients_list:
+                return {}
+            return patients_list[-1]  # latest entry
+        except Exception as e:
+            print(f"⚠️ Could not load all_patients.json: {e}")
+            return {}
+    
+    if patient is None:
+        patient = {}
+    latest_patient = _load_latest_patient_from_file()
+    
+    # Prefer non-empty from patient; fallback to latest_patient
+    def pick(field_name):
+        val = patient.get(field_name, "") if isinstance(patient, dict) else ""
+        if val not in [None, "", " "]:
+            return val
+        return latest_patient.get(field_name, "") if isinstance(latest_patient, dict) else ""
+    
+    first_name = pick("first_name")
+    last_name = pick("last_name")
+    age = pick("age")
+    gender = pick("gender")
+    # Always stamp current date/time for the report (override stored value)
+    from datetime import datetime
+    date_time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    date_time = date_time_now
+    doctor = pick("doctor") or "—"
+    doctor_mobile = pick("doctor_mobile") or "—"
+    org_name = pick("Org.") or pick("org") or "—"
+    
+    # For canvas labels (top-left)
+    patient_org = org_name
+    patient_doctor_mobile = doctor_mobile
+    full_name = f"{first_name} {last_name}".strip()
+    date_time_str = date_time
+    
+    story.append(Paragraph("<b>Patient Details</b>", styles['Heading3']))
+    patient_table = Table([
+        ["Name:", f"{first_name} {last_name}".strip(), "Age:", f"{age or '—'}", "Gender:", f"{gender or '—'}"],
+        ["Date:", f"{date_time.split()
+        [0] if date_time else '—'}", "Time:", f"{date_time.split()[1] if len(date_time.split()) > 1 else '—'}", "", ""],
+    ], colWidths=[70, 130, 40, 100, 55, 100])
+    patient_table.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 1, colors.black),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+        ("BACKGROUND", (0,0), (-1,0), colors.whitesmoke),
+        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+    ]))
+    story.append(patient_table)
+    story.append(Spacer(1, 12))
+    
+    # ==================== REPORT OVERVIEW (EXACT SAME AS MAIN REPORT) ====================
+    
+    story.append(Paragraph("<b>Report Overview</b>", styles['Heading3']))
+    total_duration = max(d['time'] for d in lead_ii_data) if lead_ii_data else 0
+    
+    # Page 1: Use metrics.json values for other metrics, but Hyperkalemia-specific average for Heart Rate
+    page1_hr = original_metrics_from_json.get("HR", 0) if original_metrics_from_json.get("HR", 0) > 0 else data.get("HR_avg", 0)
+    
+    # Calculate Hyperkalemia-specific average for "Average Heart Rate" in Report Overview
+    # This is the average of the 5 per-minute heart rate values shown in Page 3 bar chart
+    if 'hyperkalemia_specific_bpm' in locals() and hyperkalemia_specific_bpm > 0:
+        hyperkalemia_avg_for_page1 = hyperkalemia_specific_bpm
+        if 'hr_per_minute_for_report' in locals() and len(hr_per_minute_for_report) >= 5:
+            print(f"📄 Page 1: Average Heart Rate = {hyperkalemia_avg_for_page1} bpm (Hyperkalemia-specific, from 5 minutes)")
+            print(f"   Per-minute values: {[round(h, 1) for h in hr_per_minute_for_report[:5]]}")
+            print(f"   Calculation: ({hr_per_minute_for_report[0]:.1f} + {hr_per_minute_for_report[1]:.1f} + {hr_per_minute_for_report[2]:.1f} + {hr_per_minute_for_report[3]:.1f} + {hr_per_minute_for_report[4]:.1f}) / 5 = {hyperkalemia_avg_for_page1} bpm")
+        else:
+            print(f"📄 Page 1: Average Heart Rate = {hyperkalemia_avg_for_page1} bpm (Hyperkalemia-specific)")
+    else:
+        hyperkalemia_avg_for_page1 = page1_hr
+        print(f"📄 Page 1: Average Heart Rate = {hyperkalemia_avg_for_page1} bpm (from metrics.json)")
+    
+    # Calculate Max and Min from 5 per-minute values
+    if 'hr_per_minute_for_report' in locals() and len(hr_per_minute_for_report) >= 5:
+        # Get the 5 per-minute HR values
+        hr_values_5min = hr_per_minute_for_report[:5]
+        hyperkalemia_max_hr = int(round(max(hr_values_5min)))
+        hyperkalemia_min_hr = int(round(min(hr_values_5min)))
+        
+        print(f"📊 Page 1 Report Overview - Hyperkalemia Values from 5 minutes:")
+        print(f"   Per-minute HR values: {[round(h, 1) for h in hr_values_5min]}")
+        print(f"   Maximum Heart Rate: {hyperkalemia_max_hr} bpm (from: {round(max(hr_values_5min), 1)} bpm)")
+        print(f"   Minimum Heart Rate: {hyperkalemia_min_hr} bpm (from: {round(min(hr_values_5min), 1)} bpm)")
+        print(f"   Average Heart Rate: {hyperkalemia_avg_for_page1} bpm")
+    else:
+        hyperkalemia_max_hr = data.get("HR_max", 0)
+        hyperkalemia_min_hr = data.get("HR_min", 0)
+        print(f"⚠️ Page 1 Report Overview: Using fallback values (Max: {hyperkalemia_max_hr}, Min: {hyperkalemia_min_hr})")
+    
+    overview_data = [
+        ["Maximum Heart Rate:", f'{hyperkalemia_max_hr} bpm'],  
+        ["Minimum Heart Rate:", f'{hyperkalemia_min_hr} bpm'],  
+        ["Average Heart Rate:", f'{hyperkalemia_avg_for_page1} bpm'], 
+    ]
+    table = Table(overview_data, colWidths=[300, 200])
+    table.setStyle(TableStyle([
+        ("BOX", (0,0), (-1,-1), 1, colors.black),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+        ("BACKGROUND", (0,0), (-1,0), colors.whitesmoke),
+        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 15))
+    
+    # ==================== OBSERVATION (EXACT SAME AS MAIN REPORT) ====================
+    
+    story.append(Paragraph("<b>OBSERVATION</b>", styles['Heading3']))
+    story.append(Spacer(1, 6))
+    
+    # Page 1: Use metrics.json values for other metrics, but Hyperkalemia-specific average for Heart Rate
+    # Heart Rate should match Report Overview (Hyperkalemia-specific average)
+    page1_beat_hyperkalemia = hyperkalemia_avg_for_page1 if 'hyperkalemia_avg_for_page1' in locals() else (original_metrics_from_json.get("HR", 0) if original_metrics_from_json.get("HR", 0) > 0 else data.get('beat', 0))
+    page1_pr = original_metrics_from_json.get("PR", 0) if original_metrics_from_json.get("PR", 0) > 0 else data.get('PR', 0)
+    page1_qrs = original_metrics_from_json.get("QRS", 0) if original_metrics_from_json.get("QRS", 0) > 0 else data.get('QRS', 0)
+    page1_qt = original_metrics_from_json.get("QT", 0) if original_metrics_from_json.get("QT", 0) > 0 else data.get('QT', 0)
+    page1_qtc = original_metrics_from_json.get("QTc", 0) if original_metrics_from_json.get("QTc", 0) > 0 else data.get('QTc', 0)
+    page1_st = original_metrics_from_json.get("ST", 0) if original_metrics_from_json.get("ST", 0) != 0 else data.get('ST', 0)
+    
+    obs_headers = ["Interval Names", "Observed Values", "Standard Range"]
+    obs_data = [
+        ["Heart Rate", f"{page1_beat_hyperkalemia} bpm", "60-100"],  # Hyperkalemia-specific average (same as Report Overview)
+        ["PR Interval", f"{page1_pr} ms", "120 ms - 200 ms"],  # metrics.json value
+        ["QRS Complex", f"{page1_qrs} ms", "70 ms - 120 ms"],  # metrics.json value
+        ["QRS Axis", f"{data.get('QRS_axis', '--')}°", "Normal"],
+        ["QT Interval", f"{page1_qt} ms", "300 ms - 450 ms"],  # metrics.json value
+        ["QTC Interval", f"{page1_qtc} ms", "300 ms - 450 ms"],  # metrics.json value
+        ["ST Interval", f"{page1_st} ms", "80 ms - 120 ms"],  # metrics.json value
+    ]
+    
+    obs_table_data = [obs_headers] + obs_data
+    obs_table = Table(obs_table_data, colWidths=[165, 170, 165])
+    obs_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d9e6f2")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 11),
+        ("TOPPADDING", (0, 0), (-1, 0), 11),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("ALIGN", (0, 1), (-1, -1), "CENTER"),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
+        ("TOPPADDING", (0, 1), (-1, -1), 3),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BOX", (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    story.append(obs_table)
+    story.append(Spacer(1, 8))
+    
+    # ==================== CONCLUSION (EXACT SAME AS MAIN REPORT) ====================
+    
+    story.append(Paragraph("<b>ECG Report Conclusion</b>", styles['Heading3']))
+    story.append(Spacer(1, 6))
+    
+    # Get conclusions from JSON (SAME LOGIC AS MAIN REPORT)
+    dashboard_conclusions = get_dashboard_conclusions_from_image(None)
+    
+    # Filter conclusions (SAME AS MAIN REPORT)
+    filtered_conclusions = []
+    for conclusion in dashboard_conclusions:
+        if conclusion and conclusion.strip() and conclusion.strip() != "---":
+            filtered_conclusions.append(conclusion.strip())
+            if len(filtered_conclusions) >= 12:
+                break
+    
+    # If no real conclusions, use Hyperkalemia-specific defaults
+    if not filtered_conclusions:
+        filtered_conclusions = [
+            "5-minute Lead II Hyperkalemia analysis completed",
+            "Heart rate variability recorded successfully"
+        ]
+    
+    conclusion_headers = ["S.No.", "Conclusion"]
+    conclusion_data = []
+    for i, conclusion in enumerate(filtered_conclusions, 1):
+        conclusion_data.append([str(i), conclusion])
+    
+    conclusion_table_data = [conclusion_headers] + conclusion_data
+    conclusion_table = Table(conclusion_table_data, colWidths=[80, 420])
+    conclusion_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d9e6f2")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),
+        ("ALIGN", (1, 1), (1, -1), "LEFT"),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+        ("TOPPADDING", (0, 1), (-1, -1), 4),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BOX", (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    story.append(conclusion_table)
+    story.append(Spacer(1, 8))
+    
+    # Switch to Landscape template for Page 2
+    # CRITICAL: NextPageTemplate must be called BEFORE PageBreak to switch to landscape
+    story.append(NextPageTemplate('landscape'))
+    story.append(PageBreak())  # This creates Page 2 with landscape template
+    
+    # ==================== PAGE 2: V1-V6 LEADS + LEAD II (LANDSCAPE MODE) ====================
+    
+    print("📊 Creating master drawing with V1-V6 leads (2 columns) + Lead II (bottom) in LANDSCAPE...")
+    
+    # Landscape A4 frame dimensions (landscape_width - 40, landscape_height - 40)
+    # A4 landscape: 842 x 595, minus reduced margins (20 each side) = 802 x 555
+    total_width = 780  # Fits in landscape frame (802 - margin)
+    total_height = 540  # Height for patient info and graphs
+    master_drawing = Drawing(total_width, total_height)
+    
+    # Load saved ECG data to get V1-V6 leads
+    saved_ecg_data = None
+    
+    # Priority 1: Use provided ecg_data_file if available
+    if ecg_data_file and os.path.exists(ecg_data_file):
+        try:
+            with open(ecg_data_file, 'r') as f:
+                saved_ecg_data = json.load(f)
+        except Exception as e:
+            print(f"⚠️ Could not load provided ECG data file: {e}")
+    
+    # Priority 2: Find latest ECG data file if no file was provided
+    if not saved_ecg_data:
+        ecg_data_dir = os.path.join(reports_dir, 'ecg_data')
+        if os.path.exists(ecg_data_dir):
+            ecg_files = [f for f in os.listdir(ecg_data_dir) if f.startswith('ecg_data_') and f.endswith('.json')]
+            if ecg_files:
+                ecg_files.sort(reverse=True)  # Latest first
+                latest_file = os.path.join(ecg_data_dir, ecg_files[0])
+                try:
+                    with open(latest_file, 'r') as f:
+                        saved_ecg_data = json.load(f)
+                except Exception as e:
+                    print(f"⚠️ Could not load ECG data: {e}")
+    
+    # Lead-specific ADC per box multipliers (from main report)
+    adc_per_box_config = {
+        'V1': 5500.0,
+        'V2': 5500.0,
+        'V3': 5500.0,
+        'V4': 7586.0,
+        'V5': 7586.0,
+        'V6': 8209.0,
+        'II': 4955.0,
+    }
+    
+    # Reuse reportlab mm unit locally for clarity
+    mm_unit = mm
+    
+    # Function to add grid lines to a drawing area
+    def add_grid_lines(drawing, x_pos, y_pos, width, height):
+        """Add ECG grid lines (major and minor)"""
+        box_width_points = 5.0 * mm_unit  # 5mm per major box
+        minor_box_width = 1.0 * mm_unit  # 1mm per minor box
+        
+        # Major grid lines (every 5mm)
+        major_color = colors.HexColor("#FF0000")  # Red for major lines
+        minor_color = colors.HexColor("#FF9999")  # Light red for minor lines
+        
+        # Vertical major lines (every 5mm)
+        num_major_x = int(width / box_width_points) + 1
+        for i in range(num_major_x):
+            x = x_pos + (i * box_width_points)
+            if x <= x_pos + width:
+                line = Line(x, y_pos, x, y_pos + height, 
+                          strokeColor=major_color, strokeWidth=0.5)
+                drawing.add(line)
+        
+        # Vertical minor lines (every 1mm)
+        num_minor_x = int(width / minor_box_width) + 1
+        for i in range(num_minor_x):
+            x = x_pos + (i * minor_box_width)
+            if x <= x_pos + width and i % 5 != 0:  # Skip major lines
+                line = Line(x, y_pos, x, y_pos + height,
+                          strokeColor=minor_color, strokeWidth=0.3)
+                drawing.add(line)
+        
+        # Horizontal major lines (every 5mm)
+        num_major_y = int(height / box_width_points) + 1
+        for i in range(num_major_y):
+            y = y_pos + (i * box_width_points)
+            if y <= y_pos + height:
+                line = Line(x_pos, y, x_pos + width, y,
+                          strokeColor=major_color, strokeWidth=0.5)
+                drawing.add(line)
+        
+        # Horizontal minor lines (every 1mm)
+        num_minor_y = int(height / minor_box_width) + 1
+        for i in range(num_minor_y):
+            y = y_pos + (i * minor_box_width)
+            if y <= y_pos + height and i % 5 != 0:  # Skip major lines
+                line = Line(x_pos, y, x_pos + width, y,
+                          strokeColor=minor_color, strokeWidth=0.3)
+                drawing.add(line)
+    
+    # Function to create ECG drawing for a lead
+    def create_lead_drawing(lead_name, lead_data, x_pos, y_pos, width, height):
+        """Create ECG drawing for a single lead; returns (ecg_path, notch_path, dotted_path)"""
+        if lead_data is None or len(lead_data) == 0 or width <= 0:
+            return None
+        
+        # Get lead-specific ADC per box multiplier
+        adc_per_box_multiplier = adc_per_box_config.get(lead_name, 5500.0)
+        
+        # Convert to numpy array
+        adc_data = np.array(lead_data, dtype=float)
+                
+        # Limit data to fit width (downsample if needed)
+        max_samples = int(width / (1.0 * mm_unit))  # Approximate samples based on width
+        if len(adc_data) > max_samples:
+            indices = np.linspace(0, len(adc_data) - 1, max_samples, dtype=int)
+            adc_data = adc_data[indices]
+        
+        # Apply baseline 2000
+        baseline_adc = 2000.0
+        data_mean = np.mean(adc_data)
+        if abs(data_mean - 2000.0) < 500:
+            centered_adc = adc_data - baseline_adc
+        else:
+            centered_adc = adc_data
+        
+        # Calculate ADC per box
+        adc_per_box = adc_per_box_multiplier / max(1e-6, wave_gain_mm_mv)
+                
+        # Convert to boxes offset
+        boxes_offset = centered_adc / adc_per_box
+        
+        # Calculate Y positions
+        center_y = y_pos + (height / 2.0)
+        box_height_points = 5.0 * mm_unit
+        ecg_normalized = center_y + (boxes_offset * box_height_points)
+                
+        # Limit plotting width to 29 boxes (≈145mm = 165mm - 20mm) for V1/V2/V3; Lead II stays full width
+        box_width_points = 5.0 * mm_unit
+        max_plot_width = 29.0 * box_width_points  # Reduced from 33 boxes (165mm) to 29 boxes (145mm) - 20mm less
+        if lead_name in ["V1", "V2", "V3"]:
+            ecg_width = max_plot_width  # force 29-box width for strips (145mm)
+        else:
+            ecg_width = width
+        if ecg_width <= 0:
+            return None
+        t = np.linspace(x_pos, x_pos + ecg_width, len(adc_data))
+        
+        # Draw ECG waveform
+        ecg_path = Path(fillColor=None, 
+                       strokeColor=colors.HexColor("#000000"), 
+                       strokeWidth=0.4,
+                       strokeLineCap=1,
+                       strokeLineJoin=1)
+        
+        ecg_path.moveTo(t[0], ecg_normalized[0])
+        for i in range(1, len(t)):
+            ecg_path.lineTo(t[i], ecg_normalized[i])
+                
+        # Calibration notch (only for V1, V2, V3, II)
+        notch_path = None
+        if lead_name in ["V1", "V2", "V3", "II"]:
+            notch_width_mm = 5.0   # width 5mm
+            notch_height_mm = 10.0 # height 10mm
+            notch_width = notch_width_mm * mm_unit
+            notch_height = notch_height_mm * mm_unit
+            
+            # Place notch inside first box, shifted left (near first-half)
+            first_box_width = 5.0 * mm_unit
+            notch_x = x_pos + (first_box_width * -1.5)
+            notch_y_base = center_y
+            
+            notch_path = Path(
+                fillColor=None,
+                strokeColor=colors.HexColor("#000000"),
+                strokeWidth=0.8,
+                strokeLineCap=1,
+                strokeLineJoin=0
+            )
+            notch_path.moveTo(notch_x, notch_y_base)
+            notch_path.lineTo(notch_x, notch_y_base + notch_height)
+            notch_path.lineTo(notch_x + notch_width, notch_y_base + notch_height)
+            notch_path.lineTo(notch_x + notch_width, notch_y_base)
+            # Small forward tick to the right (extra 2mm) for clearer notch end
+            notch_path.lineTo(notch_x + notch_width + (2.0 * mm_unit), notch_y_base)
+        
+        # Dotted continuation / markers
+        dotted_path = None
+        if lead_name in ["V1", "V2", "V3"]:
+            # Vertical dotted marker at end of graph (after 29 boxes = 145mm)
+            dotted_path = Path(
+                fillColor=None,
+                strokeColor=colors.HexColor("#000000"),
+                strokeWidth=0.4,
+                strokeLineCap=1,
+                strokeLineJoin=1,
+                strokeDashArray=[2, 3]
+            )
+            marker_x = x_pos + (29.0 * box_width_points)  # Mark at end of 29-box width
+            dotted_path.moveTo(marker_x, y_pos)
+            dotted_path.lineTo(marker_x, y_pos + height)
+        elif width > ecg_width:
+            dotted_path = Path(
+                fillColor=None,
+                strokeColor=colors.HexColor("#000000"),
+                strokeWidth=0.4,
+                strokeLineCap=1,
+                strokeLineJoin=1,
+                strokeDashArray=[2, 3]
+            )
+            dotted_path.moveTo(x_pos + ecg_width, center_y)
+            dotted_path.lineTo(x_pos + width, center_y)
+        
+        return ecg_path, notch_path, dotted_path
+    
+    # Layout configuration
+    # Left column: V1, V2, V3 (stacked vertically)
+    # Right column: V4, V5, V6 (stacked vertically)
+    # Bottom: Lead II (full width)
+    
+    lead_height = 60  # Height per lead
+    lead_spacing = 10  # Spacing between leads
+    column_width = 360  # Width for each column
+    left_col_x = 0    # Further left
+    right_col_x = 360  # Further left
+    
+    # Y positions for V1-V6 (starting from top, below patient info)
+    v_leads_y_start = 400  # Shifted down to sit lower on the page
+    v_leads_y_positions = [
+        v_leads_y_start,  # V1/V4
+        v_leads_y_start - (lead_height + lead_spacing),  # V2/V5
+        v_leads_y_start - 2 * (lead_height + lead_spacing),  # V3/V6
+    ]
+    
+    # Lead II position (bottom, full width)
+    lead_ii_y = 150
+    lead_ii_height = 80
+    lead_ii_x = 0
+    lead_ii_width = total_width - 10  # Wider span after shifting left
+    
+    # Get V1-V6 data from saved ECG data
+    v_leads_data = {}
+    if saved_ecg_data and 'leads' in saved_ecg_data:
+        for lead_name in ['V1', 'V2', 'V3', 'V4', 'V5', 'V6']:
+            if lead_name in saved_ecg_data['leads']:
+                lead_data = saved_ecg_data['leads'][lead_name]
+                if isinstance(lead_data, list) and len(lead_data) > 0:
+                    v_leads_data[lead_name] = np.array(lead_data, dtype=float)
+                elif isinstance(lead_data, np.ndarray) and len(lead_data) > 0:
+                    v_leads_data[lead_name] = lead_data
+    
+    # Draw V1-V6 leads
+    left_leads = ['V1', 'V2', 'V3']
+    right_leads = ['V4', 'V5', 'V6']
+    
+    for idx, lead_name in enumerate(left_leads):
+        y_pos = v_leads_y_positions[idx]
+        if lead_name in v_leads_data:
+            graph_x = left_col_x + 10 - (4 * mm_unit)  # shift 4mm further left
+            graph_y = y_pos
+            graph_width = column_width - 40
+            
+            # Add lead label
+            lead_label = String(left_col_x + 5, y_pos + lead_height - 10, lead_name,
+                               fontSize=10, fontName="Helvetica-Bold", fillColor=colors.black)
+            master_drawing.add(lead_label)
+            
+            # Create and add ECG drawing
+            result = create_lead_drawing(lead_name, v_leads_data[lead_name],
+                                          graph_x, graph_y, graph_width, lead_height)
+            if result:
+                ecg_path, notch_path, dotted_path = result
+                if ecg_path:
+                    master_drawing.add(ecg_path)
+                if notch_path:
+                    master_drawing.add(notch_path)
+                if dotted_path:
+                    master_drawing.add(dotted_path)
+    
+    # Shift V4, V5, V6 graphs and labels 20mm to the right
+    v4_v5_v6_shift = 20.0 * mm_unit  # 20mm shift to the right
+    
+    for idx, lead_name in enumerate(right_leads):
+        y_pos = v_leads_y_positions[idx]
+        if lead_name in v_leads_data:
+            # V4, V5, V6 should be in right column, shifted 20mm to the right
+            graph_x = right_col_x + 10 - (4 * mm_unit) + v4_v5_v6_shift  # Shift 20mm to the right
+            graph_y = y_pos
+            graph_width = column_width - 40 + (27.0 * mm_unit)  
+            
+            # Add lead label, also shifted 20mm to the right
+            lead_label_x = right_col_x + 5 + v4_v5_v6_shift  # Shift label 20mm to the right
+            lead_label = String(lead_label_x, y_pos + lead_height - 10, lead_name,
+                               fontSize=10, fontName="Helvetica-Bold", fillColor=colors.black)
+            master_drawing.add(lead_label)
+            
+            # Create and add ECG drawing
+            result = create_lead_drawing(lead_name, v_leads_data[lead_name],
+                                          graph_x, graph_y, graph_width, lead_height)
+            if result:
+                ecg_path, notch_path, dotted_path = result
+                if ecg_path:
+                    master_drawing.add(ecg_path)
+                if notch_path:
+                    master_drawing.add(notch_path)
+                if dotted_path:
+                    master_drawing.add(dotted_path)
+                
+    # Draw Lead II at bottom (full width)
+    if lead_ii_data and len(lead_ii_data) > 0:
+        # Get first segment of Lead II data (first 10 seconds or available)
+        lead_ii_values = np.array([d['value'] for d in lead_ii_data[:5500]], dtype=float)
+        
+        graph_x = lead_ii_x + 10 - (4 * mm_unit)  # shift 4mm further left
+        graph_y = lead_ii_y
+        graph_width = lead_ii_width - 40
+        
+        # Add Lead II label
+        lead_ii_label = String(lead_ii_x + 5, lead_ii_y + lead_ii_height - 10, "Lead II",
+                              fontSize=10, fontName="Helvetica-Bold", fillColor=colors.black)
+        master_drawing.add(lead_ii_label)
+        
+        # Create and add Lead II ECG drawing
+        result = create_lead_drawing('II', lead_ii_values,
+                                      graph_x, graph_y, graph_width, lead_ii_height)
+        if result:
+            ecg_path, notch_path, dotted_path = result
+            if ecg_path:
+                master_drawing.add(ecg_path)
+            if notch_path:
+                master_drawing.add(notch_path)
+            if dotted_path:
+                master_drawing.add(dotted_path)
+        print(f"✅ Added Lead II graph at bottom ({len(lead_ii_values)} samples)")
+                
+    successful_graphs = len([l for l in left_leads + right_leads if l in v_leads_data]) + (1 if lead_ii_data else 0)
+    print(f"✅ Created {successful_graphs} ECG graphs: V1-V6 ({len([l for l in left_leads + right_leads if l in v_leads_data])}) + Lead II")
+    
+    # ==================== ADD PATIENT INFO TO PAGE 2 (LANDSCAPE MODE - POSITIONED PROPERLY) ====================
+    
+    # LEFT SIDE: Patient Info (SHIFTED LEFT + UP)
+    patient_name_label = String(-15, 545, f"Name: {full_name}",  # Shifted UP: 535 → 545
+                                fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(patient_name_label)
+    
+    patient_age_label = String(-15, 525, f"Age: {age}",  # Shifted UP: 515 → 525
+                               fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(patient_age_label)
+    
+    patient_gender_label = String(-15, 505, f"Gender: {gender}",  # Shifted UP: 495 → 505
+                                  fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(patient_gender_label)
+    
+    # RIGHT SIDE: Date/Time (shifted UP by 20 points - aligned with patient info)
+    if date_time_str:
+        parts = date_time_str.split()
+        date_part = parts[0] if parts else ""
+        time_part = parts[1] if len(parts) > 1 else ""
+    else:
+        date_part, time_part = "____", "____"
+    
+    date_label = String(640, 515, f"Date: {date_part}",  # Shifted UP by 27: 508→535 (aligned with Name)
+                       fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(date_label)
+    
+    time_label = String(640,  500, f"Time: {time_part}",  # Shifted UP by 27: 493→520
+                       fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(time_label)
+    
+    # ==================== VITAL PARAMETERS (LANDSCAPE MODE - 2 COLUMNS SIDE BY SIDE) ====================
+    # Page 2: Use Hyperkalemia-specific average HR (5 minutes), but keep other metrics from metrics.json
+    # HR should match Page 1 (Hyperkalemia-specific average from 5 minutes)
+    if 'original_metrics_from_json' in locals() and original_metrics_from_json:
+        # Use Hyperkalemia-specific average HR for Page 2 (same as Page 1)
+        if 'hyperkalemia_specific_bpm' in locals() and hyperkalemia_specific_bpm > 0:
+            HR = hyperkalemia_specific_bpm  # Hyperkalemia-specific average (5 minutes)
+        else:
+            HR = original_metrics_from_json.get('HR', 0)
+        
+        PR = original_metrics_from_json.get('PR', 0)
+        QRS = original_metrics_from_json.get('QRS', 0)
+        QT = original_metrics_from_json.get('QT', 0)
+        QTc = original_metrics_from_json.get('QTc', 0)
+        ST = original_metrics_from_json.get('ST', 0)
+        
+        # Calculate RR from Hyperkalemia-specific HR
+        if HR > 0:
+            RR = int(60000 / HR)
+        else:
+            RR = original_metrics_from_json.get('RR_ms', 0)
+        
+        print(f"📊 Page 2 (ECG waves): HR={HR} bpm (Hyperkalemia-specific average, 5 minutes) - Same as Page 1")
+        print(f"   Other metrics from metrics.json: PR={PR}, QRS={QRS}, QT={QT}, QTc={QTc}, ST={ST}, RR={RR}")
+    else:
+        # Fallback to data values if original_metrics_from_json not available
+        if 'hyperkalemia_specific_bpm' in locals() and hyperkalemia_specific_bpm > 0:
+            HR = hyperkalemia_specific_bpm
+        else:
+            HR = data.get('HR_avg', 0)
+        PR = data.get('PR', 0)
+        QRS = data.get('QRS', 0)
+        QT = data.get('QT', 0)
+        QTc = data.get('QTc', 0)
+        ST = data.get('ST', 0)
+        RR = int(60000 / HR) if HR and HR > 0 else 0
+        print(f"⚠️ Page 2 (ECG waves): Using fallback values - HR={HR} bpm")
+    
+    # LEFT COLUMN (130, y) - HR, PR, QRS, RR (SHIFTED UP BY 20 POINTS)
+    hr_label = String(130, 548, f"HR    : {HR} bpm", fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(hr_label)
+    
+    pr_label = String(130, 528, f"PR    : {PR} ms", fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(pr_label)
+    
+    qrs_label = String(130, 508, f"QRS : {QRS} ms", fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(qrs_label)
+    
+    rr_label = String(130, 490, f"RR    : {RR} ms", fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(rr_label)
+    
+    # RIGHT COLUMN (350, y) - QT, QTc, ST, Settings (SHIFTED UP BY 20 POINTS)
+    qt_label = String(350, 548, f"QT     : {QT} ms", fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(qt_label)
+    
+    qtc_label = String(350, 528, f"QTc   : {QTc} ms", fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(qtc_label)
+    
+    st_label = String(350, 508, f"ST     : {ST} ms", fontSize=10, fontName="Helvetica", fillColor=colors.black)
+    master_drawing.add(st_label)
+    
+    
+    master_drawing.add(String(
+        350, 490,
+        f"{wave_speed_mm_s} mm/s   {filter_band}   AC : {ac_frequency}Hz   {wave_gain_mm_mv} mm/mV",
+        fontSize=10, fontName="Helvetica", fillColor=colors.black
+    ))
+    
+    # ==================== DOCTOR INFO (LANDSCAPE MODE - POSITIONED INSIDE DRAWING) ====================
+    
+    doctor = doctor or ""
+    label_text = "Doctor Name: "
+    
+    doctor_name_label = String(10, 50, "Doctor Name: ",  # X=10 (visible, inside drawing)
+                              fontSize=10, fontName="Helvetica-Bold", fillColor=colors.black)
+    master_drawing.add(doctor_name_label)
+    
+    if doctor:
+        value_x = 10 + stringWidth(label_text, "Helvetica-Bold", 10) + 6
+        doctor_name_value = String(value_x, 50, doctor,  # Starts after "Doctor Name: " label
+                                fontSize=10, fontName="Helvetica", fillColor=colors.black)
+        master_drawing.add(doctor_name_value)
+    
+    doctor_sign_label = String(10, 35, "Doctor Sign: ",  # X=10 (visible, inside drawing)
+                              fontSize=10, fontName="Helvetica-Bold", fillColor=colors.black)
+    master_drawing.add(doctor_sign_label)
+    
+    # ==================== CONCLUSION BOX ON PAGE 2 (LANDSCAPE MODE - ADJUSTED FOR 780 WIDTH) ====================
+    
+    conclusion_y_start = 45.0  # Positioned to avoid overlap with graphs
+    conclusion_x_start = 280  # Shifted right for better positioning
+    
+    # Conclusion box (WIDER for landscape - adjusted for 780 total width)
+    conclusion_box = Rect(conclusion_x_start, conclusion_y_start - 55, 490, 75,  # Bottom at -10, top at 65
+                         fillColor=None, strokeColor=colors.black, strokeWidth=1.5)
+    master_drawing.add(conclusion_box)
+    
+    # Conclusion header (CENTER adjusted for new X position and width)
+    conclusion_header = String(conclusion_x_start + 245, conclusion_y_start + 8, "✦ CONCLUSION ✦", 
+                              fontSize=9, fontName="Helvetica-Bold",
+                              fillColor=colors.HexColor("#2c3e50"),
+                              textAnchor="middle")
+    master_drawing.add(conclusion_header)
+    
+    # Draw conclusions in the box (LANDSCAPE - adjusted for 520 width box)
+    conclusion_rows = []
+    for i in range(0, len(filtered_conclusions), 2):
+        row_conclusions = filtered_conclusions[i:i+2]
+        conclusion_rows.append(row_conclusions)
+    
+    row_spacing = 8
+
+    
+    start_y = conclusion_y_start - 10
+    conclusion_num = 1
+    
+    for row_idx, row_conclusions in enumerate(conclusion_rows):
+        row_y = start_y - (row_idx * row_spacing)
+        for col_idx, conclusion in enumerate(row_conclusions):
+            # More space in landscape, so can show longer conclusions
+            display_conclusion = conclusion[:42] + "..." if len(conclusion) > 42 else conclusion
+            conc_text = f"{conclusion_num}. {display_conclusion}"
+            x_pos = conclusion_x_start + 10 + (col_idx * 230)  # Adjusted: start from box x + margin
+            conc = String(x_pos, row_y, conc_text, 
+                         fontSize=9, fontName="Helvetica", fillColor=colors.black)
+            master_drawing.add(conc)
+            conclusion_num += 1
+    
+    print(f" Added Patient Info, Vital Parameters, {len(filtered_conclusions)} Conclusions to Hyperkalemia report")
+    
+    # Add master drawing to story (NO spacer to avoid creating 3rd page)
+    story.append(master_drawing)
+    # story.append(Spacer(1, 15))  # REMOVED - was creating unwanted 3rd page
+    
+    print(f"📊 Added master drawing with V1-V6 leads + Lead II graph")
+    print(f"📊 Story contains {len(story)} elements before PDF build")
+    
+    # Build PDF (2 pages only: Portrait page 1, Landscape page 2)
+    doc.build(story)
+    print(f"✅ Hyperkalemia ECG Report generated: {filename}")
+    print(f"   📄 Page 1: Patient Details + Observation + Conclusion (Portrait)")
+    print(f"   📄 Page 2: V1-V6 Leads (2 columns) + Lead II (bottom) (Landscape)")
+    
+    return filename
+
+
+# ==================== END OF Hyperkalemia ECG REPORT GENERATION ====================

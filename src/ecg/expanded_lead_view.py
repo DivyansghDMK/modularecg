@@ -65,6 +65,23 @@ class PQRSTAnalyzer:
         except:
             return signal
     
+
+    @staticmethod
+    def remove_baseline_wander(signal, fs, window_sec=0.6):
+        """
+        Remove slow baseline wander for display by subtracting a moving average
+        trend. Keeps the waveform centered without altering morphology.
+        """
+        try:
+            window = max(3, int(window_sec * fs))
+            if len(signal) < window:
+                return signal
+            trend = np.convolve(signal, np.ones(window) / float(window), mode="same")
+            return signal - trend
+        except Exception as e:
+            print(f"⚠️ Baseline wander removal failed: {e}")
+            return signal
+
     def _detect_r_peaks(self, signal):
         """Detect R peaks using Pan-Tompkins algorithm"""
         try:
@@ -988,8 +1005,9 @@ class ExpandedLeadView(QDialog):
             return
         
         time = np.arange(len(self.ecg_data)) / self.sampling_rate
-        # Plot at 1.0x to establish baseline
-        scaled = self.ecg_data * self.display_gain * 1.0  # Use 1.0x for baseline
+        # Plot at 1.0x to establish baseline with wander removed for display stability
+        scaled_raw = self.ecg_data * self.display_gain * 1.0  # Use 1.0x for baseline
+        scaled = PQRSTAnalyzer.remove_baseline_wander(scaled_raw, self.sampling_rate, window_sec=0.6)
         
         # Calculate and store the baseline (mean) for proper zooming
         self.signal_baseline = np.mean(scaled)
@@ -1207,8 +1225,11 @@ class ExpandedLeadView(QDialog):
             window_signal = self.ecg_data[start_idx:end_idx]
             time = np.arange(start_idx, end_idx) / self.sampling_rate
             base_scaled = window_signal * self.display_gain
-            self.signal_baseline = np.mean(base_scaled)
-            scaled = self.signal_baseline + (base_scaled - self.signal_baseline) * self.amplification
+            baseline_free = PQRSTAnalyzer.remove_baseline_wander(
+                base_scaled, self.sampling_rate, window_sec=0.6
+            )
+            self.signal_baseline = np.mean(baseline_free)
+            scaled = self.signal_baseline + (baseline_free - self.signal_baseline) * self.amplification
             
             # Determine y-limits once based on entire dataset for consistent scaling
             if self.fixed_ylim is None and len(self.ecg_data) > 0:

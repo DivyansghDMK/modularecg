@@ -19,8 +19,10 @@ import os
 import json
 import matplotlib.image as mpimg
 import time
+import datetime
 from dashboard.chatbot_dialog import ChatbotDialog
 from utils.settings_manager import SettingsManager
+from utils.localization import translate_text
 from utils.crash_logger import get_crash_logger, CrashLogDialog
 from dashboard.admin_reports import AdminLoginDialog, AdminReportsDialog
 
@@ -147,6 +149,10 @@ class Dashboard(QWidget):
         super().__init__()
         # Settings for wave speed/gain
         self.settings_manager = SettingsManager()
+        self.current_language = self.settings_manager.get_setting("system_language", "en")
+        self.heartbeat_sound_enabled = (
+            str(self.settings_manager.get_setting("system_beat_vol", "on")).lower() == "on"
+        )
         
         # Initialize crash logger
         self.crash_logger = get_crash_logger()
@@ -183,6 +189,9 @@ class Dashboard(QWidget):
         # Initialize mode flags
         self.dark_mode = False
         self.medical_mode = False
+        
+        # Flag to track if we've warned about missing ECG data (to avoid spam)
+        self._ecg_data_warning_shown = False
         
         self.setWindowTitle("ECG Monitor Dashboard")
         self.setGeometry(100, 100, 1300, 900)
@@ -334,6 +343,8 @@ class Dashboard(QWidget):
         self.sign_btn.clicked.connect(self.handle_sign_out)
         self.sign_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         header.addWidget(self.sign_btn)
+
+        self.apply_language(self.current_language)
         
         dashboard_layout.addLayout(header)
 
@@ -355,6 +366,8 @@ class Dashboard(QWidget):
             greeting = "Good Evening"
         
         # Show full name if available, otherwise username
+
+         
         display_name = self.user_details.get('full_name', username) or username or 'User'
         user_info_lines = [f"<span style='font-size:18pt;font-weight:bold;'>{greeting}, {display_name}</span>"]
         
@@ -367,6 +380,7 @@ class Dashboard(QWidget):
                 details.append(f"Gender: {self.user_details.get('gender')}")
             if details:
                 user_info_lines.append(f"<span style='color:#666; font-size:11pt;'>{' | '.join(details)}</span>")
+                
         
         user_info_lines.append("<span style='color:#888;'>Welcome to your ECG dashboard</span>")
         
@@ -376,18 +390,40 @@ class Dashboard(QWidget):
         greet_row.addWidget(greet)
         greet_row.addStretch()
         
-        date_btn = QPushButton("ECG Lead Test 12")
-        date_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 16px; padding: 8px 24px;")
-        date_btn.clicked.connect(self.go_to_lead_test)
-        date_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        greet_row.addWidget(date_btn)
+        # History button (orange dark suede, left of Hyperkalemia)
+        self.history_btn = QPushButton("History")
+        self.history_btn.setStyleSheet("background: #b35900; color: white; border-radius: 16px; padding: 8px 24px;")
+        self.history_btn.clicked.connect(self.open_history_window)
+        self.history_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        greet_row.addWidget(self.history_btn)
+
+        # Hyperkalemia Test button (orange suede color, right of History, left of HRV Test)
+        self.hyperkalemia_test_btn = QPushButton("Hyperkalemia Test")
+        self.hyperkalemia_test_btn.setStyleSheet("background: #d2691e; color: white; border-radius: 16px; padding: 8px 24px;")
+        self.hyperkalemia_test_btn.clicked.connect(self.open_hyperkalemia_test)
+        self.hyperkalemia_test_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        greet_row.addWidget(self.hyperkalemia_test_btn)
+        
+        # HRV Test button (red color, left of ECG Lead Test 12)
+        self.hrv_test_btn = QPushButton("HRV Test")
+        self.hrv_test_btn.setStyleSheet("background: #dc3545; color: white; border-radius: 16px; padding: 8px 24px;")
+        self.hrv_test_btn.clicked.connect(self.open_hrv_test)
+        self.hrv_test_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.hrv_test_btn.setVisible(True)
+        greet_row.addWidget(self.hrv_test_btn)
+        
+        self.date_btn = QPushButton("ECG Lead Test 12")
+        self.date_btn.setStyleSheet("background: #ff6600; color: white; border-radius: 16px; padding: 8px 24px;")
+        self.date_btn.clicked.connect(self.go_to_lead_test)
+        self.date_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        greet_row.addWidget(self.date_btn)
 
         # --- Add Chatbot Button ---
-        chatbot_btn = QPushButton("AI Chatbot")
-        chatbot_btn.setStyleSheet("background: #2453ff; color: white; border-radius: 16px; padding: 8px 24px;")
-        chatbot_btn.clicked.connect(self.open_chatbot_dialog)
-        chatbot_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        greet_row.addWidget(chatbot_btn)
+        self.chatbot_btn = QPushButton("AI Chatbot")
+        self.chatbot_btn.setStyleSheet("background: #2453ff; color: white; border-radius: 16px; padding: 8px 24px;")
+        self.chatbot_btn.clicked.connect(self.open_chatbot_dialog)
+        self.chatbot_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        greet_row.addWidget(self.chatbot_btn)
 
         dashboard_layout.addLayout(greet_row)
 
@@ -402,16 +438,16 @@ class Dashboard(QWidget):
         grid = QGridLayout(grid_widget)
         grid.setSpacing(20)
         
-        # --- Heart Rate Card ---
+        # --- Heart Rate Card --- 
         heart_card = QFrame()
         heart_card.setStyleSheet("background: white; border-radius: 16px;")
         heart_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         heart_layout = QVBoxLayout(heart_card)
         
-        heart_label = QLabel("Live Heart Rate Overview")
-        heart_label.setFont(QFont("Arial", 16, QFont.Bold))
-        heart_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        heart_layout.addWidget(heart_label)
+        self.heart_label = QLabel("Live Heart Rate Overview")
+        self.heart_label.setFont(QFont("Arial", 16, QFont.Bold))
+        self.heart_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        heart_layout.addWidget(self.heart_label)
         
         heart_img = QLabel()
         # Use portable path for the heart image asset
@@ -479,9 +515,11 @@ class Dashboard(QWidget):
             else:
                 print("⚠️ QSound not available - heartbeat sound disabled")
                 self.heartbeat_sound = None
+                self.heartbeat_sound_enabled = False
         except Exception as e:
             print(f"⚠️ Could not load heartbeat sound: {e}")
             self.heartbeat_sound = None
+            self.heartbeat_sound_enabled = False
         
         # --- ECG Recording (Animated Chart) ---
         ecg_card = QFrame()
@@ -489,10 +527,10 @@ class Dashboard(QWidget):
         ecg_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         ecg_layout = QVBoxLayout(ecg_card)
         
-        ecg_label = QLabel("ECG Recording")
-        ecg_label.setFont(QFont("Arial", 14, QFont.Bold))
-        ecg_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        ecg_layout.addWidget(ecg_label)
+        self.ecg_label = QLabel("ECG Recording")
+        self.ecg_label.setFont(QFont("Arial", 14, QFont.Bold))
+        self.ecg_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        ecg_layout.addWidget(self.ecg_label)
         
         self.ecg_canvas = MplCanvas(width=4, height=2)
         self.ecg_canvas.axes.set_facecolor("#eee")
@@ -516,10 +554,10 @@ class Dashboard(QWidget):
         current_month = datetime.now().month
         current_year = datetime.now().year
         
-        visitors_label = QLabel(f"Visitors - Last 6 Months ({current_year})")
-        visitors_label.setFont(QFont("Arial", 14, QFont.Bold))
-        visitors_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        visitors_layout.addWidget(visitors_label)
+        self.visitors_label = QLabel(f"Visitors - Last 6 Months ({current_year})")
+        self.visitors_label.setFont(QFont("Arial", 14, QFont.Bold))
+        self.visitors_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        visitors_layout.addWidget(self.visitors_label)
         
         pie_canvas = MplCanvas(width=2.5, height=2.5)
         
@@ -695,8 +733,7 @@ class Dashboard(QWidget):
         except:
             pass  # No activated signal connected
         
-        # Disabled: No longer connect month/year navigation to custom dropdowns
-        # self.schedule_calendar.currentPageChanged.connect(self.on_calendar_page_changed)
+       
         
         schedule_layout.addWidget(self.schedule_calendar)
         grid.addWidget(schedule_card, 2, 0)
@@ -728,7 +765,16 @@ class Dashboard(QWidget):
         """)
         
         issue_layout.addWidget(self.conclusion_box)
-        
+        # Small footer box below the conclusion (~3 cm height)
+        self.conclusion_footer = QFrame()
+        self.conclusion_footer.setStyleSheet("background: #f7f7f7; border: none; border-radius: 10px;")
+        self.conclusion_footer.setFixedHeight(115)
+        self.conclusion_footer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        _footer_layout = QHBoxLayout(self.conclusion_footer)
+        _footer_layout.setContentsMargins(10, 8, 10, 8)
+        _footer_layout.addWidget(QLabel(""))
+        issue_layout.addWidget(self.conclusion_footer)
+
         grid.addWidget(issue_card, 2, 1, 1, 1)
 
         # Separate card for Additional Notes (outside Conclusion)
@@ -828,7 +874,7 @@ class Dashboard(QWidget):
             box.addWidget(lbl)
             box.addWidget(val)
             metrics_layout.addLayout(box)
-            self.metric_labels[key] = val  # Store reference for live update
+            self.metric_labels[key] = val  
         
         grid.addWidget(metrics_card, 0, 1, 1, 2)
         
@@ -890,6 +936,8 @@ class Dashboard(QWidget):
                     self.title = title
                     self.parent = parent
                     self.dashboard_callback = None
+                    # Initialize data structure with 12 leads (empty arrays)
+                    self.data = [[] for _ in range(12)]
                     layout = QVBoxLayout()
                     label = QLabel("ECG Test Page - Import Error")
                     label.setAlignment(Qt.AlignCenter)
@@ -922,8 +970,12 @@ class Dashboard(QWidget):
     def on_calendar_date_selected(self, qdate):
         try:
             self.reports_filter_date = qdate.toString("yyyy-MM-dd")
+            # Set flag to prevent automatic report opening when calendar is clicked
+            self._calendar_triggered = True
             self.refresh_recent_reports_ui(self.reports_filter_date)
+            self._calendar_triggered = False
         except Exception:
+            self._calendar_triggered = False
             self.refresh_recent_reports_ui()  # safe fallback
 
     def on_calendar_selection_changed(self):
@@ -1015,6 +1067,13 @@ class Dashboard(QWidget):
 
     def refresh_recent_reports_ui(self, filter_date=None):
         import os, json
+        
+        # CRITICAL FIX: Skip complete UI refresh when triggered by calendar  
+        # This prevents the mysterious popup from appearing
+        if getattr(self, '_calendar_triggered', False):
+            print(" BLOCKED: Skipping refresh_recent_reports_ui during calendar click to prevent popup")
+            return
+        
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         reports_dir = os.path.join(base_dir, "..", "reports")
         index_path = os.path.join(reports_dir, "index.json")
@@ -1082,6 +1141,9 @@ class Dashboard(QWidget):
 
             # Make label click select row and load parameters
             def _label_click_handler(_evt, p=path, w=cont):
+                # Skip if triggered by calendar (to prevent automatic actions)
+                if getattr(self, '_calendar_triggered', False):
+                    return
                 try:
                     self._select_report_row(w, p)
                 except Exception:
@@ -1091,6 +1153,9 @@ class Dashboard(QWidget):
 
             # Make entire row clickable to select and load parameters
             def _row_click_handler(_evt, p=path, w=cont):
+                # Skip if triggered by calendar (to prevent automatic actions)
+                if getattr(self, '_calendar_triggered', False):
+                    return
                 try:
                     self._select_report_row(w, p)
                 except Exception:
@@ -1120,12 +1185,12 @@ class Dashboard(QWidget):
             cont.enterEvent = _hover_enter
             cont.leaveEvent = _hover_leave
 
-            # Preserve selected row highlight on UI refresh
-            try:
-                if getattr(self, '_selected_report_path', None) and os.path.abspath(path) == os.path.abspath(self._selected_report_path):
-                    self._select_report_row(cont, path)
-            except Exception:
-                pass
+            # Preserve selected row highlight on UI refresh - DISABLED to prevent automatic selection on calendar date click
+            # try:
+            #     if getattr(self, '_selected_report_path', None) and os.path.abspath(path) == os.path.abspath(self._selected_report_path):
+            #         self._select_report_row(cont, path)
+            # except Exception:
+            #     pass
 
             self.reports_list_layout.addWidget(cont)
 
@@ -1134,8 +1199,13 @@ class Dashboard(QWidget):
 
     def open_report_file(self, path):
         import os, sys, subprocess
+        # Prevent automatic opening when triggered by calendar
+        if getattr(self, '_calendar_triggered', False):
+            print("🚫 Blocked automatic report opening from calendar click")
+            return
         if not os.path.exists(path):
             return
+        print(f"📂 Opening report: {path}")
         if sys.platform == 'darwin':
             subprocess.call(['open', path])
         elif sys.platform.startswith('linux'):
@@ -1170,7 +1240,13 @@ class Dashboard(QWidget):
 
     def load_metrics_into_parameters(self, report_path: str):
         import os, json
+        # Add debug output to track when this is called
+        print(f"📊 load_metrics_into_parameters called for: {os.path.basename(report_path)}")
         
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        reports_dir = os.path.join(base_dir, "..", "reports")
+        metrics_path = os.path.join(reports_dir, "metrics.json")
+
         line = "No metrics found for this report."
         try:
             # First try: look for JSON twin (ECG_Report_YYYYMMDD_HHMMSS.json next to .pdf)
@@ -1737,7 +1813,9 @@ class Dashboard(QWidget):
                 try:
                     # Validate ECG test page data structure
                     if not hasattr(self.ecg_test_page, 'data') or not self.ecg_test_page.data:
-                        print("❌ ECG test page has no data")
+                        if not self._ecg_data_warning_shown:
+                            print("❌ ECG test page has no data (using fallback wave)")
+                            self._ecg_data_warning_shown = True
                         return self._fallback_wave_update(frame)
                     
                     if len(self.ecg_test_page.data) <= 1:
@@ -2158,6 +2236,11 @@ class Dashboard(QWidget):
         import os
         # Import the simple function from ecg_report_generator
         from ecg.ecg_report_generator import generate_ecg_report
+        # History helper
+        try:
+            from dashboard.history_window import append_history_entry
+        except Exception:
+            append_history_entry = None
 
         print(" Starting PDF report generation...")
 
@@ -2433,30 +2516,21 @@ class Dashboard(QWidget):
         
         if filename:
             try:
-
-                patient = getattr(self, "patient_details", None)
-                if not patient:
-                    try:
-                        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-                        data_file = os.path.join(base_dir, "ecg_data.txt")
-                        if os.path.exists(data_file):
-                            with open(data_file, "r") as f:
-                                lines = [l for l in f.readlines() if l.strip()]
-                            if lines:
-                                last = lines[-1]
-                                parts = [x.strip() for x in last.split(",")]
-                                if len(parts) >= 5:
-                                    organisation, doctor, name, age, gender = parts[:5]
-                                    first, *rest = name.split()
-                                    patient = {
-                                        "first_name": first,
-                                        "last_name": " ".join(rest),
-                                        "age": age,
-                                        "gender": gender,
-                                        "doctor": doctor
-                                    }
-                    except Exception:
-                        patient = None
+                # Load patient details from centralized all_patients.json database
+                patient = None
+                try:
+                    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                    patients_db_file = os.path.join(base_dir, "all_patients.json")
+                    
+                    if os.path.exists(patients_db_file):
+                        with open(patients_db_file, "r") as jf:
+                            all_patients = json.load(jf)
+                            if all_patients.get("patients") and len(all_patients["patients"]) > 0:
+                                # Get the last patient (most recent)
+                                patient = all_patients["patients"][-1]
+                except Exception as e:
+                    print(f"⚠️ Error loading patient data: {e}")
+                    patient = None
 
                 # Always stamp current date/time from system
                 now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2511,7 +2585,27 @@ class Dashboard(QWidget):
                 ecg_data['machine_serial'] = self.user_details.get('serial_id', '') or os.getenv('MACHINE_SERIAL_ID', '')
 
                 # Generate the PDF with patient details
-                generate_ecg_report(filename, ecg_data, lead_img_paths, self, self.ecg_test_page, patient)
+                generate_ecg_report(
+                    filename,
+                    ecg_data,
+                    lead_img_paths,
+                    self,
+                    self.ecg_test_page,
+                    patient,
+                    log_history=False,
+                )
+
+                # After successful report generation, append to history (explicit)
+                try:
+                    # Ensure history helper is available
+                    if append_history_entry is None:
+                        from dashboard.history_window import append_history_entry as _ah
+                        append_history_entry = _ah
+                    if append_history_entry is not None:
+                        append_history_entry(patient, filename, report_type="12 Lead")
+                except Exception as hist_err:
+                    import traceback
+                    traceback.print_exc()
                 
                 QMessageBox.information(
                     self, 
@@ -2616,7 +2710,7 @@ class Dashboard(QWidget):
             self.last_beat_time = current_time
             
             # Play heartbeat sound with increased volume
-            if self.heartbeat_sound:
+            if self.heartbeat_sound and self.heartbeat_sound_enabled:
                 try:
                     # Try to set volume if available (some Qt versions support this)
                     if hasattr(self.heartbeat_sound, 'setVolume'):
@@ -2708,6 +2802,48 @@ class Dashboard(QWidget):
         except Exception as e:
             print(f"⚠️ Could not create heartbeat sound: {e}")
             self.heartbeat_sound = None
+
+    def set_heartbeat_sound_enabled(self, enabled):
+        """Enable or disable the audible heartbeat feedback."""
+        desired_state = str(enabled).lower() in ("on", "true", "1", "yes")
+        self.heartbeat_sound_enabled = desired_state
+        if not desired_state and self.heartbeat_sound:
+            try:
+                self.heartbeat_sound.stop()
+            except Exception as e:
+                print(f"⚠️ Unable to stop heartbeat sound: {e}")
+
+    def tr(self, text):
+        return translate_text(text, getattr(self, "current_language", "en"))
+
+    def apply_language(self, language=None):
+        if language:
+            self.current_language = language
+        translator = self.tr
+        if hasattr(self, 'date_btn') and self.date_btn:
+            self.date_btn.setText(translator("ECG Lead Test 12"))
+        if hasattr(self, 'chatbot_btn') and self.chatbot_btn:
+            self.chatbot_btn.setText(translator("AI Chatbot"))
+        if hasattr(self, 'heart_label') and self.heart_label:
+            self.heart_label.setText(translator("Live Heart Rate Overview"))
+        if hasattr(self, 'stress_label') and self.stress_label:
+            self.stress_label.setText(translator("Stress Level: --"))
+        if hasattr(self, 'hrv_label') and self.hrv_label:
+            self.hrv_label.setText(translator("Average Variability: --"))
+        if hasattr(self, 'ecg_label') and self.ecg_label:
+            self.ecg_label.setText(translator("ECG Recording"))
+        if hasattr(self, 'visitors_label') and self.visitors_label:
+            year = datetime.datetime.now().year
+            self.visitors_label.setText(translator("Visitors - Last 6 Months ({year})").format(year=year))
+        if hasattr(self, 'sign_btn') and self.sign_btn:
+            self.sign_btn.setText(translator("Sign Out"))
+
+    def on_settings_changed(self, key, value):
+        """Handle global settings pushed from the ECG menu."""
+        if key == "system_beat_vol":
+            self.set_heartbeat_sound_enabled(value)
+        elif key == "system_language":
+            self.apply_language(value)
     def handle_sign(self):
         if self.sign_btn.text() == "Sign In":
             dialog = SignInDialog(self)
@@ -2765,23 +2901,28 @@ class Dashboard(QWidget):
                     self._current_hrv = smoothed_hrv_ms
                     
                     # Stress level based on smoothed HRV
+                    # Use dashboard's translation method
+                    translator = self.tr
+                    
                     if smoothed_hrv_ms > 100:
-                        stress = "Low"
+                        stress = translator("Low")
                         stress_color = "#27ae60"
                     elif smoothed_hrv_ms > 50:
-                        stress = "Moderate"
+                        stress = translator("Moderate")
                         stress_color = "#f39c12"
                     else:
-                        stress = "High"
+                        stress = translator("High")
                         stress_color = "#e74c3c"
                     
-                    # Update labels
+                    # Update labels with translation
                     if hasattr(self, 'stress_label'):
-                        self.stress_label.setText(f"Stress Level: {stress}")
+                        stress_label_text = translator("Stress Level:")
+                        self.stress_label.setText(f"{stress_label_text} {stress}")
                         self.stress_label.setStyleSheet(f"font-size: 13px; color: {stress_color}; font-weight: bold;")
                     
                     if hasattr(self, 'hrv_label'):
-                        self.hrv_label.setText(f"Average Variability: {int(smoothed_hrv_ms)}ms")
+                        hrv_label_text = translator("Average Variability:")
+                        self.hrv_label.setText(f"{hrv_label_text} {int(smoothed_hrv_ms)}ms")
                         self.hrv_label.setStyleSheet("font-size: 13px; color: #666;")
         except Exception as e:
             print(f"⚠️ Error calculating stress/HRV: {e}")
@@ -3060,6 +3201,36 @@ class Dashboard(QWidget):
         except Exception:
             pass
         self.close()
+        
+    def open_hyperkalemia_test(self):
+        """Open Hyperkalemia Test window in a new window"""
+        try:
+            from ecg.hyperkalemia_test import HyperkalemiaTestWindow
+            hyperkalemia_window = HyperkalemiaTestWindow(parent=self)
+            hyperkalemia_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Hyperkalemia Test window: {str(e)}")
+            print(f"❌ Error opening Hyperkalemia test: {e}")
+
+    def open_history_window(self):
+        """Open the ECG report history window."""
+        try:
+            from dashboard.history_window import HistoryWindow
+            dlg = HistoryWindow(parent=self)
+            dlg.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "History", f"Failed to open history window: {e}")
+    
+    def open_hrv_test(self):
+        """Open HRV Test window in a new window"""
+        try:
+            from ecg.hrv_test import HRVTestWindow
+            hrv_window = HRVTestWindow(parent=self)
+            hrv_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open HRV Test window: {str(e)}")
+            print(f"❌ Error opening HRV test: {e}")   
+    
     def go_to_lead_test(self):
         if hasattr(self, 'ecg_test_page') and hasattr(self.ecg_test_page, 'update_metrics_frame_theme'):
             self.ecg_test_page.update_metrics_frame_theme(self.dark_mode, self.medical_mode)

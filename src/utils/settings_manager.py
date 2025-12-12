@@ -9,37 +9,20 @@ class SettingsManager:
             "wave_speed": "25",  # mm/s (default)
             "wave_gain": "10",   # mm/mV
             "lead_sequence": "Standard",
-            "sampling_mode": "Simultaneous",
-            "demo_function": "Off",
-            "storage": "SD",
             "serial_port": "Select Port",
             "baud_rate": "115200",
 
             # Printer Setup settings
-            "printer_analysis_result": "on",
             "printer_average_wave": "on",
-            "printer_rhythm_lead": "off",
-            "printer_sensitivity": "High",
 
             # Filter settings
-            "filter_low_pass": "50",
-            "filter_high_pass": "0.5",
-            "filter_notch": "60",
-            "filter_smoothing": "medium",
+            "filter_ac": "off",
+            "filter_emg": "150",
+            "filter_dft": "0.5",
 
             # System Setup settings
             "system_beat_vol": "on",
-            "system_alarm_vol": "on",
-            "system_key_tone": "on",
-            "system_auto_power_off": "10",
             "system_language": "en",
-            "system_date_format": "mmdd",
-
-            # Load Default settings
-            "load_default_ecg": "ecg",
-            "load_default_display": "display",
-            "load_default_system": "system",
-            "load_default_all": "keep",
 
             # Factory Maintain settings
             "factory_calibration": "skip",
@@ -73,6 +56,12 @@ class SettingsManager:
         self.settings[key] = value
         self.save_settings()
         print(f"Setting updated: {key} = {value}")  # Terminal verification
+
+    def reset_to_defaults(self):
+        """Restore every persisted setting to its original factory default."""
+        self.settings = self.default_settings.copy()
+        self.save_settings()
+        return self.settings.copy()
     
     def get_wave_speed(self):
         return float(self.get_setting("wave_speed"))
