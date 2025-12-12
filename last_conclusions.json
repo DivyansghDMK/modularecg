@@ -1,13 +1,12 @@
 {
-  "timestamp": "2025-12-12 15:39:45",
+  "timestamp": "2025-12-12 16:06:51",
   "findings": [
     "Tachycardia detected",
     "Normal PR interval",
     "Normal QRS duration",
-    "Low HRV"
+    "Moderate HRV"
   ],
   "recommendations": [
-    "Monitor symptoms, consider medical evaluation",
-    "Ensure adequate rest and stress management"
+    "Monitor symptoms, consider medical evaluation"
   ]
 }

@@ -163,7 +163,7 @@ class LoginRegisterDialog(QDialog):
         for path in possible_gif_paths:
             if os.path.exists(path):
                 gif_path = path
-                print(f"✅ Found v.gif at: {gif_path}")
+                print(f" Found v.gif at: {gif_path}")
                 break
         
         if gif_path and os.path.exists(gif_path):
@@ -173,7 +173,7 @@ class LoginRegisterDialog(QDialog):
                 if movie.isValid():
                     self.bg_label.setMovie(movie)
                     movie.start()
-                    print("✅ v.gif background started successfully")
+                    print(" v.gif background started successfully")
                 else:
                     print("❌ Invalid GIF file")
                     # Set fallback background

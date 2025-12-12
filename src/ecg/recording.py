@@ -9,9 +9,10 @@ import numpy as np
 from PyQt5.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve, QTimer, pyqtProperty, QRect
 from PyQt5.QtGui import QIntValidator
 from utils.settings_manager import SettingsManager
+from utils.localization import translate_text
 import os
 import matplotlib.pyplot as plt
-import pandas as pd 
+import pandas as pd
 import json 
 import sys
 
@@ -235,6 +236,10 @@ class SlidingPanel(QWidget):
             child = self.content_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+        
+        # Reset processed widgets tracking for new content
+        if hasattr(self, '_processed_widgets'):
+            self._processed_widgets.clear()
                 
     def slide_in(self, content_widget=None, title="Settings Panel"):
         
@@ -306,22 +311,63 @@ class SlidingPanel(QWidget):
                 self.make_children_responsive(content_widget)
     
     def make_children_responsive(self, parent_widget):
-        for child in parent_widget.findChildren(QWidget):
-            if hasattr(child, 'setFixedSize'):
-                # Adjust fixed sizes for smaller panels
-                if self.panel_width < 500:
-                    # Scale down fixed sizes for small panels
-                    if hasattr(child, 'width') and hasattr(child, 'height'):
-                        current_width = child.width()
-                        current_height = child.height()
-                        if current_width > 0 and current_height > 0:
-                            scale_factor = min(self.panel_width / 600, 1.0)
-                            new_width = max(int(current_width * scale_factor), 60)
-                            new_height = max(int(current_height * scale_factor), 25)
-                            child.setFixedSize(new_width, new_height)
+        """Make child widgets responsive, with proper error handling for touch screens"""
+        try:
+            # Track processed widgets to avoid infinite recursion
+            if not hasattr(self, '_processed_widgets'):
+                self._processed_widgets = set()
             
-            # Recursively process children
-            self.make_children_responsive(child)
+            for child in parent_widget.findChildren(QWidget):
+                # Skip if already processed
+                if id(child) in self._processed_widgets:
+                    continue
+                
+                # Mark as processed
+                self._processed_widgets.add(id(child))
+                
+                try:
+                    # Only process widgets that support setFixedSize (buttons, etc.)
+                    if hasattr(child, 'setFixedSize'):
+                        # Adjust fixed sizes for smaller panels
+                        if self.panel_width < 500:
+                            try:
+                                # Get current size safely (methods, not attributes)
+                                # Try to get size, handling cases where widget might not be initialized
+                                try:
+                                    current_width = child.width()
+                                    current_height = child.height()
+                                except (AttributeError, RuntimeError, TypeError):
+                                    # Fallback: try getting size from size() method
+                                    try:
+                                        size = child.size()
+                                        current_width = size.width() if size.width() > 0 else 0
+                                        current_height = size.height() if size.height() > 0 else 0
+                                    except (AttributeError, RuntimeError, TypeError):
+                                        # Widget not ready yet, skip it
+                                        current_width = 0
+                                        current_height = 0
+                                
+                                # Only resize if we have valid dimensions
+                                if current_width > 0 and current_height > 0:
+                                    scale_factor = min(self.panel_width / 600, 1.0)
+                                    new_width = max(int(current_width * scale_factor), 60)
+                                    new_height = max(int(current_height * scale_factor), 25)
+                                    child.setFixedSize(new_width, new_height)
+                            except (AttributeError, RuntimeError, TypeError) as e:
+                                # Silently skip widgets that can't be resized (common on touch screens)
+                                pass
+                    
+                    # Recursively process children (only if not already processed)
+                    if child != parent_widget:
+                        self.make_children_responsive(child)
+                        
+                except (AttributeError, RuntimeError, TypeError) as e:
+                    # Skip widgets that cause errors (common on touch screens during initialization)
+                    continue
+                    
+        except Exception as e:
+            # Fail silently to prevent UI crashes on touch screens
+            pass
 
     def on_slide_in_finished(self):
         self.is_visible = True
@@ -370,11 +416,12 @@ class ECGMenu(QGroupBox):
         self.settings_manager = None
         self.sliding_panel = None
         self.settings_changed_callback = None
+        self.current_language = 'en'
 
         self.setStyleSheet("QGroupBox { font: bold 14pt Arial; background-color: #fff; border-radius: 10px; }")
         layout = QVBoxLayout(self)
         self.buttons = {}
-        menu_buttons = [
+        self.menu_button_defs = [
             ("Save ECG", self.on_save_ecg),
             ("Open ECG", self.on_open_ecg),
             ("Working Mode", self.on_working_mode),
@@ -383,11 +430,10 @@ class ECGMenu(QGroupBox):
             ("System Setup", self.on_system_setup),
             ("Load Default", self.on_load_default),
             ("Version", self.on_version_info),
-            ("Factory Maintain", self.on_factory_maintain),
             ("Exit", self.on_exit)
         ]
-        for text, handler in menu_buttons:
-            btn = QPushButton(text)
+        for text, handler in self.menu_button_defs:
+            btn = QPushButton(self.tr(text))
             btn.setFixedHeight(36)
             btn.clicked.connect(handler)
             layout.addWidget(btn)
@@ -413,6 +459,41 @@ class ECGMenu(QGroupBox):
     def set_ecg_test_page(self, ecg_test_page):
         """Attach the active ECG test page so menu actions can interact with it."""
         self.ecg_test_page = ecg_test_page
+
+    def update_language(self, language=None):
+        if language:
+            self.current_language = language
+        elif self.settings_manager:
+            lang = self.settings_manager.get_setting("system_language", "en")
+            self.current_language = lang
+        self.refresh_button_texts()
+        if self.sliding_panel and self.sliding_panel.is_visible and self.current_open_panel:
+            # Reopen current panel content to update texts
+            panel = self.current_open_panel
+            self.hide_sliding_panel()
+            reopen_map = {
+                "Save ECG": self.show_save_ecg,
+                "Open ECG": self.show_open_ecg,
+                "Working Mode": self.show_working_mode,
+                "Printer Setup": self.show_printer_setup,
+                "Set Filter": self.show_set_filter,
+                "System Setup": self.show_system_setup,
+                "Load Default": self.show_load_default,
+                "Version": self.show_version_info,
+                "Exit": self.show_exit,
+            }
+            if panel in reopen_map:
+                reopen_map[panel]()
+
+    def tr(self, text):
+        return translate_text(text, getattr(self, "current_language", "en"))
+
+    def refresh_button_texts(self):
+        if hasattr(self, "menu_button_defs"):
+            for label, _ in self.menu_button_defs:
+                btn = self.buttons.get(label)
+                if btn:
+                    btn.setText(self.tr(label))
 
     def setup_parent_monitoring(self, parent):
         """Setup monitoring for parent widget changes"""
@@ -486,8 +567,6 @@ class ECGMenu(QGroupBox):
         self.show_load_default()
     def on_version_info(self):
         self.show_version_info()
-    def on_factory_maintain(self):
-        self.show_factory_maintain()
     def on_exit(self):
         self.show_exit()
 
@@ -535,6 +614,41 @@ class ECGMenu(QGroupBox):
         """)
         
         return scroll_area
+
+    def ensure_sliding_panel_ready(self):
+        """Ensure the sliding panel exists with up-to-date responsive metrics."""
+        # Ensure we have a reference to the ECG test page parent
+        if not hasattr(self, 'parent_widget') or not self.parent_widget:
+            parent = self.parent()
+            while parent and not hasattr(parent, 'grid_widget'):
+                parent = parent.parent()
+            if parent:
+                self.parent_widget = parent
+        
+        parent = getattr(self, 'parent_widget', None)
+        if not parent:
+            parent = self.parent()
+            while parent and not hasattr(parent, 'grid_widget'):
+                parent = parent.parent()
+            if parent:
+                self.parent_widget = parent
+        
+        # Lazily create sliding panel if missing
+        if not self.sliding_panel and parent:
+            self.sliding_panel = SlidingPanel(parent)
+            self.setup_parent_monitoring(parent)
+            container = getattr(parent, 'grid_widget', None)
+            if container and container.layout():
+                container.layout().addWidget(self.sliding_panel)
+            elif hasattr(parent, 'layout') and parent.layout():
+                parent.layout().addWidget(self.sliding_panel)
+            else:
+                print("Could not attach sliding panel to parent layout")
+        elif not self.sliding_panel:
+            print("Could not find parent widget for sliding panel")
+        
+        if self.sliding_panel:
+            self.sliding_panel.update_responsive_sizing()
 
     def show_sliding_panel(self, content_widget, title, button_name):
         
@@ -616,26 +730,16 @@ class ECGMenu(QGroupBox):
                 parent = parent.parent()
             if parent:
                 self.parent_widget = parent
-
-        # Ensure sliding panel exists BEFORE creating content (so margins/spacing are correct)
-        if not self.sliding_panel:
-            parent = self.parent_widget
-            if not parent:
-                parent = self.parent()
-                while parent and not hasattr(parent, 'grid_widget'):
-                    parent = parent.parent()
-            if parent:
-                self.sliding_panel = SlidingPanel(parent)
-                self.setup_parent_monitoring(parent)
-                if hasattr(parent, 'grid_widget') and parent.grid_widget.layout():
-                    parent.grid_widget.layout().addWidget(self.sliding_panel)
-
-        # Update responsive sizing so margin_size/spacing_size are current
-        if self.sliding_panel:
-            self.sliding_panel.update_responsive_sizing()
+        
+        self.ensure_sliding_panel_ready()
         
         content_widget = self.create_save_ecg_content()
-        self.show_sliding_panel(content_widget, "Save ECG Details", "Save ECG")
+        # Always wrap in scroll area so all fields stay visible on smaller panels
+        try:
+            content_widget = self.create_scrollable_content(content_widget)
+        except Exception:
+            pass
+        self.show_sliding_panel(content_widget, self.tr("Save ECG Details"), "Save ECG")
 
     def get_user_specific_patient_file(self):
         """Get user-specific patient details file path"""
@@ -661,18 +765,18 @@ class ECGMenu(QGroupBox):
         layout.setSpacing(spacing_size)
 
         # Responsive title with dynamic font size
-        title = QLabel("Save ECG Details")
+        title = QLabel(self.tr("Save ECG Details"))
         title_font_size = max(16, min(24, int(margin_size * 0.8)))
         title.setStyleSheet(f"""
             QLabel {{
-                font: bold {title_font_size}pt 'Arial';
+                font: bold {max(14, title_font_size-2)}pt 'Arial';
                 color: white;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 #ff6600, stop:1 #ff8c42);
                 border: 2px solid #343434;
-                border-radius: 15px;
-                padding: {max(15, margin_size-10)}px;
-                margin: {max(5, margin_size-15)}px;
+                border-radius: 12px;
+                padding: {max(12, margin_size-12)}px;
+                margin: {max(4, margin_size-18)}px;
             }}
         """)
         title.setAlignment(Qt.AlignCenter)
@@ -682,18 +786,25 @@ class ECGMenu(QGroupBox):
 
         # Main form container with responsive styling
         form_frame = QFrame()
-        form_frame.setStyleSheet("""
-            QFrame {
+        # Responsive padding and margins for small screens
+        form_padding = max(10, min(20, int(margin_size * 0.5)))
+        form_margin = max(5, min(10, int(margin_size * 0.25)))
+        form_frame.setStyleSheet(f"""
+            QFrame {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
                     stop:0 #ffffff, stop:1 #f8f9fa);
                 border: 2px solid #e0e0e0;
                 border-radius: 15px;
-                padding: 20px;
-                margin: 10px;
-            }
+                padding: {max(8, form_padding-2)}px;
+                margin: {max(4, form_margin-2)}px;
+            }}
         """)
         form_layout = QGridLayout(form_frame)
-        form_layout.setSpacing(max(8, spacing_size-5))
+        form_layout.setSpacing(max(6, min(12, spacing_size-5)))
+        form_layout.setContentsMargins(max(8, min(15, int(margin_size * 0.3))), 
+                                      max(8, min(15, int(margin_size * 0.3))), 
+                                      max(8, min(15, int(margin_size * 0.3))), 
+                                      max(8, min(15, int(margin_size * 0.3))))
         # Make right column grow with window size
         try:
             form_layout.setColumnStretch(0, 1)
@@ -701,38 +812,45 @@ class ECGMenu(QGroupBox):
         except Exception:
             pass
         
-        labels = ["Org.", "Doctor", "Patient Name"]
+        labels = ["Org.", "Doctor", "Phone No.", "Patient Name"]
         entries = {}
 
         # Responsive form fields
         for i, label in enumerate(labels):
             lbl = QLabel(label)
-            label_font_size = max(12, min(18, int(margin_size * 0.6)))
+            label_font_size = max(11, min(16, int(margin_size * 0.55)))
+            # Responsive label sizing for small screens
+            label_min_width = max(60, min(120, int(margin_size * 2.5)))
+            label_min_height = max(22, min(32, int(margin_size * 0.8)))
             lbl.setStyleSheet(f"""
                 QLabel {{
                     font: bold {label_font_size}pt Arial;
                     color: #000000;
                     background: #ffffff;
-                    padding: 6px;
-                    min-width: {max(100, int(margin_size * 3.5))}px;
-                    min-height: {max(30, int(margin_size * 1.0))}px;
+                    padding: {max(4, min(8, int(margin_size * 0.2)))}px;
+                    min-width: {label_min_width}px;
+                    max-width: {label_min_width + 20}px;
+                    min-height: {label_min_height}px;
                     border: 1px solid #e0e0e0;
                     border-radius: 5px;
                     margin: 2px;
                 }}
             """)
+            lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             form_layout.addWidget(lbl, i, 0)
 
             entry = QLineEdit()
-            entry_font_size = max(10, min(13, int(margin_size * 0.4)))
+            entry_font_size = max(9, min(12, int(margin_size * 0.35)))
+            entry_padding = max(3, min(7, int(margin_size * 0.18)))
             entry.setStyleSheet(f"""
                 QLineEdit {{
                     font: {entry_font_size}pt Arial;
-                    padding: {max(6, int(margin_size * 0.25))}px;
+                    padding: {entry_padding}px;
                     border: 2px solid #e0e0e0;
                     border-radius: 8px;
                     background: white;
                     color: #2c3e50;
+                    min-height: {max(25, min(35, int(margin_size * 0.9)))}px;
                 }}
                 QLineEdit:focus {{
                     border: 2px solid #343434;
@@ -744,43 +862,52 @@ class ECGMenu(QGroupBox):
                 }}
             """)
             
-            # Responsive entry field sizes (expand horizontally)
-            entry_height = max(30, int(margin_size * 1.0))
+            # Responsive entry field sizes (expand horizontally, ensure minimum for touch)
+            entry_height = max(22, min(32, int(margin_size * 0.8)))
             entry.setMinimumHeight(entry_height)
+            entry.setMinimumWidth(max(80, int(margin_size * 2.0)))  # Ensure touch-friendly width
             entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             form_layout.addWidget(entry, i, 1)
             entries[label] = entry
         
         entries["Doctor"].setMaxLength(20)
-        entries["Patient Name"].setMaxLength(20)
+        entries["Phone No."].setMaxLength(10)
+        entries["Patient Name"].setMaxLength(20) 
 
         # Age field with responsive sizing
         lbl_age = QLabel("Age")
+        label_min_width = max(60, min(120, int(margin_size * 2.5)))
+        label_min_height = max(22, min(32, int(margin_size * 0.8)))
         lbl_age.setStyleSheet(f"""
             QLabel {{
                 font: bold {label_font_size}pt Arial;
                 color: #000000;
                 background: #ffffff;
-                padding: 6px;
-                min-width: {max(100, int(margin_size * 3.5))}px;
-                min-height: {max(30, int(margin_size * 1.0))}px;
+                padding: {max(4, min(8, int(margin_size * 0.2)))}px;
+                min-width: {label_min_width}px;
+                max-width: {label_min_width + 20}px;
+                min-height: {label_min_height}px;
                 border: 1px solid #e0e0e0;
                 border-radius: 5px;
                 margin: 2px;
             }}
         """)
-        form_layout.addWidget(lbl_age, 3, 0)
+        lbl_age.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        # Shift age to its own row to avoid overwriting Patient Name
+        form_layout.addWidget(lbl_age, 4, 0)
 
         age_entry = QLineEdit()
         age_entry.setValidator(QIntValidator(0, 120, age_entry))
+        entry_padding = max(3, min(7, int(margin_size * 0.18)))
         age_entry.setStyleSheet(f"""
             QLineEdit {{
                 font: {entry_font_size}pt Arial;
-                padding: {max(6, int(margin_size * 0.25))}px;
+                padding: {entry_padding}px;
                 border: 2px solid #e0e0e0;
                 border-radius: 8px;
                 background: white;
                 color: #2c3e50;
+                min-height: {max(25, min(35, int(margin_size * 0.9)))}px;
             }}
             QLineEdit:focus {{
                 border: 2px solid #343434;
@@ -792,39 +919,47 @@ class ECGMenu(QGroupBox):
             }}
         """)
         
-        age_height = max(30, int(margin_size * 1.0))
+        age_height = max(22, min(32, int(margin_size * 0.8)))
         age_entry.setMinimumHeight(age_height)
+        age_entry.setMinimumWidth(max(80, int(margin_size * 2.0)))  # Ensure touch-friendly width
         age_entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        form_layout.addWidget(age_entry, 3, 1)
+        form_layout.addWidget(age_entry, 4, 1)
         entries["Age"] = age_entry
 
         # Gender field with responsive sizing
         lbl_gender = QLabel("Gender")
+        label_min_width = max(60, min(120, int(margin_size * 2.5)))
+        label_min_height = max(22, min(32, int(margin_size * 0.8)))
         lbl_gender.setStyleSheet(f"""
             QLabel {{
                 font: bold {label_font_size}pt Arial;
                 color: #000000;
                 background: #ffffff;
-                padding: 6px;
-                min-width: {max(100, int(margin_size * 3.5))}px;
-                min-height: {max(30, int(margin_size * 1.0))}px;
+                padding: {max(4, min(8, int(margin_size * 0.2)))}px;
+                min-width: {label_min_width}px;
+                max-width: {label_min_width + 20}px;
+                min-height: {label_min_height}px;
                 border: 1px solid #e0e0e0;
                 border-radius: 5px;
                 margin: 2px;
             }}
         """)
-        form_layout.addWidget(lbl_gender, 4, 0)
+        lbl_gender.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        # Place gender on its own row below age
+        form_layout.addWidget(lbl_gender, 5, 0)
 
         gender_menu = QComboBox()
         gender_menu.addItems(["Select", "Male", "Female", "Other"])
+        entry_padding = max(3, min(7, int(margin_size * 0.18)))
         gender_menu.setStyleSheet(f"""
             QComboBox {{
                 font: {entry_font_size}pt Arial;
-                padding: {max(6, int(margin_size * 0.25))}px;
+                padding: {entry_padding}px;
                 border: 2px solid #e0e0e0;
                 border-radius: 8px;
                 background: white;
                 color: #2c3e50;
+                min-height: {max(25, min(35, int(margin_size * 0.9)))}px;
             }}
             QComboBox:focus {{
                 border: 2px solid #343434;
@@ -836,7 +971,7 @@ class ECGMenu(QGroupBox):
             }}
             QComboBox::drop-down {{
                 border: none;
-                width: 20px;
+                width: {max(18, min(25, int(margin_size * 0.5)))}px;
             }}
             QComboBox::down-arrow {{
                 image: none;
@@ -853,15 +988,15 @@ class ECGMenu(QGroupBox):
                 selection-color: white;
                 outline: none;
                 font: {entry_font_size}pt Arial;
-                padding: 6px;
+                padding: {max(4, min(8, int(margin_size * 0.2)))}px;
                 margin-left: -15px;
                 margin-right: -15px;
             }}
             QComboBox QAbstractItemView::item {{
-                padding: 6px 10px;
+                padding: {max(4, min(8, int(margin_size * 0.2)))}px {max(8, min(12, int(margin_size * 0.3)))}px;
                 border-radius: 5px;
                 margin: 2px;
-                min-height: 20px;
+                min-height: {max(20, min(28, int(margin_size * 0.7)))}px;
             }}
             QComboBox QAbstractItemView::item:hover {{
                 background: #fff0e0;
@@ -874,12 +1009,13 @@ class ECGMenu(QGroupBox):
             }}
         """)
         
-        gender_height = max(30, int(margin_size * 1.0))
+        gender_height = max(22, min(32, int(margin_size * 0.8)))
         gender_menu.setMinimumHeight(gender_height)
+        gender_menu.setMinimumWidth(max(80, int(margin_size * 2.0)))  # Ensure touch-friendly width
         gender_menu.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        form_layout.addWidget(gender_menu, 4, 1)
+        form_layout.addWidget(gender_menu, 5, 1)
 
-        # Prefill previously saved values if available (user-specific)
+        # Prefill previously saved values if available (from centralized database)
         try:
             prefill = None
             user_file = self.get_user_specific_patient_file()
@@ -887,24 +1023,40 @@ class ECGMenu(QGroupBox):
             # 1) Use in-memory cached details if present
             if hasattr(self, "patient_details") and isinstance(self.patient_details, dict):
                 prefill = self.patient_details
-            # 2) Else attempt to load from user-specific disk cache to persist across restarts
+            
+            # 2) If not in memory, load the LAST patient from centralized database
             if prefill is None:
                 try:
-                    with open(user_file, "r") as jf:
-                        prefill = json.load(jf)
-                        # Cache in memory for subsequent opens during this session
-                        setattr(self, "patient_details", prefill)
-                except Exception:
+                    # Get path to centralized database (in modularecg folder)
+                    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                    patients_db_file = os.path.join(base_dir, "all_patients.json")
+                    
+                    if os.path.exists(patients_db_file):
+                        with open(patients_db_file, "r") as jf:
+                            all_patients = json.load(jf)
+                            if all_patients.get("patients") and len(all_patients["patients"]) > 0:
+                                # Get the last patient (most recent)
+                                prefill = all_patients["patients"][-1]
+                                # Cache in memory for subsequent opens during this session
+                                setattr(self, "patient_details", prefill)
+                                print(f"✅ Loaded last patient from centralized DB: {prefill.get('patient_name', 'Unknown')}")
+                except Exception as e:
+                    print(f"⚠️ Could not load from centralized DB: {e}")
                     prefill = None
 
             if prefill:
                 pd = prefill
+
+                
                 # Org. (optional in cached data)
                 if "Org." in pd and pd["Org."]:
                     entries["Org."].setText(pd["Org."]) 
                 # Doctor
                 if "doctor" in pd and pd["doctor"]:
-                    entries["Doctor"].setText(pd["doctor"]) 
+                    entries["Doctor"].setText(pd["doctor"])
+                # Phone No.
+                if "doctor_mobile" in pd and pd["doctor_mobile"]:
+                    entries["Phone No."].setText(pd["doctor_mobile"])
                 # Patient Name
                 first = pd.get("first_name", "") or ""
                 last = pd.get("last_name", "") or ""
@@ -916,6 +1068,7 @@ class ECGMenu(QGroupBox):
                     entries["Age"].setText(str(pd["age"]))
                 # Gender
                 if "gender" in pd and pd["gender"]:
+                    
                     idx = gender_menu.findText(str(pd["gender"]))
                     if idx != -1:
                         gender_menu.setCurrentIndex(idx)
@@ -925,7 +1078,7 @@ class ECGMenu(QGroupBox):
         layout.addWidget(form_frame)
 
         # Submit button
-        submit_btn = QPushButton("Save ECG")
+        submit_btn = QPushButton(self.tr("Save ECG"))
         submit_btn.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -933,9 +1086,9 @@ class ECGMenu(QGroupBox):
                 color: white;
                 border: 2px solid #28a745;
                 border-radius: 10px;
-                padding: {max(10, int(margin_size * 0.4))}px;
-                font: bold {max(12, int(margin_size * 0.4))}pt Arial;
-                min-height: {max(35, int(margin_size * 1.2))}px;
+                padding: {max(8, int(margin_size * 0.35))}px;
+                font: bold {max(11, int(margin_size * 0.38))}pt Arial;
+                min-height: {max(32, int(margin_size * 1.0))}px;
             }}
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -955,11 +1108,11 @@ class ECGMenu(QGroupBox):
         return widget
 
     def submit_ecg_details(self, entries, gender_menu):
-        values = {label: entries[label].text().strip() for label in ["Org.", "Doctor", "Patient Name", "Age"]}
+        values = {label: entries[label].text().strip() for label in ["Org.", "Doctor", "Phone No.", "Patient Name", "Age"]}
         values["Gender"] = gender_menu.currentText()
 
         if any(v == "" for v in values.values()) or values["Gender"] == "Select":
-            QMessageBox.warning(self.parent(), "Missing Data", "Please fill all the fields and select gender.")
+            QMessageBox.warning(self.parent(), self.tr("Missing Data"), self.tr("Please fill all the fields and select gender."))
             return
 
         # Store patient details on the menu and dashboard for PDF generation
@@ -973,6 +1126,7 @@ class ECGMenu(QGroupBox):
                 "age": values["Age"],
                 "gender": values["Gender"],
                 "doctor": values["Doctor"],
+                "doctor_mobile": values["Phone No."],
                 "Org.": values.get("Org.", ""),
                 "patient_name": values.get("Patient Name", ""),
                 "date_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -980,31 +1134,57 @@ class ECGMenu(QGroupBox):
             setattr(self, "patient_details", patient_details)
             if self.dashboard:
                 setattr(self.dashboard, "patient_details", patient_details)
-            # Persist last details to user-specific disk file so they survive app restarts
+            
+            # Persist to centralized all_patients.json database
             try:
-                user_file = self.get_user_specific_patient_file()
-                with open(user_file, "w") as jf:
-                    json.dump(patient_details, jf, indent=2)
+                # Get path to centralized database (in modularecg folder)
+                base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                patients_db_file = os.path.join(base_dir, "all_patients.json")
+                
+                # Load existing patients database
+                all_patients = {"patients": []}
+                if os.path.exists(patients_db_file):
+                    try:
+                        with open(patients_db_file, "r") as jf:
+                            all_patients = json.load(jf)
+                        print(f"✅ Loaded existing patients database: {len(all_patients.get('patients', []))} patients")
+                    except Exception as load_err:
+                        print(f"⚠️ Could not load patients database, creating new: {load_err}")
+                        all_patients = {"patients": []}
+                
+                # Add unique ID to new patient
+                patient_details["id"] = len(all_patients.get("patients", [])) + 1
+                
+                # Append new patient to the list
+                if "patients" not in all_patients:
+                    all_patients["patients"] = []
+                all_patients["patients"].append(patient_details)
+                
+                # Save back to centralized file
+                with open(patients_db_file, "w") as jf:
+                    json.dump(all_patients, jf, indent=2)
+                
+                print(f"✅ Patient saved to centralized database! Total patients: {len(all_patients['patients'])}")
+                
             except Exception as disk_err:
-                print(f"⚠️ Could not persist patient details: {disk_err}")
+                print(f"⚠️ Could not persist patient details to centralized DB: {disk_err}")
+                import traceback
+                traceback.print_exc()
         except Exception as e:
             print(f"⚠️ Could not cache patient details: {e}")
 
-        try:
-            with open("ecg_data.txt", "a") as file:
-                file.write(f"{values['Org.']}, {values['Doctor']}, {values['Patient Name']}, {values['Age']}, {values['Gender']}\n")
-            QMessageBox.information(self.parent(), "Saved", "ECG details saved successfully!")
-            # Close the panel after successful save (values remain persisted for next open)
-            self.hide_sliding_panel()
-        except Exception as e:
-            QMessageBox.critical(self.parent(), "Error", f"Failed to save: {e}")
+        # Success message and close panel
+        QMessageBox.information(self.parent(), "Saved", f"✅ Patient details saved successfully!\n\nTotal patients in database: {len(all_patients.get('patients', []))}")
+        # Close the panel after successful save (values remain persisted for next open)
+        self.hide_sliding_panel()
 
     # ----------------------------- Open ECG -----------------------------
 
     def show_open_ecg(self):
         """Show open ECG file dialog"""
+        self.ensure_sliding_panel_ready()
         content_widget = self.create_open_ecg_content()
-        self.show_sliding_panel(content_widget, "Open ECG File", "Open ECG")
+        self.show_sliding_panel(content_widget, self.tr("Open ECG File"), "Open ECG")
 
     def create_open_ecg_content(self):
         # Create a simple open ECG interface
@@ -1019,7 +1199,7 @@ class ECGMenu(QGroupBox):
         layout.setSpacing(spacing_size)
 
         # Professional title
-        title = QLabel("Open ECG File")
+        title = QLabel(self.tr("Open ECG File"))
         title_font_size = max(16, min(22, int(margin_size * 0.8)))
         title.setStyleSheet(f"""
             QLabel {{
@@ -1037,22 +1217,29 @@ class ECGMenu(QGroupBox):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        # File selection container
+        # File selection container with responsive styling
         file_frame = QFrame()
-        file_frame.setStyleSheet("""
-            QFrame {
+        # Responsive padding and margins for small screens
+        file_padding = max(10, min(20, int(margin_size * 0.5)))
+        file_margin = max(5, min(10, int(margin_size * 0.25)))
+        file_frame.setStyleSheet(f"""
+            QFrame {{
                 background: white;
                 border: 2px solid #e0e0e0;
                 border-radius: 10px;
-                padding: 20px;
-                margin: 10px;
-            }
+                padding: {file_padding}px;
+                margin: {file_margin}px;
+            }}
         """)
         file_layout = QVBoxLayout(file_frame)
-        file_layout.setSpacing(15)
+        file_layout.setSpacing(max(8, min(15, spacing_size)))
+        file_layout.setContentsMargins(max(8, min(15, int(margin_size * 0.3))), 
+                                      max(8, min(15, int(margin_size * 0.3))), 
+                                      max(8, min(15, int(margin_size * 0.3))), 
+                                      max(8, min(15, int(margin_size * 0.3))))
 
         # File path display
-        path_label = QLabel("Selected File:")
+        path_label = QLabel(self.tr("Selected File:"))
         path_label.setStyleSheet(f"""
             QLabel {{
                 font: bold {max(11, int(margin_size * 0.55))}pt Arial;
@@ -1063,18 +1250,20 @@ class ECGMenu(QGroupBox):
         """)
         file_layout.addWidget(path_label)
         
-        self.file_path_display = QLabel("No file selected")
+        self.file_path_display = QLabel(self.tr("No file selected"))
         self.file_path_display.setStyleSheet(f"""
             QLabel {{
                 font: {max(10, int(margin_size * 0.5))}pt Arial;
                 color: #666;
                 background: #f8f9fa;
-                padding: 10px;
+                padding: {max(6, min(12, int(margin_size * 0.3)))}px;
                 border: 1px solid #e0e0e0;
                 border-radius: 6px;
-                min-height: {max(25, int(margin_size * 1.2))}px;
+                min-height: {max(25, min(40, int(margin_size * 1.2)))}px;
             }}
         """)
+        self.file_path_display.setWordWrap(True)  # Allow text wrapping on small screens
+        self.file_path_display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         file_layout.addWidget(self.file_path_display)
 
         # File format selection
@@ -1091,6 +1280,8 @@ class ECGMenu(QGroupBox):
         
         self.format_combo = QComboBox()
         self.format_combo.addItems(["Auto-detect", "CSV", "TXT", "JSON", "XML", "DICOM"])
+        combo_padding = max(6, min(10, int(margin_size * 0.3)))
+        combo_height = max(25, min(40, int(margin_size * 1.2)))
         self.format_combo.setStyleSheet(f"""
             QComboBox {{
                 font: {max(10, int(margin_size * 0.5))}pt Arial;
@@ -1098,8 +1289,8 @@ class ECGMenu(QGroupBox):
                 background: white;
                 border: 2px solid #e0e0e0;
                 border-radius: 6px;
-                padding: 8px;
-                min-height: {max(30, int(margin_size * 1.5))}px;
+                padding: {combo_padding}px;
+                min-height: {combo_height}px;
             }}
             QComboBox:hover {{
                 border: 2px solid #ffb347;
@@ -1107,38 +1298,62 @@ class ECGMenu(QGroupBox):
             QComboBox:focus {{
                 border: 2px solid #ff6600;
             }}
+            QComboBox::drop-down {{
+                border: none;
+                width: {max(18, min(25, int(margin_size * 0.5)))}px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: white;
+                border: 2px solid #ff6600;
+                border-radius: 6px;
+                selection-background-color: #ff6600;
+                selection-color: white;
+                font: {max(10, int(margin_size * 0.5))}pt Arial;
+                padding: {max(4, min(8, int(margin_size * 0.2)))}px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                padding: {max(4, min(8, int(margin_size * 0.2)))}px;
+                min-height: {max(20, min(28, int(margin_size * 0.7)))}px;
+            }}
         """)
+        self.format_combo.setMinimumWidth(max(100, int(margin_size * 3.0)))  # Ensure touch-friendly width
+        self.format_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         file_layout.addWidget(self.format_combo)
 
         layout.addWidget(file_frame)
 
-        # Buttons
+        # Buttons with responsive sizing
         btn_frame = QFrame()
-        btn_frame.setStyleSheet("""
-            QFrame {
+        btn_margin = max(5, min(10, int(margin_size * 0.25)))
+        btn_frame.setStyleSheet(f"""
+            QFrame {{
                 background: transparent;
-                margin: 10px;
-            }
+                margin: {btn_margin}px;
+            }}
         """)
         btn_layout = QHBoxLayout(btn_frame)
-        btn_layout.setSpacing(max(10, int(margin_size * 0.5)))
+        btn_layout.setSpacing(max(6, min(12, int(margin_size * 0.4))))
 
-        # Responsive button sizing
-        button_width = max(100, min(140, int(margin_size * 5)))
-        button_height = max(35, min(45, int(margin_size * 1.8)))
+        # Responsive button sizing for small screens
+        button_width = max(70, min(120, int(margin_size * 4.0)))
+        button_height = max(30, min(40, int(margin_size * 1.5)))
 
-        # Browse button
+        # Browse button with responsive sizing
         browse_btn = QPushButton("Browse")
-        browse_btn.setFixedSize(button_width, button_height)
+        btn_padding = max(6, min(10, int(margin_size * 0.3)))
+        btn_font_size = max(10, min(13, int(margin_size * 0.5)))
+        browse_btn.setMinimumSize(button_width, button_height)
+        browse_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         browse_btn.setStyleSheet(f"""
             QPushButton {{
-                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                font: bold {btn_font_size}pt Arial;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
                     stop:0 #17a2b8, stop:0.5 #138496, stop:1 #17a2b8);
                 color: white;
                 border: 2px solid #17a2b8;
                 border-radius: 8px;
-                padding: 8px;
+                padding: {btn_padding}px;
+                min-height: {button_height}px;
             }}
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -1149,18 +1364,20 @@ class ECGMenu(QGroupBox):
         browse_btn.clicked.connect(self.browse_ecg_file)
         btn_layout.addWidget(browse_btn)
 
-        # Open button
+        # Open button with responsive sizing
         open_btn = QPushButton("Open")
-        open_btn.setFixedSize(button_width, button_height)
+        open_btn.setMinimumSize(button_width, button_height)
+        open_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         open_btn.setStyleSheet(f"""
             QPushButton {{
-                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                font: bold {btn_font_size}pt Arial;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
                     stop:0 #4CAF50, stop:0.5 #45a049, stop:1 #4CAF50);
                 color: white;
                 border: 2px solid #4CAF50;
                 border-radius: 8px;
-                padding: 8px;
+                padding: {btn_padding}px;
+                min-height: {button_height}px;
             }}
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -1171,18 +1388,20 @@ class ECGMenu(QGroupBox):
         open_btn.clicked.connect(self.open_ecg_file)
         btn_layout.addWidget(open_btn)
 
-        # Cancel button
+        # Cancel button with responsive sizing
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedSize(button_width, button_height)
+        cancel_btn.setMinimumSize(button_width, button_height)
+        cancel_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
-                font: bold {max(11, int(margin_size * 0.55))}pt Arial;
+                font: bold {btn_font_size}pt Arial;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
                     stop:0 #f44336, stop:0.5 #d32f2f, stop:1 #f44336);
                 color: white;
                 border: 2px solid #f44336;
                 border-radius: 8px;
-                padding: 8px;
+                padding: {btn_padding}px;
+                min-height: {button_height}px;
             }}
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -1223,8 +1442,8 @@ class ECGMenu(QGroupBox):
     def open_ecg_file(self):
         """Open the selected ECG file"""
         file_path = self.file_path_display.text()
-        if file_path == "No file selected":
-            QMessageBox.warning(self.parent(), "No File", "Please select a file first!")
+        if file_path == self.tr("No file selected") or file_path == "No file selected":
+            QMessageBox.warning(self.parent(), self.tr("No File"), self.tr("Please select a file first!"))
             return
         
         try:
@@ -1237,6 +1456,7 @@ class ECGMenu(QGroupBox):
     # ----------------------------- Working Mode -----------------------------
 
     def show_working_mode(self):
+        self.ensure_sliding_panel_ready()
         content_widget = self.create_working_mode_content()
         self.show_sliding_panel(content_widget, "Working Mode Settings", "Working Mode")
 
@@ -1256,16 +1476,6 @@ class ECGMenu(QGroupBox):
                 'title': 'Wave Gain',
                 'options': [("2.5mm/mV", "2.5"), ("5mm/mV", "5"), ("10mm/mV", "10"), ("20mm/mV", "20")],
                 'setting_key': 'wave_gain'
-            },
-            {
-                'title': 'Sampling Mode',
-                'options': [("Simultaneous", "Simultaneous"), ("Sequence", "Sequence")],
-                'setting_key': 'sampling_mode'
-            },
-            {
-                'title': 'Priority Storage',
-                'options': [("U Disk", "U"), ("SD Card", "SD")],
-                'setting_key': 'storage'
             }
         ]
         
@@ -1305,6 +1515,12 @@ class ECGMenu(QGroupBox):
         else:
             print("No parent on_settings_changed found!")
         
+        if self.dashboard and hasattr(self.dashboard, 'on_settings_changed'):
+            try:
+                self.dashboard.on_settings_changed(key, value)
+            except Exception as e:
+                print(f"Dashboard settings callback error: {e}")
+        
         # For wave speed and gain, apply immediate visual feedback
         if key in ["wave_speed", "wave_gain"]:
             print(f"Applied {key}: {value}")
@@ -1313,6 +1529,8 @@ class ECGMenu(QGroupBox):
                     self.parent().ecg_test_page.update_plots()
             except Exception as e:
                 print(f"Immediate refresh error: {e}")
+        elif key == "system_language":
+            self.update_language(value)
 
     def save_working_mode_settings(self):
         
@@ -1322,6 +1540,7 @@ class ECGMenu(QGroupBox):
     # ----------------------------- Printer Setup -----------------------------
 
     def show_printer_setup(self):
+        self.ensure_sliding_panel_ready()
         content_widget = self.create_printer_setup_content()
         self.show_sliding_panel(content_widget, "Printer Setup", "Printer Setup")
 
@@ -1334,11 +1553,6 @@ class ECGMenu(QGroupBox):
         # Define sections for printer setup
         sections = [
             {
-                'title': 'Analysis Result',
-                'options': [("On", "on"), ("Off", "off")],
-                'setting_key': 'printer_analysis_result'
-            },
-            {
                 'title': 'Average Wave',
                 'options': [("On", "on"), ("Off", "off")],
                 'setting_key': 'printer_average_wave'
@@ -1347,16 +1561,6 @@ class ECGMenu(QGroupBox):
                 'title': 'Lead Sequence',
                 'options': [("Standard", "Standard"), ("Cabrera", "Cabrera")],
                 'setting_key': 'lead_sequence'
-            },
-            {
-                'title': 'Selected Rhythm Lead',
-                'options': [("On", "on"), ("Off", "off")],
-                'setting_key': 'printer_rhythm_lead'
-            },
-            {
-                'title': 'Sensitivity',
-                'options': [("High", "High"), ("Medium", "Medium"), ("Low", "Low")],
-                'setting_key': 'printer_sensitivity'
             }
         ]
         
@@ -1387,6 +1591,7 @@ class ECGMenu(QGroupBox):
 
     def show_set_filter(self):
         """Show filter settings panel"""
+        self.ensure_sliding_panel_ready()
         content_widget = self.create_filter_content()
         self.show_sliding_panel(content_widget, "Filter Settings", "Set Filter")
 
@@ -1399,31 +1604,26 @@ class ECGMenu(QGroupBox):
         # Define sections for filter settings
         sections = [
             {
-                'title': 'Low Pass Filter',
-                'options': [("Off", "off"), ("25Hz", "25"), ("50Hz", "50"), ("100Hz", "100")],
-                'setting_key': 'filter_low_pass'
+                'title': 'AC Filter',
+                'options': [("off", "off"), ("50Hz", "50"), ("60Hz", "60")],
+                'setting_key': 'filter_ac'
             },
             {
-                'title': 'High Pass Filter',
-                'options': [("Off", "off"), ("0.05Hz", "0.05"), ("0.5Hz", "0.5"), ("1Hz", "1")],
-                'setting_key': 'filter_high_pass'
+                'title': 'EMG Filter',
+                'options': [("25Hz", "25"), ("35Hz", "35"), ("45Hz", "45"), ("75Hz", "75"), ("100Hz", "100"), ("150Hz", "150")],
+                'setting_key': 'filter_emg'
             },
             {
-                'title': 'Notch Filter',
-                'options': [("Off", "off"), ("50Hz", "50"), ("60Hz", "60")],
-                'setting_key': 'filter_notch'
+                'title': 'DFT Filter',
+                'options': [("off", "off"), ("0.05Hz", "0.05"), ("0.5Hz", "0.5")],
+                'setting_key': 'filter_dft'
             },
-            {
-                'title': 'Smoothing',
-                'options': [("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high")],
-                'setting_key': 'filter_smoothing'
-            }
         ]
         
         # Define buttons
         buttons = [
             {
-                'text': 'Apply',
+                'text': 'OK',
                 'action': self.apply_filter_settings,
                 'style': 'primary'
             },
@@ -1441,24 +1641,19 @@ class ECGMenu(QGroupBox):
         self.hide_sliding_panel()
 
     def show_system_setup(self):
-        
+        self.ensure_sliding_panel_ready()
         content_widget = self.create_system_setup_content()
         self.show_sliding_panel(content_widget, "System Setup", "System Setup")
 
     def show_load_default(self):
-        
+        self.ensure_sliding_panel_ready()
         content_widget = self.create_load_default_content()
         self.show_sliding_panel(content_widget, "Load Default Settings", "Load Default")
 
     def show_version_info(self):
-        
+        self.ensure_sliding_panel_ready()
         content_widget = self.create_version_info_content()
-        self.show_sliding_panel(content_widget, "Version Information", "Version")
-
-    def show_factory_maintain(self):
-        
-        content_widget = self.create_factory_maintain_content()
-        self.show_sliding_panel(content_widget, "Factory Maintenance", "Factory Maintain")
+        self.show_sliding_panel(content_widget, self.tr("Version Information"), "Version")
 
     # ----------------------------- System Setup -----------------------------
 
@@ -1476,29 +1671,9 @@ class ECGMenu(QGroupBox):
                 'setting_key': 'system_beat_vol'
             },
             {
-                'title': 'ALARM VOL',
-                'options': [("On", "on"), ("Off", "off")],
-                'setting_key': 'system_alarm_vol'
-            },
-            {
-                'title': 'KEY TONE',
-                'options': [("On", "on"), ("Off", "off")],
-                'setting_key': 'system_key_tone'
-            },
-            {
-                'title': 'AUTO POWER OFF',
-                'options': [("5min", "5"), ("10min", "10"), ("15min", "15"), ("Off", "off")],
-                'setting_key': 'system_auto_power_off'
-            },
-            {
                 'title': 'LANGUAGE',
-                'options': [("English", "en"), ("Spanish", "es"), ("French", "fr")],
+                'options': [("English", "en"), ("Hindi", "hi"), ("Spanish", "es"), ("French", "fr")],
                 'setting_key': 'system_language'
-            },
-            {
-                'title': 'DATE FORMAT',
-                'options': [("MM/DD/YYYY", "mmdd"), ("DD/MM/YYYY", "ddmm"), ("YYYY/MM/DD", "yyyymm")],
-                'setting_key': 'system_date_format'
             }
         ]
         
@@ -1530,48 +1705,136 @@ class ECGMenu(QGroupBox):
         if not self.settings_manager:
             self.settings_manager = SettingsManager()
 
-        # Define sections for load default
-        sections = [
-            {
-                'title': 'ECG Settings',
-                'options': [("Load Defaults", "ecg"), ("Keep Current", "keep")],
-                'setting_key': 'load_default_ecg'
-            },
-            {
-                'title': 'Display Settings',
-                'options': [("Load Defaults", "display"), ("Keep Current", "keep")],
-                'setting_key': 'load_default_display'
-            },
-            {
-                'title': 'System Settings',
-                'options': [("Load Defaults", "system"), ("Keep Current", "keep")],
-                'setting_key': 'load_default_system'
-            },
-            {
-                'title': 'All Settings',
-                'options': [("Load All Defaults", "all"), ("Keep All Current", "keep")],
-                'setting_key': 'load_default_all'
-            }
-        ]
-        
-        # Define buttons
-        buttons = [
-            {
-                'text': 'Select',
-                'action': self.load_default_settings,
-                'style': 'primary'
-            },
-            {
-                'text': 'Cancel',
-                'action': self.hide_sliding_panel,
-                'style': 'danger'
-            }
-        ]
-        
-        return self.create_unified_control_panel("Load Default Settings", sections, buttons)
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
 
-    def load_default_settings(self):
-        QMessageBox.information(self.parent(), "Loaded", "Default settings loaded successfully!")
+        margin_size = getattr(self.sliding_panel, 'margin_size', 20) if self.sliding_panel else 20
+        spacing_size = getattr(self.sliding_panel, 'spacing_size', 15) if self.sliding_panel else 15
+        layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
+        layout.setSpacing(spacing_size)
+
+        # Top hint header bar
+        hint_header = QLabel(self.tr("Hint") if hasattr(self, 'tr') else "Hint")
+        hint_header.setAlignment(Qt.AlignCenter)
+        hint_header.setStyleSheet("""
+            QLabel {
+                background: #ff8400;
+                color: #ffffff;
+                font: bold 16pt 'Arial';
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        layout.addWidget(hint_header)
+
+        # Message area replicating hardware UI copy
+        message_frame = QFrame()
+        message_frame.setStyleSheet("""
+            QFrame {
+                background: #f5f5f5;
+                border: 2px solid #d0d0d0;
+                border-radius: 12px;
+                padding: 30px 20px;
+            }
+        """)
+        message_layout = QVBoxLayout(message_frame)
+        message_layout.setSpacing(12)
+
+        msg_line1 = QLabel(self.tr("Adopt Factory Default Config?"))
+        msg_line1.setAlignment(Qt.AlignCenter)
+        msg_line1.setStyleSheet("""
+            QLabel {
+                font: 14pt 'Arial';
+                color: #222;
+            }
+        """)
+        message_layout.addWidget(msg_line1)
+
+        msg_line2 = QLabel(self.tr("The previous configure will be lost!"))
+        msg_line2.setAlignment(Qt.AlignCenter)
+        msg_line2.setStyleSheet("""
+            QLabel {
+                font: italic 12pt 'Arial';
+                color: #444;
+            }
+        """)
+        message_layout.addWidget(msg_line2)
+
+        layout.addWidget(message_frame)
+
+        # Buttons row (No / Yes) styled like screenshot
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(max(15, int(margin_size * 0.6)))
+        btn_row.addStretch(1)
+
+        no_btn = QPushButton(self.tr("No"))
+        no_btn.setFixedSize(140, 48)
+        no_btn.setStyleSheet("""
+            QPushButton {
+                background: #e74c3c;
+                color: white;
+                border: 2px solid #c0392b;
+                border-radius: 6px;
+                font: bold 14pt 'Arial';
+            }
+            QPushButton:hover {
+                background: #ff5c4b;
+            }
+        """)
+        no_btn.clicked.connect(self.hide_sliding_panel)
+        btn_row.addWidget(no_btn)
+
+        yes_btn = QPushButton(self.tr("Yes"))
+        yes_btn.setFixedSize(140, 48)
+        yes_btn.setStyleSheet("""
+            QPushButton {
+                background: #2ecc71;
+                color: #fff;
+                border: 2px solid #27ae60;
+                border-radius: 6px;
+                font: bold 14pt 'Arial';
+            }
+            QPushButton:hover {
+                background: #3ddc80;
+            }
+        """)
+        yes_btn.clicked.connect(self.apply_factory_defaults)
+        btn_row.addWidget(yes_btn)
+        btn_row.addStretch(1)
+
+        layout.addLayout(btn_row)
+        return widget
+
+    def apply_factory_defaults(self):
+        """Reset every configurable option to startup defaults."""
+        if not self.settings_manager:
+            self.settings_manager = SettingsManager()
+
+        restored_settings = self.settings_manager.reset_to_defaults()
+
+        # Notify downstream listeners so active widgets update immediately
+        if restored_settings:
+            for key, value in restored_settings.items():
+                try:
+                    self.on_setting_changed(key, value)
+                except Exception as err:
+                    print(f"⚠️ Unable to broadcast default for {key}: {err}")
+
+        # Refresh ECG test page visual state if available
+        if hasattr(self, 'ecg_test_page') and self.ecg_test_page:
+            try:
+                if hasattr(self.ecg_test_page, 'apply_display_settings'):
+                    self.ecg_test_page.apply_display_settings()
+                if hasattr(self.ecg_test_page, 'update_plots'):
+                    self.ecg_test_page.update_plots()
+            except Exception as err:
+                print(f"⚠️ Unable to refresh ECG test page after defaults: {err}")
+
+        QMessageBox.information(
+            self.parent(),
+            self.tr("Factory Defaults"),
+            self.tr("All settings restored to factory defaults.")
+        )
         self.hide_sliding_panel()
 
     # ----------------------------- Version Info -----------------------------
@@ -1589,7 +1852,7 @@ class ECGMenu(QGroupBox):
         layout.setSpacing(spacing_size)
 
         # Professional title
-        title = QLabel("Version Information")
+        title = QLabel(self.tr("Version Information"))
         title_font_size = max(16, min(22, int(margin_size * 0.8)))
         title.setStyleSheet(f"""
             QLabel {{
@@ -1647,14 +1910,14 @@ class ECGMenu(QGroupBox):
 
         # Version details
         version_info = [
-            ("Software Version", "V 1.1.1"),
-            ("Hardware Version", "V 1.5.2"),
-            ("Firmware Version", "V.3.0.1"),
-            ("Build Date", "2024-08-26"),
-            ("Manufacturer", "Modular ECG Systems"),
-            ("Model", "ECG-121 Pro"),
-            ("Serial Number", "MF-2024-001"),
-            ("License", "Professional Edition")
+            (self.tr("Software Version"), "V 1.1.1"),
+            (self.tr("Hardware Version"), "V 1.5.2"),
+            (self.tr("Firmware Version"), "V.3.0.1"),
+            (self.tr("Build Date"), "2024-08-26"),
+            (self.tr("Manufacturer"), "Modular ECG Systems"),
+            (self.tr("Model"), "ECG-121 Pro"),
+            (self.tr("Serial Number"), "MF-2024-001"),
+            (self.tr("License"), "Professional Edition")
         ]
 
         # Calculate better minimum widths based on content
@@ -1708,7 +1971,7 @@ class ECGMenu(QGroupBox):
         layout.addWidget(scroll_area)
 
         # Exit button
-        exit_btn = QPushButton("Close")
+        exit_btn = QPushButton(self.tr("Close"))
         exit_btn.setStyleSheet(f"""
             QPushButton {{
                 font: bold {max(11, int(margin_size * 0.55))}pt Arial;
@@ -1730,65 +1993,14 @@ class ECGMenu(QGroupBox):
         layout.addWidget(exit_btn, alignment=Qt.AlignCenter)
         
         return widget
-    
-    # ----------------------------- Factory Maintain -----------------------------
-
-    def create_factory_maintain_content(self):
-
-        # Get current settings from settings manager
-        if not self.settings_manager:
-            self.settings_manager = SettingsManager()
-
-        # Define sections for factory maintenance
-        sections = [
-            {
-                'title': 'Calibration',
-                'options': [("Calibrate Now", "calibrate"), ("Skip", "skip")],
-                'setting_key': 'factory_calibration'
-            },
-            {
-                'title': 'Self Test',
-                'options': [("Run Test", "test"), ("Skip", "skip")],
-                'setting_key': 'factory_self_test'
-            },
-            {
-                'title': 'Memory Reset',
-                'options': [("Reset All", "reset"), ("Keep Data", "keep")],
-                'setting_key': 'factory_memory_reset'
-            },
-            {
-                'title': 'Factory Reset',
-                'options': [("Reset to Factory", "factory"), ("Cancel", "cancel")],
-                'setting_key': 'factory_reset'
-            }
-        ]
-        
-        # Define buttons
-        buttons = [
-            {
-                'text': 'Select',
-                'action': self.execute_factory_maintenance,
-                'style': 'primary'
-            },
-            {
-                'text': 'Cancel',
-                'action': self.hide_sliding_panel,
-                'style': 'danger'
-            }
-        ]
-        
-        return self.create_unified_control_panel("Factory Maintenance", sections, buttons)
-
-    def execute_factory_maintenance(self):
-        QMessageBox.information(self.parent(), "Maintenance", "Factory maintenance completed successfully!")
-        self.hide_sliding_panel()
 
     # ----------------------------- Exit -----------------------------
 
     def show_exit(self):
         """Show exit confirmation dialog"""
+        self.ensure_sliding_panel_ready()
         content_widget = self.create_exit_content()
-        self.show_sliding_panel(content_widget, "Exit Application", "Exit")
+        self.show_sliding_panel(content_widget, self.tr("Exit Application"), "Exit")
 
     def create_exit_content(self):
         # Create a simple exit confirmation
@@ -1803,7 +2015,7 @@ class ECGMenu(QGroupBox):
         layout.setSpacing(spacing_size)
 
         # Professional title
-        title = QLabel("Exit Application")
+        title = QLabel(self.tr("Exit Application"))
         title_font_size = max(16, min(22, int(margin_size * 0.8)))
         title.setStyleSheet(f"""
             QLabel {{
@@ -1834,7 +2046,7 @@ class ECGMenu(QGroupBox):
         """)
         msg_layout = QVBoxLayout(msg_frame)
         
-        confirm_msg = QLabel("Do you want to quit?")
+        confirm_msg = QLabel(self.tr("Do you want to quit?"))
         confirm_msg.setStyleSheet(f"""
             QLabel {{
                 font: bold {max(12, int(margin_size * 0.6))}pt Arial;
@@ -1847,7 +2059,7 @@ class ECGMenu(QGroupBox):
         confirm_msg.setAlignment(Qt.AlignCenter)
         msg_layout.addWidget(confirm_msg)
         
-        warning_msg = QLabel("⚠️ Any unsaved data will be lost!")
+        warning_msg = QLabel(self.tr("Any unsaved data will be lost!"))
         warning_msg.setStyleSheet(f"""
             QLabel {{
                 font: {max(10, int(margin_size * 0.5))}pt Arial;
@@ -1880,7 +2092,7 @@ class ECGMenu(QGroupBox):
         button_height = max(35, min(45, int(margin_size * 1.8)))
 
         # Cancel button
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton(self.tr("Cancel"))
         cancel_btn.setFixedSize(button_width, button_height)
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1902,7 +2114,7 @@ class ECGMenu(QGroupBox):
         btn_layout.addWidget(cancel_btn)
 
         # Exit button
-        exit_btn = QPushButton("Exit")
+        exit_btn = QPushButton(self.tr("Exit"))
         exit_btn.setFixedSize(button_width, button_height)
         exit_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1931,8 +2143,8 @@ class ECGMenu(QGroupBox):
         """Confirm and exit the application"""
         reply = QMessageBox.question(
             self.parent(), 
-            'Exit Application', 
-            'Are you absolutely sure you want to exit?',
+            self.tr('Exit Application'), 
+            self.tr('Are you absolutely sure you want to exit?'),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -2013,8 +2225,9 @@ class ECGMenu(QGroupBox):
         layout.setContentsMargins(margin_size, margin_size, margin_size, margin_size)
         layout.setSpacing(spacing_size)
 
+        translated_title = self.tr(title)
         # Professional title
-        title_label = QLabel(title)
+        title_label = QLabel(translated_title)
         title_font_size = max(16, min(22, int(margin_size * 0.8)))
         title_label.setStyleSheet(f"""
             QLabel {{
@@ -2038,59 +2251,113 @@ class ECGMenu(QGroupBox):
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setMaximumHeight(500)  # Limit height for smaller screens
+        # Responsive height based on panel size
+        panel_width = getattr(self.sliding_panel, 'panel_width', 600) if self.sliding_panel else 600
+        panel_height = getattr(self.sliding_panel, 'panel_height', 800) if self.sliding_panel else 800
+        is_small_screen = panel_width < 500
+        if is_small_screen:
+            scroll_area.setMaximumHeight(max(300, min(400, int(panel_height * 0.5))))
+        else:
+            scroll_area.setMaximumHeight(500)  # Limit height for smaller screens
         
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setSpacing(spacing_size)
-        content_layout.setContentsMargins(5, 5, 5, 5)
+        # Responsive spacing for small screens
+        if is_small_screen:
+            content_layout.setSpacing(max(5, min(10, int(spacing_size * 0.6))))
+            content_layout.setContentsMargins(max(3, min(5, int(margin_size * 0.15))), 
+                                            max(3, min(5, int(margin_size * 0.15))), 
+                                            max(3, min(5, int(margin_size * 0.15))), 
+                                            max(3, min(5, int(margin_size * 0.15))))
+        else:
+            content_layout.setSpacing(spacing_size)
+            content_layout.setContentsMargins(5, 5, 5, 5)
 
         def add_section(section_data):
-            group_box = QGroupBox(section_data['title'])
+            # Check if small screen for responsive styling
+            panel_width = getattr(self.sliding_panel, 'panel_width', 600) if self.sliding_panel else 600
+            is_small_screen = panel_width < 500
+            
+            group_box = QGroupBox(self.tr(section_data['title']))
+            if is_small_screen:
+                group_padding = max(5, min(8, int(margin_size * 0.3)))
+                group_margin = max(3, min(5, int(margin_size * 0.15)))
+                group_margin_top = max(12, min(15, int(margin_size * 0.7)))
+                group_font_size = max(10, min(12, int(margin_size * 0.5)))
+                title_font_size = max(9, min(11, int(margin_size * 0.45)))
+                title_padding = max(4, min(6, int(margin_size * 0.2)))
+                title_left = max(8, min(10, int(margin_size * 0.4)))
+            else:
+                group_padding = max(8, int(margin_size * 0.4))
+                group_margin = max(5, int(margin_size * 0.25))
+                group_margin_top = max(18, int(margin_size * 1.0))
+                group_font_size = max(12, int(margin_size * 0.6))
+                title_font_size = max(11, int(margin_size * 0.55))
+                title_padding = 8
+                title_left = 12
+            
             group_box.setStyleSheet(f"""
                 QGroupBox {{
-                    font: bold {max(12, int(margin_size * 0.6))}pt Arial;
+                    font: bold {group_font_size}pt Arial;
                     color: #2c3e50;
                     background: white;
                     border: 2px solid #ff6600;
-                    border-radius: 10px;
-                    padding: {max(8, int(margin_size * 0.4))}px;
-                    margin: {max(5, int(margin_size * 0.25))}px;
-                    margin-top: {max(18, int(margin_size * 1.0))}px;
+                    border-radius: {max(6, min(10, int(margin_size * 0.5)))}px;
+                    padding: {group_padding}px;
+                    margin: {group_margin}px;
+                    margin-top: {group_margin_top}px;
                 }}
                 QGroupBox:title {{
                     subcontrol-origin: margin;
                     subcontrol-position: top left;
-                    left: 12px;
+                    left: {title_left}px;
                     top: 0px;
-                    padding: 0 8px 0 8px;
+                    padding: 0 {title_padding}px 0 {title_padding}px;
                     color: #ff6600;
                     font-weight: bold;
                     background: white;
-                    font-size: {max(11, int(margin_size * 0.55))}pt;
+                    font-size: {title_font_size}pt;
                 }}
             """)
             
             # Use grid layout for better organization
             grid_layout = QGridLayout(group_box)
-            grid_layout.setSpacing(8)
-            grid_layout.setContentsMargins(8, 8, 8, 8)
+            # Responsive spacing and margins based on screen size (is_small_screen already defined above)
+            grid_spacing = max(4, min(8, int(margin_size * 0.3))) if is_small_screen else 8
+            grid_margin = max(4, min(8, int(margin_size * 0.3))) if is_small_screen else 8
+            grid_layout.setSpacing(grid_spacing)
+            grid_layout.setContentsMargins(grid_margin, grid_margin, grid_margin, grid_margin)
             
-            # Calculate optimal button size
-            button_width = max(70, min(120, int(margin_size * 3.5)))
-            button_height = max(25, min(35, int(margin_size * 1.3)))
+            # Calculate optimal button size - smaller for small screens
+            if is_small_screen:
+                button_width = max(50, min(90, int(margin_size * 2.5)))
+                button_height = max(20, min(28, int(margin_size * 1.0)))
+                radio_font_size = max(8, min(10, int(margin_size * 0.4)))
+                radio_padding = max(3, min(5, int(margin_size * 0.15)))
+                indicator_size = max(8, min(10, int(margin_size * 0.4)))
+                indicator_margin_left = max(4, min(5, int(margin_size * 0.2)))
+                indicator_margin_right = max(5, min(6, int(margin_size * 0.25)))
+            else:
+                button_width = max(70, min(120, int(margin_size * 3.5)))
+                button_height = max(25, min(35, int(margin_size * 1.3)))
+                radio_font_size = max(9, int(margin_size * 0.45))
+                radio_padding = max(4, int(margin_size * 0.2))
+                indicator_size = max(10, int(margin_size * 0.5))
+                indicator_margin_left = 6
+                indicator_margin_right = 8
             
             for i, (text, val) in enumerate(section_data['options']):
-                btn = QRadioButton(text)
+                btn = QRadioButton(self.tr(text))
                 btn.setStyleSheet(f"""
                     QRadioButton {{
-                        font: bold {max(9, int(margin_size * 0.45))}pt Arial;
+                        font: bold {radio_font_size}pt Arial;
                         color: #2c3e50;
                         background: white;
-                        padding: {max(4, int(margin_size * 0.2))}px;
+                        padding: {radio_padding}px;
                         border: 1px solid #e0e0e0;
-                        border-radius: 6px;
+                        border-radius: {max(4, min(6, int(margin_size * 0.3)))}px;
                         min-width: {button_width}px;
+                        max-width: {button_width + 10}px;
                         min-height: {button_height}px;
                     }}
                     QRadioButton:hover {{
@@ -2104,19 +2371,21 @@ class ECGMenu(QGroupBox):
                         font-weight: bold;
                     }}
                     QRadioButton::indicator {{
-                        width: {max(10, int(margin_size * 0.5))}px;
-                        height: {max(10, int(margin_size * 0.5))}px;
+                        width: {indicator_size}px;
+                        height: {indicator_size}px;
                         border: 2px solid #e0e0e0;
-                        border-radius: {max(5, int(margin_size * 0.25))}px;
+                        border-radius: {max(4, min(5, int(margin_size * 0.25)))}px;
                         background: white;
-                        margin-left: 6px;
-                        margin-right: 8px;
+                        margin-left: {indicator_margin_left}px;
+                        margin-right: {indicator_margin_right}px;
                     }}
                     QRadioButton::indicator:checked {{
                         border: 1px solid #ff6600;
                         background: #ff6600;
                     }}
                 """)
+                # Set size policy for better responsive behavior
+                btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                 
                 # Set checked state if variable exists
                 if 'variable' in section_data and section_data['variable']:
@@ -2164,7 +2433,7 @@ class ECGMenu(QGroupBox):
             button_height = max(35, min(45, int(margin_size * 1.8)))
 
             for btn_data in buttons:
-                btn = QPushButton(btn_data['text'])
+                btn = QPushButton(self.tr(btn_data['text']))
                 btn.setFixedSize(button_width, button_height)
                 
                 # Default style if not specified
